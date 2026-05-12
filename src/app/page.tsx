@@ -291,12 +291,12 @@ export default function HelixLandingPage() {
             <EvidenceRow
               side="left"
               eyebrow="Evidence 03"
-              title="Test the framework, not just the signal."
-              body="Eight historical stress windows including a real −35% BTC bear. v2.1 contained the loss to −19%. Documented, repeatable, visible."
-              linkLabel="View live stress tests →"
+              title="An AI-managed index, paper-traded live."
+              body="AlphaIndex allocates across BTC, ETH, L1s, RWA, sector indexes, and perps based on accumulated news signals, sector momentum, and ETF flows. Real SoDEX prices, simulated fills. Rebalance rationale written by Claude — visible for every rebalance."
+              linkLabel="View live AlphaIndex →"
               href="/index-fund"
               src="/landing/stress.png"
-              alt="v2.1 stress test results table showing eight historical 60-day windows including a -35% BTC bear, with DD ratio column visible."
+              alt="The AlphaIndex live portfolio dashboard — NAV, holdings, rebalance history, and Claude-written rebalance reasoning."
             />
           </div>
         </div>

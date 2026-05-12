@@ -7,7 +7,8 @@
  *   audit.png         — /signal/[id] (a pending/REVIEW signal with rich
  *                       reasoning text)
  *   events.png        — /events (live event stream with classifier verdicts)
- *   stress.png        — /index-fund (stress test panel)
+ *   stress.png        — /index-fund Live portfolio tab (AlphaIndex
+ *                       dashboard — NAV, holdings, rebalance history)
  *
  * Viewport 1440x900 @ 2x DPI → saved PNG is 2880x1800. The HTML renders
  * the image at max 1200px wide, so the asset stays crisp on retina.
@@ -86,16 +87,9 @@ async function main() {
     await p.evaluate(() => window.scrollTo(0, 0));
   });
 
-  // Stress — /index-fund opens on Live portfolio by default. Click the
-  // "Stress tests" tab so the historical stress-window table renders.
+  // AlphaIndex — /index-fund opens on Live portfolio by default, which is
+  // exactly what we want now: NAV, holdings table, rebalance history.
   await capture(page, `${BASE_URL}/index-fund`, "stress.png", async (p) => {
-    await p.evaluate(() => {
-      const btn = [...document.querySelectorAll("button")].find((b) =>
-        /stress tests/i.test((b.textContent ?? "").trim()),
-      );
-      if (btn) (btn).click();
-    });
-    await p.waitForTimeout(1500);
     await p.evaluate(() => window.scrollTo(0, 0));
   });
 

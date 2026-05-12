@@ -196,24 +196,13 @@ export function IndexDashboard() {
         >
           Live portfolio
         </button>
-        <button
-          onClick={() => setTab("stress_tests")}
-          className={cn(
-            "dash-tab-trigger rounded border px-3 py-1 transition-colors",
-            tab === "stress_tests"
-              ? "dash-tab-active border-accent bg-accent/15 text-accent-2"
-              : "border-line text-fg-muted hover:border-line-2",
-          )}
-        >
-          Stress tests
-        </button>
         {isPublicMode() ? (
           <button
             disabled
-            title="v2.1 ships in Wave 2 — currently in calibration"
+            title="Stress tests panel is being rebuilt — back next wave"
             className="dash-tab-trigger cursor-not-allowed rounded border border-line px-3 py-1 text-fg-dim opacity-60"
           >
-            v2 (preview)
+            Stress tests
             <span
               className="ml-1.5 font-[var(--font-jetbrains-mono)] uppercase text-accent-2"
               style={{ fontSize: "9px", letterSpacing: "0.16em" }}
@@ -223,21 +212,32 @@ export function IndexDashboard() {
           </button>
         ) : (
           <button
-            onClick={() => setTab("v2_preview")}
+            onClick={() => setTab("stress_tests")}
             className={cn(
               "dash-tab-trigger rounded border px-3 py-1 transition-colors",
-              tab === "v2_preview"
+              tab === "stress_tests"
                 ? "dash-tab-active border-accent bg-accent/15 text-accent-2"
                 : "border-line text-fg-muted hover:border-line-2",
             )}
           >
-            v2 (preview)
+            Stress tests
           </button>
         )}
+        <button
+          onClick={() => setTab("v2_preview")}
+          className={cn(
+            "dash-tab-trigger rounded border px-3 py-1 transition-colors",
+            tab === "v2_preview"
+              ? "dash-tab-active border-accent bg-accent/15 text-accent-2"
+              : "border-line text-fg-muted hover:border-line-2",
+          )}
+        >
+          v2 (preview)
+        </button>
       </div>
 
-      {tab === "stress_tests" ? <StressTestsPanel /> : null}
-      {tab === "v2_preview" && !isPublicMode() ? <V2PreviewPanel /> : null}
+      {tab === "stress_tests" && !isPublicMode() ? <StressTestsPanel /> : null}
+      {tab === "v2_preview" ? <V2PreviewPanel /> : null}
 
       {/* Live tab content — preserved verbatim from pre-Part-1 layout.
           Hidden when stress-tests tab is active so the page renders one
