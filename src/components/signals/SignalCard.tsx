@@ -99,6 +99,30 @@ function relevanceLabel(relevance: number | null | undefined): string {
 }
 
 /**
+ * Strip the technical scoring breakdown ("Conviction X% = cls ... × Xw + ...")
+ * and the significance debug line ("Significance X.XXX → INFO; score=...;
+ * magnitude=...; instance=...; novelty=X (X similar in window)") from
+ * the reasoning text. These are useful for audit (see /signal/[id]) but
+ * noisy for the inline read-more view.
+ */
+function stripTechnicalScoring(text: string): string {
+  let cleaned = text;
+  // Conviction breakdown: starts at "Conviction NN% = cls" and ends at
+  // the period after "novelty NN% × Nw." (last term in the formula).
+  cleaned = cleaned.replace(
+    /\s*Conviction \d+% = cls [\s\S]*?novelty \d+% × \d+w\.?/g,
+    "",
+  );
+  // Significance debug line: starts at "Significance N.NNN →" and ends
+  // at the closing ")" of "(N similar in window)".
+  cleaned = cleaned.replace(
+    /\s*Significance \d+\.\d+ →[\s\S]*?\(\d+ similar in window\)\.?/g,
+    "",
+  );
+  return cleaned.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/**
  * Extract the first sentence of a passage. Used as a one-line summary
  * with a "Read more" toggle. Falls back to a soft char limit if the
  * sentence boundary isn't found.
@@ -453,7 +477,7 @@ export function SignalCard({
 
       {/* Reasoning — one-sentence summary with optional expand. */}
       {(() => {
-        const full = sig.reasoning.trim();
+        const full = stripTechnicalScoring(sig.reasoning.trim());
         const summary = firstSentence(full);
         const hasMore = summary.length < full.length;
         return (
