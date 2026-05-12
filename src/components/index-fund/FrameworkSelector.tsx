@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/components/ui/cn";
+import { isPublicMode } from "@/lib/public-mode";
 
 type Framework = "v1" | "v2";
 
@@ -136,18 +137,34 @@ export function FrameworkSelector({ onChange }: { onChange?: (fw: Framework) => 
         >
           v1
         </button>
-        <button
-          onClick={() => current !== "v2" && openV2Modal()}
-          disabled={busy}
-          className={cn(
-            "rounded border px-2 py-1 transition-colors",
-            current === "v2"
-              ? "border-warning bg-warning/15 text-warning"
-              : "border-line text-fg-muted hover:border-line-2",
-          )}
-        >
-          v2.1
-        </button>
+        {isPublicMode() ? (
+          <button
+            disabled
+            title="v2.1 ships in Wave 2 — currently in calibration"
+            className="cursor-not-allowed rounded border border-line px-2 py-1 text-fg-dim opacity-60"
+          >
+            v2.1
+            <span
+              className="ml-1.5 font-[var(--font-jetbrains-mono)] uppercase text-accent-2"
+              style={{ fontSize: "9px", letterSpacing: "0.16em" }}
+            >
+              Soon
+            </span>
+          </button>
+        ) : (
+          <button
+            onClick={() => current !== "v2" && openV2Modal()}
+            disabled={busy}
+            className={cn(
+              "rounded border px-2 py-1 transition-colors",
+              current === "v2"
+                ? "border-warning bg-warning/15 text-warning"
+                : "border-line text-fg-muted hover:border-line-2",
+            )}
+          >
+            v2.1
+          </button>
+        )}
       </div>
 
       {showModal ? (

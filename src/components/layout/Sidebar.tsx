@@ -1,9 +1,12 @@
 import Link from "next/link";
+import { isPublicMode } from "@/lib/public-mode";
 
 interface NavItem {
   href: string;
   label: string;
   badge?: string;
+  /** Hidden from the sidebar when public-mode is on (judges, public viewers). */
+  internal?: boolean;
 }
 
 const NAV: Array<{ section: string; items: NavItem[] }> = [
@@ -30,20 +33,27 @@ const NAV: Array<{ section: string; items: NavItem[] }> = [
       { href: "/portfolio", label: "Paper Portfolio" },
       { href: "/index-fund", label: "AlphaIndex", badge: "NEW" },
       { href: "/learnings", label: "Learnings", badge: "NEW" },
-      { href: "/calibration", label: "Calibration", badge: "NEW" },
+      { href: "/calibration", label: "Calibration", badge: "SOON" },
     ],
   },
   {
     section: "System",
     items: [
-      { href: "/jobs", label: "Cron & Audit" },
-      { href: "/system-health", label: "System Health", badge: "NEW" },
+      // Cron & Audit and System Health are internal monitoring surfaces.
+      // Public viewers don't need them — gated to dev only via internal=true.
+      { href: "/jobs", label: "Cron & Audit", internal: true },
+      { href: "/system-health", label: "System Health", badge: "NEW", internal: true },
       { href: "/universe", label: "Asset Universe" },
     ],
   },
 ];
 
 export function Sidebar() {
+  const publicMode = isPublicMode();
+  const sections = NAV.map((section) => ({
+    ...section,
+    items: section.items.filter((item) => !(publicMode && item.internal)),
+  })).filter((section) => section.items.length > 0);
   return (
     <aside className="flex h-screen w-56 shrink-0 flex-col border-r border-line bg-surface">
       <Link
@@ -60,7 +70,7 @@ export function Sidebar() {
       </Link>
 
       <nav className="flex-1 overflow-y-auto px-2 py-3">
-        {NAV.map((section) => (
+        {sections.map((section) => (
           <div key={section.section} className="mb-4">
             <div className="px-2 pb-1 text-[10px] font-medium uppercase tracking-wider text-fg-dim">
               {section.section}

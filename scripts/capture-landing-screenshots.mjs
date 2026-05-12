@@ -6,7 +6,7 @@
  *
  *   audit.png         — /signal/[id] (a pending/REVIEW signal with rich
  *                       reasoning text)
- *   calibration.png   — /calibration
+ *   events.png        — /events (live event stream with classifier verdicts)
  *   stress.png        — /index-fund (stress test panel)
  *
  * Viewport 1440x900 @ 2x DPI → saved PNG is 2880x1800. The HTML renders
@@ -79,16 +79,10 @@ async function main() {
     },
   );
 
-  // Calibration — flip to Compare view so the v1 vs v2.1 panel is the
-  // headline element instead of the default "All" framework summary.
-  await capture(page, `${BASE_URL}/calibration`, "calibration.png", async (p) => {
-    await p.evaluate(() => {
-      const btn = [...document.querySelectorAll("button")].find(
-        (b) => (b.textContent ?? "").trim() === "Compare",
-      );
-      if (btn) (btn).click();
-    });
-    await p.waitForTimeout(1500);
+  // Event stream — the live ingestion feed. The page renders dozens of
+  // recent events with classifier verdicts; the top viewport captures
+  // the freshest batch + sidebar context for free.
+  await capture(page, `${BASE_URL}/events`, "events.png", async (p) => {
     await p.evaluate(() => window.scrollTo(0, 0));
   });
 

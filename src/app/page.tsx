@@ -281,12 +281,12 @@ export default function HelixLandingPage() {
             <EvidenceRow
               side="right"
               eyebrow="Evidence 02"
-              title="Track what actually happened."
-              body="Hit rate by tier and catalyst subtype. Conviction calibration curves. v1 vs v2.1 attribution side by side. Outcomes resolve as horizons expire."
-              linkLabel="View live calibration →"
-              href="/calibration"
-              src="/landing/calibration.png"
-              alt="The calibration dashboard with framework toggle showing hit rates and PnL per framework."
+              title="Live event ingestion."
+              body="Every news headline is fetched, classified by Claude for actionability, sentiment, severity, and asset mapping, then gated by a corpus-similarity filter before it can fire a signal. Thousands of events on file, auto-polling for new ones."
+              linkLabel="View live event stream →"
+              href="/events"
+              src="/landing/events.png"
+              alt="The event stream — recent news headlines with classifier verdicts (event type, sentiment, severity) and asset mappings."
             />
             <EvidenceRow
               side="left"

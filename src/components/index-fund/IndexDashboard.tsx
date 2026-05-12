@@ -19,6 +19,7 @@ import { StressTestsPanel } from "./StressTestsPanel";
 import { SignalContributionPanel } from "./SignalContributionPanel";
 import { V2PreviewPanel } from "./V2PreviewPanel";
 import { FrameworkSelector } from "./FrameworkSelector";
+import { isPublicMode } from "@/lib/public-mode";
 
 interface IndexResponse {
   index: { id: string; name: string; description: string | null; starting_nav: number };
@@ -206,21 +207,37 @@ export function IndexDashboard() {
         >
           Stress tests
         </button>
-        <button
-          onClick={() => setTab("v2_preview")}
-          className={cn(
-            "dash-tab-trigger rounded border px-3 py-1 transition-colors",
-            tab === "v2_preview"
-              ? "dash-tab-active border-accent bg-accent/15 text-accent-2"
-              : "border-line text-fg-muted hover:border-line-2",
-          )}
-        >
-          v2 (preview)
-        </button>
+        {isPublicMode() ? (
+          <button
+            disabled
+            title="v2.1 ships in Wave 2 — currently in calibration"
+            className="dash-tab-trigger cursor-not-allowed rounded border border-line px-3 py-1 text-fg-dim opacity-60"
+          >
+            v2 (preview)
+            <span
+              className="ml-1.5 font-[var(--font-jetbrains-mono)] uppercase text-accent-2"
+              style={{ fontSize: "9px", letterSpacing: "0.16em" }}
+            >
+              Soon
+            </span>
+          </button>
+        ) : (
+          <button
+            onClick={() => setTab("v2_preview")}
+            className={cn(
+              "dash-tab-trigger rounded border px-3 py-1 transition-colors",
+              tab === "v2_preview"
+                ? "dash-tab-active border-accent bg-accent/15 text-accent-2"
+                : "border-line text-fg-muted hover:border-line-2",
+            )}
+          >
+            v2 (preview)
+          </button>
+        )}
       </div>
 
       {tab === "stress_tests" ? <StressTestsPanel /> : null}
-      {tab === "v2_preview" ? <V2PreviewPanel /> : null}
+      {tab === "v2_preview" && !isPublicMode() ? <V2PreviewPanel /> : null}
 
       {/* Live tab content — preserved verbatim from pre-Part-1 layout.
           Hidden when stress-tests tab is active so the page renders one
