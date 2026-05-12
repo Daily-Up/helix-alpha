@@ -1,0 +1,78 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+!.env.local.example
+
+# vercel
+.vercel
+
+# Claude Code / agent tooling — local IDE/SDK config, not source code.
+# These folders contain thousands of skill definition files that are
+# part of the dev environment, not the product.
+.agents/
+.claude/
+skills-lock.json
+
+# Stray files from misfired CLI commands — not source.
+/next
+/npm
+/sosoalpha@*
+test-embedding.ts.txt
+check-outcomes.js
+check-resolution.js
+check-significance.js
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# local data (sqlite + reference files)
+# Use /data/* (not /data/) so Git still walks into the folder — that
+# lets the !file exceptions below override the wildcard. With /data/
+# alone, the whole folder is skipped and the exceptions never fire.
+/data/*
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Whitelisted data assets — required at runtime for the calibration
+# pipeline (Phase A/B/C/G) AND for the production snapshot served on
+# Vercel until we migrate off SQLite to a hosted DB. The .db file is
+# read-only on Vercel and copied to /tmp on cold start (see
+# src/lib/db/client.ts).
+!/data/calibration-corpus.json
+!/data/base-rates.json
+!/data/perps.json
+!/data/perps-tickers.json
+!/data/sosoalpha.db

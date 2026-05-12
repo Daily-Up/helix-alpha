@@ -1,0 +1,256 @@
+{
+  "_schema": {
+    "comment": "Hand-curated base rates per (catalyst_subtype, asset_class). Values reflect plausible 1-day move bands for the most common combinations seen in the active queue. Empirical refinement happens later via impact_metrics.",
+    "fields": {
+      "mean_move_pct": "typical absolute move size (signed by event polarity)",
+      "stdev_move_pct": "variability of the move",
+      "horizon_hours": "time window over which the move plays out",
+      "sample_size": "0 = curated estimate, >0 = backtested",
+      "notes": "calibration rationale"
+    }
+  },
+
+  "treasury_action": {
+    "large_cap_crypto": {
+      "mean_move_pct": 1.5,
+      "stdev_move_pct": 3.5,
+      "horizon_hours": 72,
+      "sample_size": 0,
+      "notes": "MSTR-style BTC accumulation: incremental, BTC reaction modest"
+    },
+    "crypto_adjacent_equity": {
+      "mean_move_pct": 4.0,
+      "stdev_move_pct": 6.0,
+      "horizon_hours": 72,
+      "sample_size": 0,
+      "notes": "Stock reacts more than spot when company doubles down on crypto"
+    }
+  },
+
+  "earnings_reaction": {
+    "crypto_adjacent_equity": {
+      "mean_move_pct": 6.0,
+      "stdev_move_pct": 7.0,
+      "horizon_hours": 48,
+      "sample_size": 0,
+      "notes": "COIN/MSTR/MARA quarterly print typically 5-10% on the day"
+    },
+    "broad_equity": {
+      "mean_move_pct": 4.0,
+      "stdev_move_pct": 5.0,
+      "horizon_hours": 48,
+      "sample_size": 0,
+      "notes": "Mag7 names typically move 3-6% on print"
+    }
+  },
+
+  "whale_flow": {
+    "large_cap_crypto": {
+      "mean_move_pct": 0.8,
+      "stdev_move_pct": 2.0,
+      "horizon_hours": 8,
+      "sample_size": 0,
+      "notes": "Single whale move on liquid majors: hours, modest size"
+    },
+    "mid_cap_crypto": {
+      "mean_move_pct": 1.5,
+      "stdev_move_pct": 3.5,
+      "horizon_hours": 12,
+      "sample_size": 0,
+      "notes": "Less liquid: whale moves matter more"
+    },
+    "small_cap_crypto": {
+      "mean_move_pct": 3.0,
+      "stdev_move_pct": 6.0,
+      "horizon_hours": 24,
+      "sample_size": 0,
+      "notes": "Small caps absorb whale flow slowly"
+    }
+  },
+
+  "etf_flow_reaction": {
+    "large_cap_crypto": {
+      "mean_move_pct": 1.0,
+      "stdev_move_pct": 2.5,
+      "horizon_hours": 48,
+      "sample_size": 0,
+      "notes": "Daily ETF flow data; market gradually re-prices over 1-2 days"
+    }
+  },
+
+  "regulatory_statement": {
+    "large_cap_crypto": {
+      "mean_move_pct": 1.5,
+      "stdev_move_pct": 3.0,
+      "horizon_hours": 72,
+      "sample_size": 0,
+      "notes": "Fed/SEC chair statements ripple over multiple days"
+    },
+    "crypto_adjacent_equity": {
+      "mean_move_pct": 3.0,
+      "stdev_move_pct": 4.5,
+      "horizon_hours": 72,
+      "sample_size": 0,
+      "notes": "COIN/HOOD react harder to regulatory clarity than spot does"
+    }
+  },
+
+  "regulatory_enforcement": {
+    "crypto_adjacent_equity": {
+      "mean_move_pct": 4.0,
+      "stdev_move_pct": 5.5,
+      "horizon_hours": 48,
+      "sample_size": 0,
+      "notes": "SEC subpoena/lawsuit hits stocks first, harder than spot"
+    },
+    "small_cap_crypto": {
+      "mean_move_pct": 5.0,
+      "stdev_move_pct": 8.0,
+      "horizon_hours": 48,
+      "sample_size": 0,
+      "notes": "Tokens with regulatory exposure can drop 10%+"
+    }
+  },
+
+  "macro_print": {
+    "large_cap_crypto": {
+      "mean_move_pct": 1.2,
+      "stdev_move_pct": 2.5,
+      "horizon_hours": 96,
+      "sample_size": 0,
+      "notes": "CPI/FOMC moves bleed across days"
+    },
+    "broad_equity": {
+      "mean_move_pct": 0.8,
+      "stdev_move_pct": 1.5,
+      "horizon_hours": 48,
+      "sample_size": 0,
+      "notes": "Equity index reacts fastest"
+    },
+    "index": {
+      "mean_move_pct": 0.7,
+      "stdev_move_pct": 1.3,
+      "horizon_hours": 48,
+      "sample_size": 0,
+      "notes": "S&P / Nasdaq absorb macro prints quickly"
+    }
+  },
+
+  "macro_geopolitical": {
+    "commodity": {
+      "mean_move_pct": 2.5,
+      "stdev_move_pct": 4.0,
+      "horizon_hours": 72,
+      "sample_size": 0,
+      "notes": "Oil/gold spike on conflict news"
+    },
+    "large_cap_crypto": {
+      "mean_move_pct": 2.0,
+      "stdev_move_pct": 4.0,
+      "horizon_hours": 96,
+      "sample_size": 0,
+      "notes": "Risk-off bid lifts BTC modestly"
+    }
+  },
+
+  "exploit_disclosure": {
+    "small_cap_crypto": {
+      "mean_move_pct": 8.0,
+      "stdev_move_pct": 12.0,
+      "horizon_hours": 4,
+      "sample_size": 0,
+      "notes": "Confirmed hack on small token = severe immediate selloff"
+    },
+    "mid_cap_crypto": {
+      "mean_move_pct": 4.0,
+      "stdev_move_pct": 6.0,
+      "horizon_hours": 4,
+      "sample_size": 0,
+      "notes": "Mid cap absorbs better but still drops on confirmed exploit"
+    }
+  },
+
+  "security_disclosure": {
+    "small_cap_crypto": {
+      "mean_move_pct": 3.0,
+      "stdev_move_pct": 5.0,
+      "horizon_hours": 12,
+      "sample_size": 0,
+      "notes": "Vuln (not yet exploited) creates uncertainty discount"
+    }
+  },
+
+  "governance_vote": {
+    "mid_cap_crypto": {
+      "mean_move_pct": 1.5,
+      "stdev_move_pct": 3.5,
+      "horizon_hours": 24,
+      "sample_size": 0,
+      "notes": "DAO outcomes already partly priced in by vote time"
+    }
+  },
+
+  "partnership_announcement": {
+    "small_cap_crypto": {
+      "mean_move_pct": 2.0,
+      "stdev_move_pct": 4.0,
+      "horizon_hours": 24,
+      "sample_size": 0,
+      "notes": "Partnerships often pump for hours then fade"
+    },
+    "crypto_adjacent_equity": {
+      "mean_move_pct": 1.5,
+      "stdev_move_pct": 3.0,
+      "horizon_hours": 24,
+      "sample_size": 0,
+      "notes": "Stocks react less to partnerships than tokens"
+    }
+  },
+
+  "listing_event": {
+    "small_cap_crypto": {
+      "mean_move_pct": 6.0,
+      "stdev_move_pct": 10.0,
+      "horizon_hours": 12,
+      "sample_size": 0,
+      "notes": "Major exchange listing pumps small caps then often retraces"
+    }
+  },
+
+  "tech_update": {
+    "mid_cap_crypto": {
+      "mean_move_pct": 1.0,
+      "stdev_move_pct": 2.5,
+      "horizon_hours": 120,
+      "sample_size": 0,
+      "notes": "Tech updates pre-priced by anticipation"
+    },
+    "small_cap_crypto": {
+      "mean_move_pct": 2.5,
+      "stdev_move_pct": 5.0,
+      "horizon_hours": 120,
+      "sample_size": 0,
+      "notes": "Tech delivers can move a thinner book"
+    }
+  },
+
+  "transient_operational": {
+    "crypto_adjacent_equity": {
+      "mean_move_pct": 2.0,
+      "stdev_move_pct": 3.0,
+      "horizon_hours": 4,
+      "sample_size": 0,
+      "notes": "Coinbase outage moves stock immediately, recovers within session"
+    }
+  },
+
+  "legislative_progress": {
+    "large_cap_crypto": {
+      "mean_move_pct": 1.0,
+      "stdev_move_pct": 2.5,
+      "horizon_hours": 72,
+      "sample_size": 0,
+      "notes": "Bill markups telegraph weeks in advance"
+    }
+  }
+}

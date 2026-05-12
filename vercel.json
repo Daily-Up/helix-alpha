@@ -1,0 +1,28 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "buildCommand": "next build",
+  "regions": ["iad1"],
+  "functions": {
+    "src/app/api/cron/ingest-news/route.ts": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "src/app/api/cron/tick/route.ts": {
+      "maxDuration": 30
+    },
+    "src/app/api/cron/generate-briefing/route.ts": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "src/app/api/data/**/route.ts": {
+      "maxDuration": 15
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/ingest-news",
+      "schedule": "*/15 * * * *"
+    }
+  ]
+}

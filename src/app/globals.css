@@ -1,0 +1,604 @@
+@import "tailwindcss";
+
+/* =============================================================================
+   SosoAlpha — design tokens
+   Dark-first quant/analyst aesthetic. Every value here is paired with a
+   Tailwind utility (bg-bg, text-fg, border-line, etc.) via @theme inline.
+============================================================================= */
+
+:root {
+  /* Surfaces — normalized to landing page */
+  --bg:        #0b0b0e;   /* page background (matches landing) */
+  --surface:   #0f1218;   /* cards, sidebar */
+  --surface-2: #161b24;   /* hover states */
+  --line:      #1f2630;   /* borders */
+  --line-2:    #2a3340;   /* stronger borders */
+
+  /* Text */
+  --fg:        #e6e9ef;
+  --fg-muted:  #8a93a6;
+  --fg-dim:    #5a6378;
+
+  /* Brand text — warm cream for page titles only */
+  --fg-brand:  #ede4d3;
+  --fg-tertiary: #6b6760;
+
+  /* Brand borders */
+  --border-subtle:   rgba(237, 228, 211, 0.08);
+  --border-emphasis: rgba(237, 228, 211, 0.18);
+
+  /* Accents — normalized to landing amber/terracotta */
+  --accent:    #d97757;
+  --accent-2:  #e89373;
+  --info:      #4d9fff;
+  --positive:  #22c55e;
+  --negative:  #ef4444;
+  --neutral:   #a3a3a3;
+  --warning:   #f59e0b;
+}
+
+@theme inline {
+  --color-bg:        var(--bg);
+  --color-surface:   var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line:      var(--line);
+  --color-line-2:    var(--line-2);
+  --color-fg:        var(--fg);
+  --color-fg-muted:  var(--fg-muted);
+  --color-fg-dim:    var(--fg-dim);
+  --color-accent:    var(--accent);
+  --color-accent-2:  var(--accent-2);
+  --color-info:      var(--info);
+  --color-positive:  var(--positive);
+  --color-negative:  var(--negative);
+  --color-neutral:   var(--neutral);
+  --color-warning:   var(--warning);
+  --color-fg-brand:  var(--fg-brand);
+  --color-fg-tertiary: var(--fg-tertiary);
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  --font-mono: ui-monospace, SF Mono, Menlo, Consolas, monospace;
+}
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  touch-action: manipulation;
+  scroll-behavior: smooth;
+}
+
+/* Offset anchor scroll targets below the fixed nav. */
+[id] { scroll-margin-top: 5rem; }
+
+/* Subtle scrollbar across the app. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: #364257; }
+
+/* Tabular numerals everywhere — keeps columns aligned in tables. */
+.tabular { font-variant-numeric: tabular-nums; }
+
+/* =============================================================================
+   Landing page — Reveal animation (legacy, used by warm variant)
+============================================================================= */
+
+.reveal {
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 500ms cubic-bezier(0.22, 1, 0.36, 1),
+              transform 500ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.reveal--visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.reveal--visible > * {
+  animation: reveal-child 500ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.reveal--staggered > *:nth-child(1) { animation-delay: 0ms; }
+.reveal--staggered > *:nth-child(2) { animation-delay: var(--reveal-stagger); }
+.reveal--staggered > *:nth-child(3) { animation-delay: calc(var(--reveal-stagger) * 2); }
+.reveal--staggered > *:nth-child(4) { animation-delay: calc(var(--reveal-stagger) * 3); }
+.reveal--staggered > *:nth-child(5) { animation-delay: calc(var(--reveal-stagger) * 4); }
+.reveal--staggered > *:nth-child(6) { animation-delay: calc(var(--reveal-stagger) * 5); }
+.reveal--staggered > *:nth-child(7) { animation-delay: calc(var(--reveal-stagger) * 6); }
+.reveal--staggered > *:nth-child(8) { animation-delay: calc(var(--reveal-stagger) * 7); }
+
+@keyframes reveal-child {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  .reveal--visible > * {
+    animation: none;
+  }
+}
+
+/* =============================================================================
+   Landing page — live indicator, hover refinements
+============================================================================= */
+
+/* Live indicator pulse — single continuous animation allowed */
+.live-pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #5cc97a;
+  animation: live-pulse 2s ease-in-out infinite;
+}
+
+@keyframes live-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.4); opacity: 0.3; }
+}
+
+/* Landing text links — underline draws left to right on hover */
+.landing-link {
+  position: relative;
+}
+.landing-link::after {
+  content: "";
+  position: absolute;
+  bottom: 8px;
+  left: 0;
+  width: 0;
+  height: 1px;
+  background: #ffffff;
+  transition: width 200ms ease;
+}
+.landing-link:hover::after {
+  width: 100%;
+}
+
+/* Audit cards — amber bar extends, title shifts color on hover */
+.landing-audit-card:hover .landing-audit-card-bar {
+  width: 48px;
+}
+.landing-audit-card:hover .landing-audit-card-title {
+  color: #e89373;
+}
+
+/* Table rows — subtle background on hover */
+.landing-table-row:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* Screenshot blocks — border brightens on hover */
+.landing-screenshot {
+  transition: border-color 200ms ease;
+}
+.landing-screenshot:hover {
+  border-color: rgba(237, 228, 211, 0.6) !important;
+}
+
+/* CTA shimmer — amber highlight traces the border */
+.landing-cta-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.landing-cta-shimmer::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 60%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.15),
+    transparent
+  );
+  animation: cta-shimmer 4s ease-in-out infinite;
+}
+
+@keyframes cta-shimmer {
+  0% { left: -100%; }
+  50%, 100% { left: 150%; }
+}
+
+/* Stage tech-label hover underline */
+.landing-stage-tech {
+  position: relative;
+  display: inline-block;
+  cursor: default;
+}
+.landing-stage-tech::after {
+  content: "";
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  width: 0;
+  height: 1px;
+  background: #d97757;
+  transition: width 200ms ease;
+}
+.landing-stage-tech:hover::after {
+  width: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-pulse-dot {
+    animation: none;
+  }
+  .landing-cta-shimmer::before {
+    animation: none;
+  }
+}
+
+/* =============================================================================
+   Dashboard — mount reveal, skeleton shimmer, focus, selection, transitions
+============================================================================= */
+
+/* Panel reveal on mount — pure-CSS fade-in animation.
+   IMPORTANT: this used to start at `opacity: 0` and rely on a JS hook
+   to add `.mount-reveal--visible`. The hook ran in a useEffect with an
+   empty dep array, but the panels don't exist in the DOM at first
+   mount (the dashboard renders a skeleton until data loads), so the
+   hook found no elements and the panels were stranded at opacity 0
+   forever. Self-contained CSS animation avoids that race. */
+.mount-reveal {
+  animation: mount-reveal-anim 320ms ease-out both;
+}
+
+@keyframes mount-reveal-anim {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Compatibility: the legacy `--visible` class is kept as a no-op
+   so any old JS that still toggles it doesn't error. */
+.mount-reveal--visible { opacity: 1; transform: translateY(0); }
+
+@media (prefers-reduced-motion: reduce) {
+  .mount-reveal {
+    animation: none;
+  }
+}
+
+/* Skeleton shimmer — subtle sweep at 8% max opacity */
+.skeleton-shimmer {
+  background: rgba(237, 228, 211, 0.04);
+  position: relative;
+  overflow: hidden;
+}
+
+.skeleton-shimmer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(237, 228, 211, 0.08),
+    transparent
+  );
+  animation: skeleton-sweep 1.5s ease-in-out infinite;
+}
+
+@keyframes skeleton-sweep {
+  0% { left: -100%; }
+  100% { left: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-shimmer::after {
+    animation: none;
+  }
+}
+
+/* Focus states — amber outlines on keyboard focus */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Selection — matches landing page */
+::selection {
+  background: #d97757;
+  color: #0b0b0e;
+}
+
+/* Dashboard page title — Fraunces serif */
+.dash-title {
+  font-family: var(--font-fraunces);
+  font-weight: 400;
+  font-size: 32px;
+  letter-spacing: -0.02em;
+  color: var(--fg-brand);
+  line-height: 1.15;
+}
+
+/* Dashboard page description */
+.dash-description {
+  font-family: var(--font-inter);
+  font-weight: 400;
+  font-size: 15px;
+  color: var(--fg-muted);
+  line-height: 1.6;
+  max-width: 720px;
+}
+
+/* Dashboard live indicator — matches landing exactly */
+.dash-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #5cc97a;
+  animation: live-pulse 2s ease-in-out infinite;
+}
+
+/* Dashboard hover polish — table/list rows */
+.dash-row-hover {
+  transition: background 120ms ease;
+}
+.dash-row-hover:hover {
+  background: rgba(237, 228, 211, 0.03);
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   Dashboard editorial hierarchy (Path B)
+   One headline number per page, demoted supporting stats, and
+   panels with thinner borders so the eye is directed.
+───────────────────────────────────────────────────────────────── */
+
+/* Hero stat block: page-level headline number above the fold. */
+.dash-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dash-hero-label {
+  font-family: var(--font-jetbrains-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.dash-hero-value {
+  font-family: var(--font-fraunces);
+  font-weight: 300;
+  font-size: clamp(48px, 6vw, 88px);
+  letter-spacing: -0.025em;
+  line-height: 1.0;
+  color: var(--fg-brand);
+  font-variant-numeric: tabular-nums;
+}
+.dash-hero-change {
+  font-family: var(--font-jetbrains-mono);
+  font-size: 15px;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.dash-hero-sub {
+  font-family: var(--font-inter);
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+
+/* Supporting stat row — used after the hero on the same page.
+   Lower visual weight than the old Stat cards. */
+.dash-substat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 0;
+  border-top: 1px solid rgba(237, 228, 211, 0.08);
+}
+.dash-substat-label {
+  font-family: var(--font-jetbrains-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.dash-substat-value {
+  font-family: var(--font-jetbrains-mono);
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-brand);
+  line-height: 1.1;
+}
+.dash-substat-sub {
+  font-family: var(--font-inter);
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+/* Quieter panel — reduce visual weight of supporting cards
+   so the hero number leads the eye. Apply to wrappers that
+   already have a `Card` border. */
+.dash-panel-quiet {
+  border-color: rgba(237, 228, 211, 0.07) !important;
+}
+.dash-panel-quiet .dash-panel-title {
+  font-family: var(--font-jetbrains-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+/* Primary button hover — subtle lift */
+.dash-btn-primary {
+  transition: transform 120ms ease, background 120ms ease;
+}
+.dash-btn-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+.dash-btn-primary:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+/* Tab trigger hover — amber underline grows from center */
+.dash-tab-trigger {
+  position: relative;
+}
+.dash-tab-trigger::after {
+  content: "";
+  position: absolute;
+  bottom: -1px;
+  left: 50%;
+  width: 32px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+  opacity: 0;
+  transform: translateX(-50%);
+  transition: width 200ms ease, opacity 200ms ease;
+}
+.dash-tab-trigger:hover::after {
+  width: 100%;
+  opacity: 0.6;
+}
+.dash-tab-trigger[aria-selected="true"]::after,
+.dash-tab-trigger.dash-tab-active::after {
+  width: 100%;
+  opacity: 1;
+}
+
+/* Skeleton → data cross-fade */
+.dash-crossfade-enter {
+  animation: dash-crossfade 150ms ease-out both;
+}
+
+@keyframes dash-crossfade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Dashboard page transition — fade only */
+.dash-page-enter {
+  animation: dash-fade-in 200ms ease-out both;
+  animation-delay: 50ms;
+}
+
+@keyframes dash-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dash-page-enter {
+    animation: dash-fade-in-reduced 100ms ease-out both;
+  }
+  @keyframes dash-fade-in-reduced {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  .dash-live-dot {
+    animation: none;
+  }
+  .dash-btn-primary:hover:not(:disabled) {
+    transform: none;
+  }
+  .dash-tab-trigger::after {
+    transition: none;
+  }
+  .dash-crossfade-enter {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+/* =============================================================================
+   Warm landing — richer reveal animation (blur + scale + translate)
+============================================================================= */
+
+.warm-reveal {
+  opacity: 0;
+  transform: translateY(12px) scale(0.985);
+  filter: blur(4px);
+  transition: opacity 700ms cubic-bezier(0.22, 1, 0.36, 1),
+              transform 700ms cubic-bezier(0.22, 1, 0.36, 1),
+              filter 700ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.warm-reveal--visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  filter: blur(0);
+}
+
+.warm-reveal--visible > * {
+  animation: warm-reveal-child 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.warm-reveal--staggered > *:nth-child(1) { animation-delay: 0ms; }
+.warm-reveal--staggered > *:nth-child(2) { animation-delay: var(--warm-reveal-stagger); }
+.warm-reveal--staggered > *:nth-child(3) { animation-delay: calc(var(--warm-reveal-stagger) * 2); }
+.warm-reveal--staggered > *:nth-child(4) { animation-delay: calc(var(--warm-reveal-stagger) * 3); }
+.warm-reveal--staggered > *:nth-child(5) { animation-delay: calc(var(--warm-reveal-stagger) * 4); }
+.warm-reveal--staggered > *:nth-child(6) { animation-delay: calc(var(--warm-reveal-stagger) * 5); }
+.warm-reveal--staggered > *:nth-child(7) { animation-delay: calc(var(--warm-reveal-stagger) * 6); }
+.warm-reveal--staggered > *:nth-child(8) { animation-delay: calc(var(--warm-reveal-stagger) * 7); }
+
+@keyframes warm-reveal-child {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .warm-reveal {
+    opacity: 1;
+    transform: none;
+    filter: none;
+    transition: none;
+  }
+  .warm-reveal--visible > * {
+    animation: none;
+  }
+}
+
+
+/* Hide number input spinners — used by trade builder inputs in signal cards. */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+
+/* Signal card — headline link hover. Subtle warm-amber underline that animates in. */
+.signal-headline-link {
+  position: relative;
+  background-image: linear-gradient(to right, #d97757, #d97757);
+  background-size: 0% 1px;
+  background-position: 0 100%;
+  background-repeat: no-repeat;
+  transition: background-size 220ms ease, color 220ms ease;
+}
+.signal-headline-link:hover {
+  color: #d97757;
+  background-size: 100% 1px;
+}
