@@ -77,7 +77,7 @@ The pages exist in code and run locally — they're publicly gated until the dat
 - **Anthropic Claude** (`claude-sonnet-4-5`) — the model powering today's classification and rebalance-reasoning agents
 - **SoSoValue OpenAPI** — news, ETF flow, sector data
 - **SoDEX** — perp + spot market URLs wired in; execution wave 2
-- **better-sqlite3** — synchronous SQLite, hydrated from snapshot on Vercel cold start
+- **better-sqlite3** with snapshot hydration on Vercel — Wave 1 demo shortcut. Wave 2 migrates to a hosted database (Turso or Postgres) for persistent writes, live cron, and real execution state.
 - **TailwindCSS 4** + custom design system
 - **Vitest** for unit tests
 - **Playwright** for landing-page screenshot capture
