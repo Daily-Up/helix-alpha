@@ -5,6 +5,7 @@
 Helix turns the financial news firehose into auditable, conviction-scored trade signals. Every news headline is fetched from SoSoValue, classified by an AI agent for actionability / sentiment / severity / asset mapping, gated by a corpus-similarity filter, then weighted into a single conviction score whose every input is visible on a per-signal audit page. No black boxes.
 
 > **Live demo:** https://helix-alpha-kappa.vercel.app
+> **Wave 1 video:** https://www.youtube.com/watch?v=Pyy0KAbHTv4
 > **Repo:** https://github.com/Daily-Up/helix-alpha
 
 ---
