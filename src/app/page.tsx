@@ -12,7 +12,7 @@
 import Link from "next/link";
 import { LandingNav } from "@/components/landing/LandingNav";
 import { HeroSignalCard } from "@/components/landing/HeroSignalCard";
-import { ScreenshotBlock } from "@/components/landing/ScreenshotBlock";
+import { EvidenceRow } from "@/components/landing/EvidenceRow";
 import { LiveIndicator } from "@/components/landing/LiveIndicator";
 import { Footer } from "@/components/landing/Footer";
 import { LandingMotion } from "@/components/landing/LandingMotion";
@@ -267,24 +267,36 @@ export default function HelixLandingPage() {
             <span style={{ fontFeatureSettings: '"smcp"' }}>Built</span> to be inspected.
           </h2>
 
-          <div className="mt-16 flex flex-col items-center gap-32">
-            <ScreenshotBlock
-              src="/landing/audit.png"
-              alt="The audit page for a single signal — conviction breakdown, sources, gate-rule outcomes."
+          <div className="mt-[120px] flex flex-col gap-[120px]">
+            <EvidenceRow
+              side="left"
+              eyebrow="Evidence 01"
               title="Open the box."
               body="Click any signal to see its conviction breakdown formula, sources, classifier reasoning, gate-rule outcomes, and corroboration status. No black boxes."
+              linkLabel="View live audit →"
+              href="/signals"
+              src="/landing/audit.png"
+              alt="The audit page for a single signal — conviction breakdown formula, sources, gate-rule outcomes, corroboration status."
             />
-            <ScreenshotBlock
-              src="/landing/calibration.png"
-              alt="The calibration dashboard with framework toggle showing hit rates and PnL per framework."
+            <EvidenceRow
+              side="right"
+              eyebrow="Evidence 02"
               title="Track what actually happened."
               body="Hit rate by tier and catalyst subtype. Conviction calibration curves. v1 vs v2.1 attribution side by side. Outcomes resolve as horizons expire."
+              linkLabel="View live calibration →"
+              href="/calibration"
+              src="/landing/calibration.png"
+              alt="The calibration dashboard with framework toggle showing hit rates and PnL per framework."
             />
-            <ScreenshotBlock
-              src="/landing/stress.png"
-              alt="v2.1 stress test results table showing eight historical 60-day windows including a -35% BTC bear."
+            <EvidenceRow
+              side="left"
+              eyebrow="Evidence 03"
               title="Test the framework, not just the signal."
               body="Eight historical stress windows including a real −35% BTC bear. v2.1 contained the loss to −19%. Documented, repeatable, visible."
+              linkLabel="View live stress tests →"
+              href="/index-fund"
+              src="/landing/stress.png"
+              alt="v2.1 stress test results table showing eight historical 60-day windows including a -35% BTC bear, with DD ratio column visible."
             />
           </div>
         </div>

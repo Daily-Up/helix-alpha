@@ -13,7 +13,7 @@
 import Link from "next/link";
 import { WarmNav } from "@/components/landing/warm/WarmNav";
 import { WarmHeroSignalCard } from "@/components/landing/warm/WarmHeroSignalCard";
-import { WarmScreenshotBlock } from "@/components/landing/warm/WarmScreenshotBlock";
+import { WarmEvidenceRow } from "@/components/landing/warm/WarmEvidenceRow";
 import { WarmReveal } from "@/components/landing/warm/WarmReveal";
 import { TopoField } from "@/components/landing/warm/TopoField";
 
@@ -256,24 +256,36 @@ export default function HelixWarmLanding() {
           </WarmReveal>
 
           <WarmReveal stagger={80}>
-          <div className="mt-20 flex flex-col items-center gap-32">
-            <WarmScreenshotBlock
-              src="/landing/audit.png"
-              alt="The audit page for a single signal — conviction breakdown, sources, gate-rule outcomes."
+          <div className="mt-[120px] flex flex-col gap-[120px]">
+            <WarmEvidenceRow
+              side="left"
+              eyebrow="Evidence 01"
               title="Open the box."
               body="Click any signal to see its conviction breakdown formula, sources, classifier reasoning, gate-rule outcomes, and corroboration status. No black boxes."
+              linkLabel="View live audit →"
+              href="/signals"
+              src="/landing/audit.png"
+              alt="The audit page for a single signal — conviction breakdown formula, sources, gate-rule outcomes, corroboration status."
             />
-            <WarmScreenshotBlock
-              src="/landing/calibration.png"
-              alt="The calibration dashboard with framework toggle showing hit rates and PnL per framework."
+            <WarmEvidenceRow
+              side="right"
+              eyebrow="Evidence 02"
               title="Track what actually happened."
               body="Hit rate by tier and catalyst subtype. Conviction calibration curves. v1 vs v2.1 attribution side by side. Outcomes resolve as horizons expire."
+              linkLabel="View live calibration →"
+              href="/calibration"
+              src="/landing/calibration.png"
+              alt="The calibration dashboard with framework toggle showing hit rates and PnL per framework."
             />
-            <WarmScreenshotBlock
-              src="/landing/stress.png"
-              alt="v2.1 stress test results table showing eight historical 60-day windows including a -35% BTC bear."
+            <WarmEvidenceRow
+              side="left"
+              eyebrow="Evidence 03"
               title="Test the framework, not just the signal."
               body="Eight historical stress windows including a real −35% BTC bear. v2.1 contained the loss to −19%. Documented, repeatable, visible."
+              linkLabel="View live stress tests →"
+              href="/index-fund"
+              src="/landing/stress.png"
+              alt="v2.1 stress test results table showing eight historical 60-day windows including a -35% BTC bear, with DD ratio column visible."
             />
           </div>
           </WarmReveal>
