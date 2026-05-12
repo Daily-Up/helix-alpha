@@ -51,20 +51,22 @@ export function WarmEvidenceRow({
   // Source order is always image-then-caption so that on mobile (<768px,
   // single-column stack) the screenshot sits above its caption regardless
   // of which side it's pinned to on desktop. On desktop we re-position
-  // each cell with col-start so the zigzag rhythm reads correctly.
+  // each cell with col-start so the zigzag rhythm reads correctly. 8-col
+  // image / 4-col caption — the wider image slot is the difference between
+  // readable dashboard text and a thumbnail.
   const imageCol = imageLeft
-    ? "md:col-start-1 md:col-span-7"
-    : "md:col-start-6 md:col-span-7";
+    ? "md:col-start-1 md:col-span-8"
+    : "md:col-start-5 md:col-span-8";
   const captionCol = imageLeft
-    ? "md:col-start-8 md:col-span-5"
-    : "md:col-start-1 md:col-span-5 md:row-start-1";
+    ? "md:col-start-9 md:col-span-4"
+    : "md:col-start-1 md:col-span-4 md:row-start-1";
 
   return (
     <figure className="grid w-full grid-cols-1 items-center gap-y-10 md:grid-cols-12 md:gap-x-12">
       {/* ── Screenshot frame ── */}
       <div className={`${imageCol} flex justify-center`}>
         <div
-          className="relative w-full max-w-[800px]"
+          className="relative w-full max-w-[1200px]"
           style={{ aspectRatio: "16 / 10" }}
         >
           {/* Amber accent stripe — vertical, left edge */}
@@ -86,7 +88,7 @@ export function WarmEvidenceRow({
                 src={src}
                 alt={alt}
                 fill
-                sizes="(min-width: 768px) 800px, 100vw"
+                sizes="(min-width: 1280px) 950px, (min-width: 768px) 70vw, 100vw"
                 className="object-cover"
                 unoptimized
               />

@@ -23,6 +23,7 @@ import Link from "next/link";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { fmtRelative, fmtSodexSymbol, fmtUsd } from "@/lib/format";
+import { stripTechnicalScoring } from "@/lib/format/reasoning";
 import { cn } from "@/components/ui/cn";
 
 interface AuditResp {
@@ -343,14 +344,14 @@ export function SignalAuditPage({ signalId }: { signalId: string }) {
         </CardBody>
       </Card>
 
-      {/* Reasoning + conviction breakdown */}
+      {/* Reasoning */}
       <Card>
         <CardHeader>
-          <CardTitle>Reasoning + conviction breakdown</CardTitle>
+          <CardTitle>Reasoning</CardTitle>
         </CardHeader>
         <CardBody>
           <p className="whitespace-pre-wrap text-sm leading-relaxed text-fg-muted">
-            {s.reasoning}
+            {stripTechnicalScoring(s.reasoning)}
           </p>
         </CardBody>
       </Card>

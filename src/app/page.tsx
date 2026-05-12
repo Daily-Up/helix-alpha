@@ -252,7 +252,7 @@ export default function HelixLandingPage() {
 
       {/* ─────────── Section 6: Built for transparency ─────────── */}
       <section id="frameworks" className="py-40" data-reveal-section>
-        <div className="mx-auto max-w-[1280px] px-6 md:px-12">
+        <div className="mx-auto max-w-[1440px] px-6 md:px-12">
           <h2
             data-reveal="header"
             className="font-[var(--font-fraunces)] font-light opacity-0"
@@ -272,11 +272,11 @@ export default function HelixLandingPage() {
               side="left"
               eyebrow="Evidence 01"
               title="Open the box."
-              body="Click any signal to see its conviction breakdown formula, sources, classifier reasoning, gate-rule outcomes, and corroboration status. No black boxes."
+              body="Click any signal to see its full reasoning, the triggering news event, classifier output, gate-rule outcomes, and corroboration status. No black boxes."
               linkLabel="View live audit →"
               href="/signals"
               src="/landing/audit.png"
-              alt="The audit page for a single signal — conviction breakdown formula, sources, gate-rule outcomes, corroboration status."
+              alt="The audit page for a single signal — reasoning, sources, classifier output, gate-rule outcomes, corroboration status."
             />
             <EvidenceRow
               side="right"

@@ -9,6 +9,7 @@ import {
   fmtUsd,
   truncate,
 } from "@/lib/format";
+import { stripTechnicalScoring } from "@/lib/format/reasoning";
 import { cn } from "@/components/ui/cn";
 
 const TEXT_BRAND = "#ede4d3";
@@ -96,30 +97,6 @@ function relevanceLabel(relevance: number | null | undefined): string {
   if (relevance >= 0.45) return "basket member";
   if (relevance >= 0.25) return "incidental";
   return "weak";
-}
-
-/**
- * Strip the technical scoring breakdown ("Conviction X% = cls ... × Xw + ...")
- * and the significance debug line ("Significance X.XXX → INFO; score=...;
- * magnitude=...; instance=...; novelty=X (X similar in window)") from
- * the reasoning text. These are useful for audit (see /signal/[id]) but
- * noisy for the inline read-more view.
- */
-function stripTechnicalScoring(text: string): string {
-  let cleaned = text;
-  // Conviction breakdown: starts at "Conviction NN% = cls" and ends at
-  // the period after "novelty NN% × Nw." (last term in the formula).
-  cleaned = cleaned.replace(
-    /\s*Conviction \d+% = cls [\s\S]*?novelty \d+% × \d+w\.?/g,
-    "",
-  );
-  // Significance debug line: starts at "Significance N.NNN →" and ends
-  // at the closing ")" of "(N similar in window)".
-  cleaned = cleaned.replace(
-    /\s*Significance \d+\.\d+ →[\s\S]*?\(\d+ similar in window\)\.?/g,
-    "",
-  );
-  return cleaned.replace(/\n{3,}/g, "\n\n").trim();
 }
 
 /**

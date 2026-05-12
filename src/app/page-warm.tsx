@@ -239,7 +239,7 @@ export default function HelixWarmLanding() {
 
       {/* ─────────── Section 6: Built for transparency ─────────── */}
       <section id="frameworks" className="py-32 md:py-40">
-        <div className="mx-auto max-w-[1280px] px-6 md:px-12">
+        <div className="mx-auto max-w-[1440px] px-6 md:px-12">
           <WarmReveal>
           <h2
             className="font-[var(--font-fraunces)] font-light"
@@ -261,11 +261,11 @@ export default function HelixWarmLanding() {
               side="left"
               eyebrow="Evidence 01"
               title="Open the box."
-              body="Click any signal to see its conviction breakdown formula, sources, classifier reasoning, gate-rule outcomes, and corroboration status. No black boxes."
+              body="Click any signal to see its full reasoning, the triggering news event, classifier output, gate-rule outcomes, and corroboration status. No black boxes."
               linkLabel="View live audit →"
               href="/signals"
               src="/landing/audit.png"
-              alt="The audit page for a single signal — conviction breakdown formula, sources, gate-rule outcomes, corroboration status."
+              alt="The audit page for a single signal — reasoning, sources, classifier output, gate-rule outcomes, corroboration status."
             />
             <WarmEvidenceRow
               side="right"

@@ -58,13 +58,15 @@ export function EvidenceRow({
   // Source order = image then caption so mobile stacks read top-to-bottom
   // with the screenshot first. On desktop we use col-start to place each
   // cell, allowing the caption to render to the left of the image when
-  // side="right" despite coming second in the DOM.
+  // side="right" despite coming second in the DOM. 8-col image / 4-col
+  // caption — the wider image slot is the difference between readable
+  // dashboard text and a thumbnail.
   const imageCol = imageLeft
-    ? "md:col-start-1 md:col-span-7"
-    : "md:col-start-6 md:col-span-7";
+    ? "md:col-start-1 md:col-span-8"
+    : "md:col-start-5 md:col-span-8";
   const captionCol = imageLeft
-    ? "md:col-start-8 md:col-span-5"
-    : "md:col-start-1 md:col-span-5 md:row-start-1";
+    ? "md:col-start-9 md:col-span-4"
+    : "md:col-start-1 md:col-span-4 md:row-start-1";
 
   return (
     <figure
@@ -74,7 +76,7 @@ export function EvidenceRow({
       {/* ── Screenshot frame ── */}
       <div className={`${imageCol} flex justify-center`}>
         <div
-          className="relative w-full max-w-[800px]"
+          className="relative w-full max-w-[1200px]"
           style={{ aspectRatio: "16 / 10" }}
         >
           {/* Amber accent stripe — vertical, left edge */}
@@ -96,7 +98,7 @@ export function EvidenceRow({
                 src={src}
                 alt={alt}
                 fill
-                sizes="(min-width: 768px) 800px, 100vw"
+                sizes="(min-width: 1280px) 950px, (min-width: 768px) 70vw, 100vw"
                 className="object-cover"
                 unoptimized
               />
