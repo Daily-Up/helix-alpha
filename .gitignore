@@ -76,3 +76,5 @@ next-env.d.ts
 !/data/perps.json
 !/data/perps-tickers.json
 !/data/sosoalpha.db
+
+.vercel
