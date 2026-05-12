@@ -24,7 +24,10 @@ Active crypto / cross-asset traders who want:
 ## What it does — the full flow
 
 ```
-SoSoValue OpenAPI  →  News ingestion  →  AI classification (Claude)
+SoSoValue OpenAPI  →  News ingestion  →  AI classification
+                                          (Claude in Wave 1;
+                                           tool-using AI agents
+                                           in Wave 2 / 3)
                                               ↓
                               Corpus-similarity gate (drop noise)
                                               ↓
