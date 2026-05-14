@@ -1,0 +1,39 @@
+name: Helix tick (15-min pipeline)
+
+# Pokes the production /api/cron/tick endpoint every 15 minutes so the
+# live deploy stays fresh during the judging window.
+#
+# Vercel Hobby tier only allows daily crons, so this workflow is the
+# external scheduler that keeps news ingestion + signal generation
+# running on a real cadence.
+#
+# Requires the repo secret CRON_SECRET (set under Settings → Secrets and
+# variables → Actions). The same value must be configured as CRON_SECRET
+# in Vercel's environment variables.
+
+on:
+  schedule:
+    # Every 15 minutes. GitHub Actions cron is best-effort — actual fire
+    # time can drift by a few minutes under load. Good enough.
+    - cron: "*/15 * * * *"
+  # Allow manual triggering from the Actions tab for ad-hoc refreshes.
+  workflow_dispatch:
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Hit /api/cron/tick
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          BASE_URL: https://helix-alpha-kappa.vercel.app
+        run: |
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Accept: application/json" \
+            --max-time 90 \
+            "$BASE_URL/api/cron/tick" \
+            | tee response.json
+          echo
+          echo "tick complete"
