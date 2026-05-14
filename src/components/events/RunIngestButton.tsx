@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/components/ui/cn";
+import { isPublicMode } from "@/lib/public-mode";
 
 /**
  * Auto-ingest control.
@@ -29,7 +30,35 @@ interface IngestError {
   error: string;
 }
 
-export function RunIngestButton({
+/**
+ * In public mode (production for judges), the browser can't hit the cron
+ * endpoint — it doesn't have CRON_SECRET. Ingestion runs server-side every
+ * 15 min via GitHub Actions instead, so the manual button and auto-poll
+ * toggle would just produce a "missing token" error. We render a passive
+ * badge that explains the cadence instead.
+ */
+function PublicIngestBadge() {
+  return (
+    <div
+      className="inline-flex items-center gap-2 rounded-md border border-line bg-surface-2 px-3 py-1.5 text-xs text-fg-muted"
+      title="The live deploy ingests news every 15 minutes via a server-side scheduler. No manual trigger needed."
+    >
+      <span
+        className="inline-flex h-1.5 w-1.5 rounded-full"
+        style={{ background: "#5cc97a" }}
+        aria-hidden
+      />
+      Auto-ingest · every 15 min
+    </div>
+  );
+}
+
+export function RunIngestButton(props: { onComplete?: () => void }) {
+  if (isPublicMode()) return <PublicIngestBadge />;
+  return <InteractiveIngestButton {...props} />;
+}
+
+function InteractiveIngestButton({
   onComplete,
 }: {
   onComplete?: () => void;
