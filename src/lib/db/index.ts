@@ -37,6 +37,8 @@ export * as Treasuries from "./repos/treasuries";
 export * as Outcomes from "./repos/outcomes";
 export * as Alerts from "./repos/alerts";
 export * as ShadowPortfolio from "./repos/shadow-portfolio";
+export * as AgentTraces from "./repos/agent-traces";
+export type { AgentStep, AgentTraceRow } from "./repos/agent-traces";
 export * as FrameworkSwitches from "./repos/framework-switches";
 
 // Re-export commonly-needed enum values + types so call sites don't need a

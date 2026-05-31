@@ -759,7 +759,36 @@ CREATE TABLE IF NOT EXISTS skipped_pre_classify (
 CREATE INDEX IF NOT EXISTS idx_skipped_pre_classify_at
   ON skipped_pre_classify(skipped_at DESC);
 
--- ── 20. Schema version (manual migrations) ────────────────────────────────
+-- ── 20. Agent traces (Wave 2 — agentic pipeline) ─────────────────────────
+-- Every multi-step agent run records its decision trace here. The audit
+-- page renders it inline so users can see exactly which tools the agent
+-- called, what they returned, and how the conclusion was reached. This
+-- is what makes the agent layer auditable in a way chat-based assistants
+-- structurally can't be.
+
+CREATE TABLE IF NOT EXISTS agent_traces (
+  id              TEXT PRIMARY KEY,
+  agent_name      TEXT NOT NULL,             -- 'research', 'verification', 'debate'
+  event_id        TEXT,                       -- nullable: not all agents tied to an event
+  signal_id       TEXT,                       -- nullable: set when agent gates a signal
+  started_at      INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+  finished_at     INTEGER,
+  status          TEXT NOT NULL,              -- 'running' | 'ok' | 'error'
+  rounds          INTEGER NOT NULL DEFAULT 0,
+  steps           TEXT NOT NULL DEFAULT '[]', -- JSON array of AgentStep
+  final_output    TEXT,                       -- JSON of the agent's structured output
+  tokens_input    INTEGER NOT NULL DEFAULT 0,
+  tokens_output   INTEGER NOT NULL DEFAULT 0,
+  tokens_cached   INTEGER NOT NULL DEFAULT 0,
+  cost_usd        REAL NOT NULL DEFAULT 0,
+  model           TEXT,
+  error           TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_agent_traces_event ON agent_traces(event_id);
+CREATE INDEX IF NOT EXISTS idx_agent_traces_signal ON agent_traces(signal_id);
+CREATE INDEX IF NOT EXISTS idx_agent_traces_started ON agent_traces(started_at DESC);
+
+-- ── 21. Schema version (manual migrations) ────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS schema_version (
   version  INTEGER PRIMARY KEY,
