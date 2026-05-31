@@ -3,7 +3,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { Assets, Signals, all, get } from "@/lib/db";
+import { Assets, Signals, all, get, AgentTraces } from "@/lib/db";
 import {
   getSupersessionForOld,
   listSupersessionsByNew,
@@ -140,6 +140,16 @@ export async function GET(
     signal.id,
   );
 
+  // Wave 2 — agent trace. Prefer one tagged to this specific signal;
+  // fall back to one tagged to the triggering event (the research agent
+  // ran during classification, before the signal id existed).
+  let agent_trace = await AgentTraces.getTraceForSignal(signal.id);
+  if (!agent_trace && signal.triggered_by_event_id) {
+    agent_trace = await AgentTraces.getTraceForEvent(
+      signal.triggered_by_event_id,
+    );
+  }
+
   return NextResponse.json({
     signal: {
       ...signal,
@@ -155,5 +165,6 @@ export async function GET(
     superseded_by: supersededByRow ?? null,
     superseded_others: supersededOthers,
     suppressed_at_emission: suppressionsThisWon,
+    agent_trace: agent_trace ?? null,
   });
 }

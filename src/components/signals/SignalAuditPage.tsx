@@ -25,6 +25,7 @@ import { Badge } from "@/components/ui/Badge";
 import { fmtRelative, fmtSodexSymbol, fmtUsd } from "@/lib/format";
 import { stripTechnicalScoring } from "@/lib/format/reasoning";
 import { cn } from "@/components/ui/cn";
+import { AgentTraceCard, type AgentTraceData } from "./AgentTraceCard";
 
 interface AuditResp {
   signal: {
@@ -123,6 +124,8 @@ interface AuditResp {
     significance_winner: number;
     suppressed_at: number;
   }>;
+  /** Wave 2 — research agent trace when one ran for the triggering event. */
+  agent_trace?: AgentTraceData | null;
 }
 
 export function SignalAuditPage({ signalId }: { signalId: string }) {
@@ -507,6 +510,9 @@ export function SignalAuditPage({ signalId }: { signalId: string }) {
           </CardBody>
         </Card>
       ) : null}
+
+      {/* Wave 2 — research agent trace (when one ran) */}
+      {data.agent_trace ? <AgentTraceCard trace={data.agent_trace} /> : null}
 
       {/* Secondary assets */}
       {data.secondary.length > 0 ? (
