@@ -140,15 +140,22 @@ export async function GET(
     signal.id,
   );
 
-  // Wave 2 — agent trace. Prefer one tagged to this specific signal;
-  // fall back to one tagged to the triggering event (the research agent
-  // ran during classification, before the signal id existed).
-  let agent_trace = await AgentTraces.getTraceForSignal(signal.id);
-  if (!agent_trace && signal.triggered_by_event_id) {
-    agent_trace = await AgentTraces.getTraceForEvent(
-      signal.triggered_by_event_id,
-    );
-  }
+  // Wave 2 — agent traces. We surface every trace associated with this
+  // signal: the research-agent trace tagged to the triggering event
+  // (ran at classification time, before signal_id existed), plus any
+  // verification or debate traces tagged directly to the signal id.
+  const signalScoped = (await AgentTraces.listRecentTraces(50)).filter(
+    (r) => r.signal_id === signal.id,
+  );
+  const eventScoped = signal.triggered_by_event_id
+    ? (
+        await AgentTraces.listTracesForEvent(signal.triggered_by_event_id)
+      ).filter((r) => !r.signal_id)
+    : [];
+  const agent_traces = [...eventScoped, ...signalScoped];
+  // Legacy single-trace field for the existing AgentTraceCard. The new
+  // UI will iterate agent_traces.
+  const agent_trace = agent_traces[0] ?? null;
 
   return NextResponse.json({
     signal: {
@@ -166,5 +173,6 @@ export async function GET(
     superseded_others: supersededOthers,
     suppressed_at_emission: suppressionsThisWon,
     agent_trace: agent_trace ?? null,
+    agent_traces,
   });
 }

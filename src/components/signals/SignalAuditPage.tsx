@@ -124,8 +124,11 @@ interface AuditResp {
     significance_winner: number;
     suppressed_at: number;
   }>;
-  /** Wave 2 — research agent trace when one ran for the triggering event. */
+  /** Wave 2 — single research-agent trace for back-compat. */
   agent_trace?: AgentTraceData | null;
+  /** Wave 2 — every agent trace associated with this signal:
+   *  research, verification, debate-bull, debate-bear, debate-synth. */
+  agent_traces?: AgentTraceData[];
 }
 
 export function SignalAuditPage({ signalId }: { signalId: string }) {
@@ -511,8 +514,16 @@ export function SignalAuditPage({ signalId }: { signalId: string }) {
         </Card>
       ) : null}
 
-      {/* Wave 2 — research agent trace (when one ran) */}
-      {data.agent_trace ? <AgentTraceCard trace={data.agent_trace} /> : null}
+      {/* Wave 2 — every agent trace associated with this signal */}
+      {data.agent_traces && data.agent_traces.length > 0 ? (
+        <div className="flex flex-col gap-4">
+          {data.agent_traces.map((t) => (
+            <AgentTraceCard key={t.id} trace={t} />
+          ))}
+        </div>
+      ) : data.agent_trace ? (
+        <AgentTraceCard trace={data.agent_trace} />
+      ) : null}
 
       {/* Secondary assets */}
       {data.secondary.length > 0 ? (
