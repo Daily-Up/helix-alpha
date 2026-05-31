@@ -35,18 +35,28 @@ interface Body {
 }
 
 async function readBody(req: Request): Promise<Body> {
-  if (req.method === "GET") {
-    const url = new URL(req.url);
-    return {
-      mode: url.searchParams.get("mode") ?? undefined,
-      event_id: url.searchParams.get("event_id") ?? undefined,
-      signal_id: url.searchParams.get("signal_id") ?? undefined,
-    };
-  }
+  // Query params first (works for GET and for POSTs that don't have a
+  // JSON body — including the RunLiveAgentButton case, which sends only
+  // a Content-Length-0 POST with params in the URL).
+  const url = new URL(req.url);
+  const fromQuery: Body = {
+    mode: url.searchParams.get("mode") ?? undefined,
+    event_id: url.searchParams.get("event_id") ?? undefined,
+    signal_id: url.searchParams.get("signal_id") ?? undefined,
+  };
+  if (req.method === "GET") return fromQuery;
+
+  // For POST, prefer JSON-body values when present; otherwise fall back
+  // to query params.
   try {
-    return (await req.json()) as Body;
+    const json = (await req.json()) as Body;
+    return {
+      mode: json.mode ?? fromQuery.mode,
+      event_id: json.event_id ?? fromQuery.event_id,
+      signal_id: json.signal_id ?? fromQuery.signal_id,
+    };
   } catch {
-    return {};
+    return fromQuery;
   }
 }
 
