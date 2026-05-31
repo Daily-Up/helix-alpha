@@ -12,7 +12,7 @@
  * cron tick which re-imports the module).
  */
 
-import { db } from "@/lib/db";
+import { all } from "@/lib/db";
 import {
   walkPriceSeries,
   computeRunMetrics,
@@ -58,11 +58,11 @@ export interface RunHistoricalReplayResult {
  * `backtest.ts` JSDoc for the full caveat. The UI labels every replay
  * accordingly.
  */
-export function runHistoricalReplay(
+export async function runHistoricalReplay(
   startDate: string,
   endDate: string,
   label: string,
-): RunHistoricalReplayResult {
+): Promise<RunHistoricalReplayResult> {
   const cacheKey = `${startDate}|${endDate}`;
   const cached = memo.get(cacheKey);
   if (cached) return cached;
@@ -78,7 +78,7 @@ export function runHistoricalReplay(
     Number(endDate.slice(8, 10)),
   );
 
-  const series = loadAnchorSeries(REPLAY_ANCHORS, startMs, endMs);
+  const series = await loadAnchorSeries(REPLAY_ANCHORS, startMs, endMs);
   let notes: string | undefined;
 
   // If BTC has no data for the window we can't even produce a baseline.
@@ -114,11 +114,11 @@ export function runHistoricalReplay(
 }
 
 /** Pull klines_daily for each anchor asset, restricted to the window. */
-function loadAnchorSeries(
+async function loadAnchorSeries(
   anchors: Record<string, number>,
   startMs: number,
   endMs: number,
-): Map<string, DailyBar[]> {
+): Promise<Map<string, DailyBar[]>> {
   const startDate = new Date(startMs).toISOString().slice(0, 10);
   const endDate = new Date(endMs).toISOString().slice(0, 10);
   const out = new Map<string, DailyBar[]>();
@@ -131,13 +131,12 @@ function loadAnchorSeries(
     close: number;
   }
   for (const assetId of Object.keys(anchors)) {
-    const rows = db()
-      .prepare<[string, string, string], Row>(
-        `SELECT date, open, high, low, close FROM klines_daily
-         WHERE asset_id = ? AND date >= ? AND date <= ?
-         ORDER BY date ASC`,
-      )
-      .all(assetId, startDate, endDate);
+    const rows = await all<Row>(
+      `SELECT date, open, high, low, close FROM klines_daily
+       WHERE asset_id = ? AND date >= ? AND date <= ?
+       ORDER BY date ASC`,
+      [assetId, startDate, endDate],
+    );
     out.set(
       assetId,
       rows.map((r) => ({
@@ -187,18 +186,16 @@ export interface ReplaySpec {
  * recent 60d window (typically chop or run-up). When data is too thin
  * for distinct windows, returns whatever we have with a note.
  */
-export function discoverReplayPeriods(): ReplaySpec[] {
+export async function discoverReplayPeriods(): Promise<ReplaySpec[]> {
   interface Row {
     date: string;
     close: number;
   }
-  const closes = db()
-    .prepare<[], Row>(
-      `SELECT date, close FROM klines_daily
-       WHERE asset_id = 'tok-btc'
-       ORDER BY date ASC`,
-    )
-    .all();
+  const closes = await all<Row>(
+    `SELECT date, close FROM klines_daily
+     WHERE asset_id = 'tok-btc'
+     ORDER BY date ASC`,
+  );
   if (closes.length < 60) return [];
 
   const W = 60;

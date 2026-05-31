@@ -23,6 +23,6 @@ export async function POST(req: Request) {
     );
   }
 
-  const result = dismissSignal(parsed.signal_id);
+  const result = await dismissSignal(parsed.signal_id);
   return NextResponse.json(result, { status: result.ok ? 200 : 400 });
 }

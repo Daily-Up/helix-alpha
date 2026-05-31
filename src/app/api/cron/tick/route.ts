@@ -163,7 +163,7 @@ async function handle(req: Request): Promise<NextResponse> {
   // 8) Evaluate system-health alert thresholds (Part 3). Idempotent —
   //    Alerts.raiseAlert coalesces duplicates within 1h.
   try {
-    const raised = evaluateAlerts();
+    const raised = await evaluateAlerts();
     summary.alerts_raised = raised.length;
   } catch (err) {
     summary.alerts_raised = { error: (err as Error).message };

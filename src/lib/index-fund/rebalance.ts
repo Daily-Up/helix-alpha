@@ -62,10 +62,10 @@ export async function rebalanceIndex(
   indexId = "alphacore",
   opts: RebalanceOptions = {},
 ): Promise<RebalanceSummary> {
-  const idx = IndexFund.getIndex(indexId);
+  const idx = await IndexFund.getIndex(indexId);
   if (!idx) throw new Error(`index '${indexId}' not found`);
 
-  const settings = Settings.getSettings();
+  const settings = await Settings.getSettings();
   const triggered_by = opts.triggered_by ?? "scheduled";
   const execute = opts.execute ?? true;
   const framework = settings.index_framework_version ?? "v1";
@@ -76,7 +76,9 @@ export async function rebalanceIndex(
   // is v1 unless the user has opted into v2 via the framework selector
   // with explicit confirmation (I-36).
   const candidate =
-    framework === "v2" ? computeCandidatePortfolioV2() : computeCandidatePortfolio();
+    framework === "v2"
+      ? await computeCandidatePortfolioV2()
+      : await computeCandidatePortfolio();
   const review = await reviewCandidate(candidate);
 
   // Build per-asset rationale from the rules engine's drivers. The driver
@@ -103,12 +105,12 @@ export async function rebalanceIndex(
     return Number.isFinite(n) && n > 0 ? n : null;
   };
 
-  const currentPositions = IndexFund.listPositions(indexId);
+  const currentPositions = await IndexFund.listPositions(indexId);
   const positionMap = new Map<string, IndexPositionRow>();
   let portfolioMtm = 0;
 
   for (const p of currentPositions) {
-    const asset = Assets.getAssetById(p.asset_id);
+    const asset = await Assets.getAssetById(p.asset_id);
     if (!asset?.tradable) {
       positionMap.set(p.asset_id, p);
       portfolioMtm += p.current_value_usd;
@@ -125,7 +127,7 @@ export async function rebalanceIndex(
   // We track a running cash by computing on-the-fly each rebalance: cash =
   // last NAV - portfolioMtm at the end. For first rebalance, cash =
   // starting_nav.
-  const lastNavRow = IndexFund.listNavHistory(indexId, 1)[0];
+  const lastNavRow = (await IndexFund.listNavHistory(indexId, 1))[0];
   const lastNav = lastNavRow?.nav_usd ?? idx.starting_nav;
   const cash = Math.max(0, lastNav - portfolioMtm);
   const preNav = portfolioMtm + cash;
@@ -150,7 +152,7 @@ export async function rebalanceIndex(
   let skipped = 0;
 
   for (const assetId of allInvolvedAssetIds) {
-    const asset = Assets.getAssetById(assetId);
+    const asset = await Assets.getAssetById(assetId);
     if (!asset?.tradable) {
       skipped++;
       continue;
@@ -238,7 +240,7 @@ export async function rebalanceIndex(
       if (!updatedPositions.has(old.asset_id)) {
         // Position dropped — sell entirely.
         if (old.quantity > 0) {
-          const asset = Assets.getAssetById(old.asset_id);
+          const asset = await Assets.getAssetById(old.asset_id);
           const px =
             asset?.tradable ? livePrice(asset.tradable.symbol) : null;
           if (px != null) {
@@ -249,7 +251,7 @@ export async function rebalanceIndex(
               fill_price: px,
             });
           }
-          IndexFund.upsertPosition({
+          await IndexFund.upsertPosition({
             index_id: indexId,
             asset_id: old.asset_id,
             target_weight: 0,
@@ -272,7 +274,7 @@ export async function rebalanceIndex(
       const rationale = rationaleByAsset.has(assetId)
         ? rationaleByAsset.get(assetId)!
         : undefined;
-      IndexFund.upsertPosition({
+      await IndexFund.upsertPosition({
         index_id: indexId,
         asset_id: assetId,
         target_weight: tw,
@@ -284,7 +286,7 @@ export async function rebalanceIndex(
     }
 
     // Drop zero positions out of the table.
-    IndexFund.clearZeroPositions(indexId);
+    await IndexFund.clearZeroPositions(indexId);
   }
 
   // ── 6. Compute post-NAV (positions + cash) ─────────────────────
@@ -295,7 +297,7 @@ export async function rebalanceIndex(
   // ── 7. Insert rebalance row + snapshot NAV ────────────────────
   const rebalanceId = randomUUID();
   if (execute) {
-    IndexFund.insertRebalance({
+    await IndexFund.insertRebalance({
       id: rebalanceId,
       index_id: indexId,
       triggered_by,
@@ -312,7 +314,7 @@ export async function rebalanceIndex(
     const today = new Date().toISOString().slice(0, 10);
     const pnl_usd = postNav - idx.starting_nav;
     const pnl_pct = idx.starting_nav > 0 ? (pnl_usd / idx.starting_nav) * 100 : 0;
-    IndexFund.snapshotNav({
+    await IndexFund.snapshotNav({
       index_id: indexId,
       date: today,
       nav_usd: postNav,
@@ -328,9 +330,9 @@ export async function rebalanceIndex(
     // and move on so the live portfolio is unaffected.
     try {
       // Resolve last rebalance's pending attribution against today's prices.
-      resolvePendingAttributions(indexId);
+      await resolvePendingAttributions(indexId);
       // Then record this rebalance's tilt vs. the momentum-only counterfactual.
-      recordAttributionAtRebalance({
+      await recordAttributionAtRebalance({
         index_id: indexId,
         rebalance_id: rebalanceId,
         actual_weights: review.weights,

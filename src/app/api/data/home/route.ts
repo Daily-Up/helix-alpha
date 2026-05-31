@@ -1,9 +1,7 @@
 /**
  * GET /api/data/home
  *
- * Single endpoint that powers the marketing homepage. Aggregates a
- * lean snapshot from across the system so the page can render in one
- * fetch without 5 separate API calls. Response intentionally compact.
+ * Single endpoint that powers the marketing homepage. Wave 2: async.
  */
 
 import { NextResponse } from "next/server";
@@ -12,7 +10,8 @@ import {
   Briefings,
   IndexFund,
   Postmortem,
-  db,
+  all,
+  get,
 } from "@/lib/db";
 import { Market } from "@/lib/sodex";
 
@@ -20,7 +19,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  // ── Stats: today's pending signal count, conviction breakdown ──
   interface SigStats {
     total_pending: number;
     auto: number;
@@ -28,20 +26,17 @@ export async function GET() {
     info: number;
     avg_conf: number | null;
   }
-  const sigStats = db()
-    .prepare<[], SigStats>(
-      `SELECT
-         COUNT(*) AS total_pending,
-         SUM(CASE WHEN tier = 'auto' THEN 1 ELSE 0 END) AS auto,
-         SUM(CASE WHEN tier = 'review' THEN 1 ELSE 0 END) AS review,
-         SUM(CASE WHEN tier = 'info' THEN 1 ELSE 0 END) AS info,
-         AVG(confidence) AS avg_conf
-       FROM signals
-       WHERE status = 'pending'`,
-    )
-    .get();
+  const sigStats = await get<SigStats>(
+    `SELECT
+       COUNT(*) AS total_pending,
+       SUM(CASE WHEN tier = 'auto' THEN 1 ELSE 0 END) AS auto,
+       SUM(CASE WHEN tier = 'review' THEN 1 ELSE 0 END) AS review,
+       SUM(CASE WHEN tier = 'info' THEN 1 ELSE 0 END) AS info,
+       AVG(confidence) AS avg_conf
+     FROM signals
+     WHERE status = 'pending'`,
+  );
 
-  // Top 3 highest-conviction pending signals (with event title).
   interface TopSig {
     id: string;
     asset_symbol: string;
@@ -53,24 +48,22 @@ export async function GET() {
     event_title: string | null;
     event_type: string | null;
   }
-  const topSignals = db()
-    .prepare<[], TopSig>(
-      `SELECT s.id, a.symbol AS asset_symbol, a.kind AS asset_kind,
-              s.direction, s.tier, s.confidence, s.fired_at,
-              n.title AS event_title, c.event_type AS event_type
-       FROM signals s
-       JOIN assets a ON a.id = s.asset_id
-       LEFT JOIN news_events n ON n.id = s.triggered_by_event_id
-       LEFT JOIN classifications c ON c.event_id = s.triggered_by_event_id
-       WHERE s.status = 'pending'
-       ORDER BY s.confidence DESC, s.fired_at DESC
-       LIMIT 3`,
-    )
-    .all();
+  const topSignals = await all<TopSig>(
+    `SELECT s.id, a.symbol AS asset_symbol, a.kind AS asset_kind,
+            s.direction, s.tier, s.confidence, s.fired_at,
+            n.title AS event_title, c.event_type AS event_type
+     FROM signals s
+     JOIN assets a ON a.id = s.asset_id
+     LEFT JOIN news_events n ON n.id = s.triggered_by_event_id
+     LEFT JOIN classifications c ON c.event_id = s.triggered_by_event_id
+     WHERE s.status = 'pending'
+     ORDER BY s.confidence DESC, s.fired_at DESC
+     LIMIT 3`,
+  );
 
   // ── AlphaIndex snapshot ───────────────────────────────────────
-  const idx = IndexFund.getIndex("alphacore");
-  const positions = IndexFund.listPositions("alphacore");
+  const idx = await IndexFund.getIndex("alphacore");
+  const positions = await IndexFund.listPositions("alphacore");
   let tickers = new Map<string, { lastPx: string }>();
   try {
     tickers = (await Market.getAllTickersBySymbol()) as unknown as Map<
@@ -97,7 +90,7 @@ export async function GET() {
     value: number;
   }> = [];
   for (const p of positions) {
-    const a = Assets.getAssetById(p.asset_id);
+    const a = await Assets.getAssetById(p.asset_id);
     if (!a) continue;
     const sym = a.tradable?.symbol ?? "";
     const px = sym ? livePrice(sym) : null;
@@ -116,7 +109,7 @@ export async function GET() {
       value,
     });
   }
-  const lastNav = IndexFund.listNavHistory("alphacore", 1)[0];
+  const lastNav = (await IndexFund.listNavHistory("alphacore", 1))[0];
   const navTotal = lastNav?.nav_usd ?? idx?.starting_nav ?? 0;
   const cash = Math.max(0, navTotal - invested);
   const totalNav = invested + cash;
@@ -140,14 +133,12 @@ export async function GET() {
     })),
   };
 
-  // ── Latest briefing (preview) ─────────────────────────────────
-  const briefing = Briefings.getLatestBriefing();
+  const briefing = await Briefings.getLatestBriefing();
 
-  // ── Calibration: overall + best event_type ────────────────────
-  const overall = Postmortem.overallStats({
+  const overall = await Postmortem.overallStats({
     since_ms: 30 * 24 * 60 * 60 * 1000,
   });
-  const byType = Postmortem.statsByEventType({
+  const byType = await Postmortem.statsByEventType({
     since_ms: 30 * 24 * 60 * 60 * 1000,
   });
   const evaluable = byType.filter(
@@ -156,7 +147,6 @@ export async function GET() {
   evaluable.sort((a, b) => (b.hit_rate_3d ?? 0) - (a.hit_rate_3d ?? 0));
   const bestEventType = evaluable[0] ?? null;
 
-  // ── System counts (transparency / "this is real" proof) ──────
   interface Counts {
     total_events: number;
     total_classified: number;
@@ -164,16 +154,14 @@ export async function GET() {
     total_briefings: number;
     last_event_at: number | null;
   }
-  const counts = db()
-    .prepare<[], Counts>(
-      `SELECT
-         (SELECT COUNT(*) FROM news_events)                      AS total_events,
-         (SELECT COUNT(*) FROM classifications)                  AS total_classified,
-         (SELECT COUNT(*) FROM signals)                          AS total_signals,
-         (SELECT COUNT(*) FROM briefings)                        AS total_briefings,
-         (SELECT MAX(release_time) FROM news_events)             AS last_event_at`,
-    )
-    .get();
+  const counts = await get<Counts>(
+    `SELECT
+       (SELECT COUNT(*) FROM news_events)                      AS total_events,
+       (SELECT COUNT(*) FROM classifications)                  AS total_classified,
+       (SELECT COUNT(*) FROM signals)                          AS total_signals,
+       (SELECT COUNT(*) FROM briefings)                        AS total_briefings,
+       (SELECT MAX(release_time) FROM news_events)             AS last_event_at`,
+  );
 
   return NextResponse.json({
     counts,

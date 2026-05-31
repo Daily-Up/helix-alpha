@@ -8,7 +8,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { all } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -85,21 +85,19 @@ export async function GET(req: Request) {
   sql += ` ORDER BY s.fired_at DESC LIMIT ?`;
   params.push(limit);
 
-  const rows = db().prepare<typeof params, JoinedSignal>(sql).all(...params);
+  const rows = await all<JoinedSignal>(sql, params);
 
   // ── Fix C — annotate conflicts ─────────────────────────────────
   // For each pending signal, check if its asset also has an OPPOSITE
   // direction pending signal. Attach has_conflict so the UI can render
   // a warning badge.
   type ConflictRow = { asset_id: string; direction: string };
-  const conflictRows = db()
-    .prepare<[], ConflictRow>(
-      `SELECT asset_id, direction
-       FROM signals
-       WHERE status = 'pending'
-       GROUP BY asset_id, direction`,
-    )
-    .all();
+  const conflictRows = await all<ConflictRow>(
+    `SELECT asset_id, direction
+     FROM signals
+     WHERE status = 'pending'
+     GROUP BY asset_id, direction`,
+  );
   const dirsByAsset = new Map<string, Set<string>>();
   for (const r of conflictRows) {
     const s = dirsByAsset.get(r.asset_id) ?? new Set<string>();

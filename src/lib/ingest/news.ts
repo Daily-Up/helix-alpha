@@ -94,7 +94,7 @@ export async function runNewsIngest(
   // Universe: assume already-seeded; fall back to in-memory if not.
   let universe = opts.universe;
   if (!universe) {
-    const stored = Assets.getAllAssets();
+    const stored = await Assets.getAllAssets();
     universe = stored.length > 0 ? stored : await resolveUniverse(DEFAULT_UNIVERSE);
   }
 
@@ -141,28 +141,28 @@ export async function runNewsIngest(
       continue;
     }
 
-    const { inserted } = Events.upsertEvent(item);
+    const { inserted } = await Events.upsertEvent(item);
     if (inserted) newEvents++;
 
     const matchedIds: string[] = [];
     for (const c of item.matched_currencies ?? []) {
-      const a = Assets.getAssetByCurrencyId(c.currency_id);
+      const a = await Assets.getAssetByCurrencyId(c.currency_id);
       if (a) matchedIds.push(a.id);
     }
     if (matchedIds.length > 0) {
-      Events.linkEventAssets(item.id, matchedIds, "matched");
+      await Events.linkEventAssets(item.id, matchedIds, "matched");
     }
 
     if (inserted) {
       // Stage 1: existing exact-match dedup (Events.findDuplicateEvent).
-      const dup = Events.findDuplicateEvent({
+      const dup = await Events.findDuplicateEvent({
         id: item.id,
         title: item.title ?? "",
         release_time: Number(item.release_time),
         matched_currencies: item.matched_currencies ?? null,
       });
       if (dup) {
-        Events.markAsDuplicate(item.id, dup.canonical_id);
+        await Events.markAsDuplicate(item.id, dup.canonical_id);
         duplicatesSkipped++;
         continue;
       }
@@ -183,7 +183,7 @@ export async function runNewsIngest(
         .join(". ");
       const newEmbedding = embed(haystack);
       const sinceMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
-      const recent = Classifications.listRecentEmbeddings(sinceMs);
+      const recent = await Classifications.listRecentEmbeddings(sinceMs);
       const verdict = classifyFreshness({
         new_embedding: newEmbedding,
         history: recent,
@@ -192,7 +192,7 @@ export async function runNewsIngest(
         verdict.verdict === "duplicate" &&
         verdict.matched_event_id != null
       ) {
-        Events.markAsDuplicate(item.id, verdict.matched_event_id);
+        await Events.markAsDuplicate(item.id, verdict.matched_event_id);
         duplicatesSkipped++;
         // Don't continue — we still want to persist the embedding for
         // future similarity comparisons (against this duplicate's
@@ -227,11 +227,15 @@ export async function runNewsIngest(
   if (!opts.skipClassify && !paused) {
     // Batch size 150 — large enough to drain backlog under bursty
     // ingest while still fitting in Vercel's 60s maxDuration.
-    const rawTargets: StoredEvent[] = opts.reclassify
-      ? fresh
-          .map((i) => Events.getEventById(i.id))
-          .filter((e): e is StoredEvent => !!e)
-      : Events.getUnclassifiedEvents(150);
+    let rawTargets: StoredEvent[];
+    if (opts.reclassify) {
+      const events = await Promise.all(
+        fresh.map((i) => Events.getEventById(i.id)),
+      );
+      rawTargets = events.filter((e): e is StoredEvent => !!e);
+    } else {
+      rawTargets = await Events.getUnclassifiedEvents(150);
+    }
 
     // ── Corpus pre-classify gate (Phase G, invariant I-46) ──
     // AUTHORITATIVE: src/lib/calibration/corpus-filter.ts.
@@ -254,7 +258,7 @@ export async function runNewsIngest(
       });
       if (verdict.verdict === "drop") {
         try {
-          insertSkipped({
+          await insertSkipped({
             id: e.id,
             headline_text: e.title,
             corpus_score: verdict.score,

@@ -13,7 +13,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { all } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -102,9 +102,7 @@ export async function GET(req: Request) {
   sql += ` ORDER BY n.release_time DESC LIMIT ?`;
   params.push(limit);
 
-  const rows = db()
-    .prepare<typeof params, JoinedRow>(sql)
-    .all(...params);
+  const rows = await all<JoinedRow>(sql, params);
 
   const events = rows.map((r) => ({
     id: r.id,

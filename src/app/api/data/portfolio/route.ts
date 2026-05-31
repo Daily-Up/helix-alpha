@@ -31,7 +31,7 @@ interface OpenWithMarks {
 }
 
 export async function GET() {
-  const settings = Settings.getSettings();
+  const settings = await Settings.getSettings();
   // Fetch from spot + perps so positions on either market mark-to-market.
   const tickers = await Market.getAllTickersBySymbol().catch(
     () => new Map<string, never>(),
@@ -45,7 +45,7 @@ export async function GET() {
     livePrices.set(sym, Number(t.lastPx));
   }
 
-  const open = PaperTrades.listOpen();
+  const open = await PaperTrades.listOpen();
   const openWithMarks: OpenWithMarks[] = open.map((t) => {
     const px = livePrices.get(t.sodex_symbol) ?? null;
     let pnl_usd: number | null = null;
@@ -76,12 +76,14 @@ export async function GET() {
     };
   });
 
-  const stats = PaperTrades.portfolioStats(
+  const stats = await PaperTrades.portfolioStats(
     settings.paper_starting_balance_usd,
     livePrices,
   );
 
-  const closed = PaperTrades.listAll(50).filter((t) => t.status === "closed");
+  const closed = (await PaperTrades.listAll(50)).filter(
+    (t) => t.status === "closed",
+  );
 
   return NextResponse.json({
     settings,

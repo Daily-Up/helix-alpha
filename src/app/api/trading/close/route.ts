@@ -26,7 +26,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const t = PaperTrades.getTrade(parsed.trade_id);
+  const t = await PaperTrades.getTrade(parsed.trade_id);
   if (!t) {
     return NextResponse.json(
       { ok: false, error: "trade not found" },
@@ -46,6 +46,6 @@ export async function POST(req: Request) {
     );
   }
   const px = Number(ticker.lastPx);
-  const closed = PaperTrades.closeTrade(parsed.trade_id, px, "manual");
+  const closed = await PaperTrades.closeTrade(parsed.trade_id, px, "manual");
   return NextResponse.json({ ok: true, trade: closed });
 }

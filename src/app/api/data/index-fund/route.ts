@@ -10,7 +10,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { Assets, IndexFund, Settings, db } from "@/lib/db";
+import { Assets, IndexFund, Settings, all } from "@/lib/db";
 import { Market } from "@/lib/sodex";
 import {
   buildBenchmarkSpec,
@@ -43,12 +43,12 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const indexId = url.searchParams.get("id") ?? "alphacore";
 
-  const idx = IndexFund.getIndex(indexId);
+  const idx = await IndexFund.getIndex(indexId);
   if (!idx) {
     return NextResponse.json({ ok: false, error: "index not found" }, { status: 404 });
   }
 
-  const settings = Settings.getSettings();
+  const settings = await Settings.getSettings();
   const tickers = await Market.getAllTickersBySymbol().catch(
     () => new Map<string, never>(),
   );
@@ -60,12 +60,12 @@ export async function GET(req: Request) {
   };
 
   // ── Mark positions to market ──────────────────────────────────
-  const rawPositions = IndexFund.listPositions(indexId);
+  const rawPositions = await IndexFund.listPositions(indexId);
   const positions: PositionView[] = [];
   let invested = 0;
 
   for (const p of rawPositions) {
-    const asset = Assets.getAssetById(p.asset_id);
+    const asset = await Assets.getAssetById(p.asset_id);
     if (!asset) continue;
     const sodex = asset.tradable?.symbol ?? "";
     const px = sodex ? livePrice(sodex) : null;
@@ -99,7 +99,7 @@ export async function GET(req: Request) {
   }
 
   // Cash & NAV
-  const lastNavRow = IndexFund.listNavHistory(indexId, 1)[0];
+  const lastNavRow = (await IndexFund.listNavHistory(indexId, 1))[0];
   const lastNav = lastNavRow?.nav_usd ?? idx.starting_nav;
   const cash = Math.max(0, lastNav - invested);
   const nav = invested + cash;
@@ -111,7 +111,7 @@ export async function GET(req: Request) {
   positions.sort((a, b) => b.current_value_usd - a.current_value_usd);
 
   // ── Rebalance history ─────────────────────────────────────────
-  const rebalances = IndexFund.listRebalances(indexId, 30);
+  const rebalances = await IndexFund.listRebalances(indexId, 30);
 
   // ── NAV history for equity curve ──────────────────────────────
   // The real `index_nav_history` table only has rows for days the
@@ -120,8 +120,8 @@ export async function GET(req: Request) {
   // historical close that day. This answers the investor's first
   // question — "would I have made more just holding BTC?" — by
   // showing the full curve, not just two dots.
-  const real_nav_history = IndexFund.listNavHistory(indexId, 90);
-  const synthetic_nav_history = buildSyntheticNavHistory(
+  const real_nav_history = await IndexFund.listNavHistory(indexId, 90);
+  const synthetic_nav_history = await buildSyntheticNavHistory(
     indexId,
     positions,
     cash,
@@ -145,7 +145,7 @@ export async function GET(req: Request) {
   // Compute "naive momentum top-7" and "hybrid simple" NAVs over the
   // same date window as the equity curve. These get layered into the
   // chart as toggleable lines and a mini-table beneath.
-  const benchmark_curves = computeBenchmarkOverlays(nav_history, idx.starting_nav);
+  const benchmark_curves = await computeBenchmarkOverlays(nav_history, idx.starting_nav);
 
   // ── Risk metrics ──────────────────────────────────────────────
   const risk = computeRiskMetrics(nav_history);
@@ -206,28 +206,27 @@ interface BenchmarkOverlay {
  * stub so the UI knows the toggle should be disabled — the NAV map will
  * be empty in that case.
  */
-function computeBenchmarkOverlays(
+async function computeBenchmarkOverlays(
   nav_history: Array<{ date: string }>,
   startingNav: number,
-): BenchmarkOverlay[] {
+): Promise<BenchmarkOverlay[]> {
   if (nav_history.length < 2) return [];
-  const conn = db();
-  // Find date range
   const dates = nav_history.map((r) => r.date);
   const start_ms = Date.parse(dates[0] + "T00:00:00Z");
   const end_ms = Date.parse(dates[dates.length - 1] + "T00:00:00Z");
   if (!Number.isFinite(start_ms) || !Number.isFinite(end_ms)) return [];
 
-  // Pull all daily bars for assets we might need. The naive benchmark
-  // can use the entire universe; the hybrid spec only needs BTC + the
-  // four hardcoded equities. Loading all assets keeps the universe wide
-  // for the momentum benchmark without a per-spec query.
-  const rows = conn
-    .prepare<[], { asset_id: string; date: string; open: number; high: number; low: number; close: number }>(
-      `SELECT asset_id, date, open, high, low, close FROM klines_daily
-       ORDER BY asset_id, date ASC`,
-    )
-    .all();
+  const rows = await all<{
+    asset_id: string;
+    date: string;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+  }>(
+    `SELECT asset_id, date, open, high, low, close FROM klines_daily
+     ORDER BY asset_id, date ASC`,
+  );
   const series = new Map<string, DailyBar[]>();
   for (const r of rows) {
     const ts = Date.parse(r.date + "T00:00:00Z");
@@ -303,12 +302,12 @@ function computeBenchmarkOverlays(
  * klines_daily table for `tok-btc` and `idx-ssimag7`. Either may be
  * null if no kline exists for that asset / date.
  */
-function buildSyntheticNavHistory(
+async function buildSyntheticNavHistory(
   indexId: string,
   positions: PositionView[],
   cashUsd: number,
   days: number,
-): Array<{
+): Promise<Array<{
   index_id: string;
   date: string;
   nav_usd: number;
@@ -316,17 +315,16 @@ function buildSyntheticNavHistory(
   pnl_pct: number;
   btc_price: number | null;
   ssimag7_price: number | null;
-}> {
-  const conn = db();
-  // Build the date list (newest -> oldest), then reverse for chart.
-  const dates = conn
-    .prepare<[number], { date: string }>(
+}>> {
+  const dates = (
+    await all<{ date: string }>(
       `SELECT DISTINCT date FROM klines_daily
        WHERE asset_id = 'tok-btc'
        ORDER BY date DESC
        LIMIT ?`,
+      [days],
     )
-    .all(days)
+  )
     .map((r) => r.date)
     .reverse();
   if (dates.length === 0) return [];
@@ -334,11 +332,10 @@ function buildSyntheticNavHistory(
   // Per-position kline maps: asset_id -> date -> close
   const closeByDate = new Map<string, Map<string, number>>();
   for (const p of positions) {
-    const rows = conn
-      .prepare<[string], { date: string; close: number }>(
-        `SELECT date, close FROM klines_daily WHERE asset_id = ?`,
-      )
-      .all(p.asset_id);
+    const rows = await all<{ date: string; close: number }>(
+      `SELECT date, close FROM klines_daily WHERE asset_id = ?`,
+      [p.asset_id],
+    );
     const m = new Map<string, number>();
     for (const r of rows) m.set(r.date, r.close);
     closeByDate.set(p.asset_id, m);
@@ -346,11 +343,9 @@ function buildSyntheticNavHistory(
 
   // Benchmarks
   const btcMap = closeByDate.get("tok-btc") ?? new Map();
-  const ssimag7Rows = conn
-    .prepare<[], { date: string; close: number }>(
-      `SELECT date, close FROM klines_daily WHERE asset_id = 'idx-ssimag7'`,
-    )
-    .all();
+  const ssimag7Rows = await all<{ date: string; close: number }>(
+    `SELECT date, close FROM klines_daily WHERE asset_id = 'idx-ssimag7'`,
+  );
   const ssimag7Map = new Map<string, number>();
   for (const r of ssimag7Rows) ssimag7Map.set(r.date, r.close);
 

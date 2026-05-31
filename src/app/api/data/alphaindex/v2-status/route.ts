@@ -15,7 +15,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { all } from "@/lib/db";
 import { runV2Backtest } from "@/lib/alphaindex/v2/backtest-v2";
 import {
   evaluateAcceptance,
@@ -48,7 +48,7 @@ interface Window {
 
 export async function GET() {
   try {
-    const series = loadAllSeries();
+    const series = await loadAllSeries();
     if (series.size === 0) {
       return NextResponse.json({
         ok: false,
@@ -148,7 +148,7 @@ export async function GET() {
       naive_max_dd_pct: naiveResult.max_drawdown_pct,
       naive_sharpe: naiveResult.sharpe,
     };
-    recordAcceptance("alphacore", acceptance, {
+    await recordAcceptance("alphacore", acceptance, {
       stress_summary: v2BacktestSummaries,
       live_summary: liveSummary,
     });
@@ -182,24 +182,18 @@ export async function GET() {
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────
 
-function loadAllSeries(): Map<string, DailyBar[]> {
-  const conn = db();
-  const rows = conn
-    .prepare<
-      [],
-      {
-        asset_id: string;
-        date: string;
-        open: number;
-        high: number;
-        low: number;
-        close: number;
-      }
-    >(
-      `SELECT asset_id, date, open, high, low, close FROM klines_daily
-       ORDER BY asset_id, date ASC`,
-    )
-    .all();
+async function loadAllSeries(): Promise<Map<string, DailyBar[]>> {
+  const rows = await all<{
+    asset_id: string;
+    date: string;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+  }>(
+    `SELECT asset_id, date, open, high, low, close FROM klines_daily
+     ORDER BY asset_id, date ASC`,
+  );
   const series = new Map<string, DailyBar[]>();
   for (const r of rows) {
     const ts = Date.parse(r.date + "T00:00:00Z");

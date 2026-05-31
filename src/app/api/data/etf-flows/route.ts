@@ -13,7 +13,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { db, ETFFlows, Assets } from "@/lib/db";
+import { get, ETFFlows, Assets } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,14 +37,13 @@ export async function GET(req: Request) {
   const days = clamp(numParam(url, "days") ?? 30, 1, 60);
 
   // Aggregate flow time series
-  const aggHistory = ETFFlows.getAggregateHistory(symbol, country, days);
+  const aggHistory = await ETFFlows.getAggregateHistory(symbol, country, days);
   // Reverse so the chart goes oldest → newest
   const aggregate = [...aggHistory].reverse();
 
   // Per-fund: take the latest row from etf_flows_daily for each ticker
   // matching this underlying (approximate by ticker prefix lookup via assets)
-  const conn = db();
-  const fundAssets = Assets.getAssetsByKind("etf_fund").filter((a) => {
+  const fundAssets = (await Assets.getAssetsByKind("etf_fund")).filter((a) => {
     if (a.sosovalue.kind !== "etf_fund") return false;
     return a.sosovalue.underlying === symbol;
   });
@@ -53,18 +52,17 @@ export async function GET(req: Request) {
   for (const f of fundAssets) {
     if (f.sosovalue.kind !== "etf_fund") continue;
     const ticker = f.sosovalue.ticker;
-    const latest = conn
-      .prepare<[string], FundSnapshot>(
-        `SELECT
-           ticker, date, net_inflow, cum_inflow, net_assets,
-           prem_dsc, value_traded,
-           '' AS name, '' AS exchange
-         FROM etf_flows_daily
-         WHERE ticker = ?
-         ORDER BY date DESC
-         LIMIT 1`,
-      )
-      .get(ticker);
+    const latest = await get<FundSnapshot>(
+      `SELECT
+         ticker, date, net_inflow, cum_inflow, net_assets,
+         prem_dsc, value_traded,
+         '' AS name, '' AS exchange
+       FROM etf_flows_daily
+       WHERE ticker = ?
+       ORDER BY date DESC
+       LIMIT 1`,
+      [ticker],
+    );
     if (latest) {
       // Patch in display-name/exchange from the assets table; the SELECT
       // returns empty strings as placeholders for these.

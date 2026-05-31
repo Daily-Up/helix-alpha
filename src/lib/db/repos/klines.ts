@@ -35,11 +35,11 @@ export async function upsertKlines(
       args: [
         assetId,
         formatApiDate(toMs(k.timestamp)),
-        k.open,
-        k.high,
-        k.low,
-        k.close,
-        k.volume,
+        k.open ?? 0,
+        k.high ?? 0,
+        k.low ?? 0,
+        k.close ?? 0,
+        k.volume ?? 0,
       ],
     })),
   );

@@ -34,7 +34,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { db } from "@/lib/db";
+import { get, run } from "@/lib/db";
 
 /**
  * Three-state criterion status.
@@ -348,32 +348,30 @@ export function evaluateAcceptance(input: AcceptanceInputs): AcceptanceResult {
 // Persistence
 // ─────────────────────────────────────────────────────────────────────────
 
-export function recordAcceptance(
+export async function recordAcceptance(
   indexId: string,
   result: AcceptanceResult,
   context: {
     stress_summary?: unknown;
     live_summary?: unknown;
   } = {},
-): string {
+): Promise<string> {
   const id = randomUUID();
-  db()
-    .prepare(
-      `INSERT INTO v2_acceptance
-         (id, index_id, evaluated_at, passed, criteria_json,
-          stress_summary, live_summary)
-       VALUES (@id, @index_id, @evaluated_at, @passed, @criteria_json,
-               @stress_summary, @live_summary)`,
-    )
-    .run({
+  await run(
+    `INSERT INTO v2_acceptance
+       (id, index_id, evaluated_at, passed, criteria_json,
+        stress_summary, live_summary)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
       id,
-      index_id: indexId,
-      evaluated_at: result.evaluated_at,
-      passed: result.passed ? 1 : 0,
-      criteria_json: JSON.stringify(result.criteria),
-      stress_summary: context.stress_summary ? JSON.stringify(context.stress_summary) : null,
-      live_summary: context.live_summary ? JSON.stringify(context.live_summary) : null,
-    });
+      indexId,
+      result.evaluated_at,
+      result.passed ? 1 : 0,
+      JSON.stringify(result.criteria),
+      context.stress_summary ? JSON.stringify(context.stress_summary) : null,
+      context.live_summary ? JSON.stringify(context.live_summary) : null,
+    ],
+  );
   return id;
 }
 
@@ -387,7 +385,9 @@ export interface AcceptanceRecord {
   live_summary: unknown | null;
 }
 
-export function latestAcceptance(indexId: string): AcceptanceRecord | null {
+export async function latestAcceptance(
+  indexId: string,
+): Promise<AcceptanceRecord | null> {
   interface Raw {
     id: string;
     index_id: string;
@@ -397,16 +397,15 @@ export function latestAcceptance(indexId: string): AcceptanceRecord | null {
     stress_summary: string | null;
     live_summary: string | null;
   }
-  const row = db()
-    .prepare<[string], Raw>(
-      `SELECT id, index_id, evaluated_at, passed, criteria_json,
-              stress_summary, live_summary
-       FROM v2_acceptance
-       WHERE index_id = ?
-       ORDER BY evaluated_at DESC
-       LIMIT 1`,
-    )
-    .get(indexId);
+  const row = await get<Raw>(
+    `SELECT id, index_id, evaluated_at, passed, criteria_json,
+            stress_summary, live_summary
+     FROM v2_acceptance
+     WHERE index_id = ?
+     ORDER BY evaluated_at DESC
+     LIMIT 1`,
+    [indexId],
+  );
   if (!row) return null;
   return {
     id: row.id,

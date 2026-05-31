@@ -57,12 +57,12 @@ export async function runTreasuriesIngest(
 
   // Detect newly-tracked companies for the summary.
   const existingTickers = new Set(
-    Treasuries.listCompanies().map((c) => c.ticker),
+    (await Treasuries.listCompanies()).map((c) => c.ticker),
   );
 
   for (const company of filtered) {
     if (!existingTickers.has(company.ticker)) companiesNew++;
-    Treasuries.upsertCompany({
+    await Treasuries.upsertCompany({
       ticker: company.ticker,
       name: company.name,
       list_location: company.list_location ?? null,
@@ -93,7 +93,7 @@ export async function runTreasuriesIngest(
             ? acqCost / btcAcq
             : null;
 
-        Treasuries.upsertPurchase({
+        await Treasuries.upsertPurchase({
           ticker: company.ticker,
           date: p.date,
           btc_holding: btcHolding,

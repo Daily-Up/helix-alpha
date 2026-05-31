@@ -15,7 +15,7 @@
  *    30 days of NAV through the smoothed regime classifier.
  */
 
-import { Assets, db } from "@/lib/db";
+import { Assets, all } from "@/lib/db";
 import type { CandidatePortfolio } from "@/lib/index-fund/types";
 import type { Asset } from "@/lib/universe";
 import {
@@ -41,10 +41,10 @@ const BTC_ID = "tok-btc";
  * Returns null when BTC has no klines at or before asof — the caller
  * skips that cycle rather than synthesizing data.
  */
-export function computeCandidatePortfolioV2AsOf(
+export async function computeCandidatePortfolioV2AsOf(
   asofMs: number,
-): CandidatePortfolio | null {
-  const fullSeries = loadAllSeries();
+): Promise<CandidatePortfolio | null> {
+  const fullSeries = await loadAllSeries();
   const series = new Map<string, DailyBar[]>();
   for (const [k, bars] of fullSeries.entries()) {
     const filtered = bars.filter((b) => b.ts_ms <= asofMs);
@@ -67,7 +67,7 @@ export function computeCandidatePortfolioV2AsOf(
     state.regime = applyRegimeSmoothing(state.regime, raw);
   }
 
-  const signals = loadAggregatedSignalsAsOf(asofMs);
+  const signals = await loadAggregatedSignalsAsOf(asofMs);
   const result = runV2Engine({
     asof_ms: asofMs,
     series,
@@ -78,7 +78,7 @@ export function computeCandidatePortfolioV2AsOf(
   return {
     weights: result.weights,
     cash_weight: result.cash_weight,
-    scores: buildScores(result.weights, result.meta.regime),
+    scores: await buildScores(result.weights, result.meta.regime),
     meta: {
       candidates_considered: series.size,
       above_min_threshold: Object.keys(result.weights).length,
@@ -91,8 +91,8 @@ export function computeCandidatePortfolioV2AsOf(
  * Compute target weights using v2.1. Throws if klines are missing
  * for BTC — v2 is undefined without an anchor price series.
  */
-export function computeCandidatePortfolioV2(): CandidatePortfolio {
-  const series = loadAllSeries();
+export async function computeCandidatePortfolioV2(): Promise<CandidatePortfolio> {
+  const series = await loadAllSeries();
   if (!series.has(BTC_ID)) {
     throw new Error(
       "computeCandidatePortfolioV2: tok-btc kline data missing — cannot run v2 anchor",
@@ -117,7 +117,7 @@ export function computeCandidatePortfolioV2(): CandidatePortfolio {
   }
 
   // Load aggregated 14d signals.
-  const signals = loadAggregatedSignals();
+  const signals = await loadAggregatedSignals();
 
   // We don't know live NAV here — pass a nominal so the breaker uses
   // its peak/current ratio. The setting `paper_starting_balance_usd`
@@ -132,7 +132,7 @@ export function computeCandidatePortfolioV2(): CandidatePortfolio {
   });
 
   // Package into the v1-shaped CandidatePortfolio.
-  const scores = buildScores(result.weights, result.meta.regime);
+  const scores = await buildScores(result.weights, result.meta.regime);
   return {
     weights: result.weights,
     cash_weight: result.cash_weight,
@@ -149,24 +149,18 @@ export function computeCandidatePortfolioV2(): CandidatePortfolio {
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────
 
-function loadAllSeries(): Map<string, DailyBar[]> {
-  const conn = db();
-  const rows = conn
-    .prepare<
-      [],
-      {
-        asset_id: string;
-        date: string;
-        open: number;
-        high: number;
-        low: number;
-        close: number;
-      }
-    >(
-      `SELECT asset_id, date, open, high, low, close FROM klines_daily
-       ORDER BY asset_id, date ASC`,
-    )
-    .all();
+async function loadAllSeries(): Promise<Map<string, DailyBar[]>> {
+  const rows = await all<{
+    asset_id: string;
+    date: string;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+  }>(
+    `SELECT asset_id, date, open, high, low, close FROM klines_daily
+     ORDER BY asset_id, date ASC`,
+  );
   const series = new Map<string, DailyBar[]>();
   for (const r of rows) {
     const ts = Date.parse(r.date + "T00:00:00Z");
@@ -181,8 +175,9 @@ function loadAllSeries(): Map<string, DailyBar[]> {
   return series;
 }
 
-function loadAggregatedSignalsAsOf(asofMs: number): SignalEntry[] {
-  const conn = db();
+async function loadAggregatedSignalsAsOf(
+  asofMs: number,
+): Promise<SignalEntry[]> {
   const windowMs = 14 * 24 * 60 * 60 * 1000;
   const cutoff = asofMs - windowMs;
   interface Row {
@@ -191,13 +186,12 @@ function loadAggregatedSignalsAsOf(asofMs: number): SignalEntry[] {
     confidence: number;
     fired_at: number;
   }
-  const rows = conn
-    .prepare<[number, number], Row>(
-      `SELECT asset_id, direction, confidence, fired_at FROM signals
-       WHERE fired_at >= ? AND fired_at <= ?
-         AND status IN ('pending','executed')`,
-    )
-    .all(cutoff, asofMs);
+  const rows = await all<Row>(
+    `SELECT asset_id, direction, confidence, fired_at FROM signals
+     WHERE fired_at >= ? AND fired_at <= ?
+       AND status IN ('pending','executed')`,
+    [cutoff, asofMs],
+  );
   const agg = new Map<string, number>();
   for (const r of rows) {
     const ageMs = asofMs - r.fired_at;
@@ -211,8 +205,7 @@ function loadAggregatedSignalsAsOf(asofMs: number): SignalEntry[] {
   }));
 }
 
-function loadAggregatedSignals(): SignalEntry[] {
-  const conn = db();
+async function loadAggregatedSignals(): Promise<SignalEntry[]> {
   const cutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
   interface Row {
     asset_id: string;
@@ -220,12 +213,11 @@ function loadAggregatedSignals(): SignalEntry[] {
     confidence: number;
     fired_at: number;
   }
-  const rows = conn
-    .prepare<[number], Row>(
-      `SELECT asset_id, direction, confidence, fired_at FROM signals
-       WHERE fired_at >= ? AND status IN ('pending','executed')`,
-    )
-    .all(cutoff);
+  const rows = await all<Row>(
+    `SELECT asset_id, direction, confidence, fired_at FROM signals
+     WHERE fired_at >= ? AND status IN ('pending','executed')`,
+    [cutoff],
+  );
   const agg = new Map<string, number>();
   const now = Date.now();
   for (const r of rows) {
@@ -240,13 +232,13 @@ function loadAggregatedSignals(): SignalEntry[] {
   }));
 }
 
-function buildScores(
+async function buildScores(
   weights: Record<string, number>,
   regime: string,
-): import("@/lib/index-fund/types").CandidateScore[] {
+): Promise<import("@/lib/index-fund/types").CandidateScore[]> {
   const out: import("@/lib/index-fund/types").CandidateScore[] = [];
   for (const [assetId, w] of Object.entries(weights)) {
-    const a = Assets.getAssetById(assetId);
+    const a = await Assets.getAssetById(assetId);
     if (!a) continue;
     out.push({
       asset: a as Asset,

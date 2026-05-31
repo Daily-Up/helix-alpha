@@ -16,7 +16,15 @@
  * comparison the backfill exists to enable.
  */
 
-import { Assets, IndexFund, Outcomes, ShadowPortfolio, db } from "@/lib/db";
+import {
+  Assets,
+  IndexFund,
+  Outcomes,
+  ShadowPortfolio,
+  all,
+  get,
+  run,
+} from "@/lib/db";
 import { computeCandidatePortfolioV2AsOf } from "@/lib/alphaindex/v2/live-adapter";
 
 export interface BackfillSummary {
@@ -37,23 +45,19 @@ const SHADOW_TARGETS_V2 = { target_pct: 8, stop_pct: 5 };
  * Backfill v2 shadow data for the trailing `lookbackDays` based on
  * existing v1 rebalances.
  */
-export function backfillShadowV2(
+export async function backfillShadowV2(
   indexId = "alphacore",
   lookbackDays = 30,
   startingNav = 10_000,
-): BackfillSummary {
+): Promise<BackfillSummary> {
   const cutoffMs = Date.now() - lookbackDays * DAY_MS;
-  const v1Rebs = db()
-    .prepare<
-      [string, number],
-      { id: string; rebalanced_at: number }
-    >(
-      `SELECT id, rebalanced_at FROM index_rebalances
-       WHERE index_id = ? AND framework_version = 'v1'
-         AND rebalanced_at >= ?
-       ORDER BY rebalanced_at ASC`,
-    )
-    .all(indexId, cutoffMs);
+  const v1Rebs = await all<{ id: string; rebalanced_at: number }>(
+    `SELECT id, rebalanced_at FROM index_rebalances
+     WHERE index_id = ? AND framework_version = 'v1'
+       AND rebalanced_at >= ?
+     ORDER BY rebalanced_at ASC`,
+    [indexId, cutoffMs],
+  );
 
   let rebalancesWritten = 0;
   let rebalancesSkipped = 0;
@@ -64,7 +68,7 @@ export function backfillShadowV2(
   let prevWeights: Record<string, number> | null = null;
   let prevAsof: number | null = null;
 
-  ShadowPortfolio.ensureShadowsSeeded(startingNav);
+  await ShadowPortfolio.ensureShadowsSeeded(startingNav);
 
   for (const v1 of v1Rebs) {
     // ── Mark-to-market across the price window since the last shadow
@@ -72,11 +76,11 @@ export function backfillShadowV2(
     // at the prior asof's prices and applying the change to current
     // asof's prices.
     if (prevWeights && prevAsof != null) {
-      nav = markToMarket(nav, prevWeights, prevAsof, v1.rebalanced_at);
+      nav = await markToMarket(nav, prevWeights, prevAsof, v1.rebalanced_at);
     }
 
     // ── Recompute v2 weights at this historical asof.
-    const candidate = computeCandidatePortfolioV2AsOf(v1.rebalanced_at);
+    const candidate = await computeCandidatePortfolioV2AsOf(v1.rebalanced_at);
     if (!candidate) {
       rebalancesSkipped++;
       console.warn(
@@ -87,13 +91,12 @@ export function backfillShadowV2(
 
     // ── Idempotent write: deterministic id = `shadow-bf-v2-${asof_ms}`
     const rebalanceId = `shadow-bf-v2-${v1.rebalanced_at}`;
-    const exists = db()
-      .prepare<[string], { c: number }>(
-        `SELECT COUNT(*) AS c FROM index_rebalances WHERE id = ?`,
-      )
-      .get(rebalanceId);
+    const exists = await get<{ c: number }>(
+      `SELECT COUNT(*) AS c FROM index_rebalances WHERE id = ?`,
+      [rebalanceId],
+    );
     if ((exists?.c ?? 0) === 0) {
-      IndexFund.insertRebalance({
+      await IndexFund.insertRebalance({
         id: rebalanceId,
         index_id: indexId,
         rebalanced_at: v1.rebalanced_at,
@@ -129,21 +132,22 @@ export function backfillShadowV2(
     // Filtering them out is what produced outcomes_written: 0 in
     // production, since most signals naturally expire after their
     // horizon.
-    const sigs = db()
-      .prepare<[number, number], SigPick>(
-        `SELECT id, asset_id FROM signals
-         WHERE fired_at >= ? AND fired_at <= ?`,
-      )
-      .all(v1.rebalanced_at - 14 * DAY_MS, v1.rebalanced_at);
+    const sigs = await all<SigPick>(
+      `SELECT id, asset_id FROM signals
+       WHERE fired_at >= ? AND fired_at <= ?`,
+      [v1.rebalanced_at - 14 * DAY_MS, v1.rebalanced_at],
+    );
     for (const s of sigs) {
       if (!heldAssets.has(s.asset_id)) continue;
-      const px = priceAtOrBefore(s.asset_id, v1.rebalanced_at);
-      const beforeCount = db()
-        .prepare<[string], { c: number }>(
-          `SELECT COUNT(*) AS c FROM signal_outcomes WHERE signal_id = ?`,
-        )
-        .get(`${s.id}-shadow-v2`)?.c ?? 0;
-      Outcomes.recordShadowOutcomeFromSignal({
+      const px = await priceAtOrBefore(s.asset_id, v1.rebalanced_at);
+      const beforeCount =
+        (
+          await get<{ c: number }>(
+            `SELECT COUNT(*) AS c FROM signal_outcomes WHERE signal_id = ?`,
+            [`${s.id}-shadow-v2`],
+          )
+        )?.c ?? 0;
+      await Outcomes.recordShadowOutcomeFromSignal({
         signal_id: s.id,
         framework_version: "v2",
         asset_class: classifyAssetClass(s.asset_id),
@@ -151,11 +155,13 @@ export function backfillShadowV2(
         target_pct: SHADOW_TARGETS_V2.target_pct,
         stop_pct: SHADOW_TARGETS_V2.stop_pct,
       });
-      const afterCount = db()
-        .prepare<[string], { c: number }>(
-          `SELECT COUNT(*) AS c FROM signal_outcomes WHERE signal_id = ?`,
-        )
-        .get(`${s.id}-shadow-v2`)?.c ?? 0;
+      const afterCount =
+        (
+          await get<{ c: number }>(
+            `SELECT COUNT(*) AS c FROM signal_outcomes WHERE signal_id = ?`,
+            [`${s.id}-shadow-v2`],
+          )
+        )?.c ?? 0;
       if (afterCount > beforeCount) outcomesWritten++;
     }
 
@@ -170,7 +176,7 @@ export function backfillShadowV2(
   // ── Mark-to-market from the last backfill rebalance to "now" so the
   // shadow NAV reflects the current value of the v2 portfolio.
   if (prevWeights && prevAsof != null) {
-    nav = markToMarket(nav, prevWeights, prevAsof, Date.now());
+    nav = await markToMarket(nav, prevWeights, prevAsof, Date.now());
   }
 
   // ── Persist the resulting NAV and started_at.
@@ -179,23 +185,22 @@ export function backfillShadowV2(
       .toISOString()
       .replace("T", " ")
       .slice(0, 19);
-    db()
-      .prepare(
-        `UPDATE shadow_portfolio SET
-           nav_usd = ?,
-           cash_usd = ?,
-           started_at = ?,
-           last_rebalance_at = ?
-         WHERE framework_version = 'v2'`,
-      )
-      .run(
+    await run(
+      `UPDATE shadow_portfolio SET
+         nav_usd = ?,
+         cash_usd = ?,
+         started_at = ?,
+         last_rebalance_at = ?
+       WHERE framework_version = 'v2'`,
+      [
         nav,
         nav * (prevWeights ? cashWeight(prevWeights) : 1),
         startedIso,
         latestAsof
           ? new Date(latestAsof).toISOString().replace("T", " ").slice(0, 19)
           : null,
-      );
+      ],
+    );
   }
 
   return {
@@ -220,18 +225,18 @@ export function backfillShadowV2(
  * price at either endpoint are dropped (assets without klines are
  * treated as static — no fake price).
  */
-function markToMarket(
+async function markToMarket(
   navAtA: number,
   weights: Record<string, number>,
   asofA_ms: number,
   asofB_ms: number,
-): number {
+): Promise<number> {
   let priced = 0;
   let pricedNotional = 0;
   let unpriced = 0;
   for (const [assetId, w] of Object.entries(weights)) {
-    const pa = priceAtOrBefore(assetId, asofA_ms);
-    const pb = priceAtOrBefore(assetId, asofB_ms);
+    const pa = await priceAtOrBefore(assetId, asofA_ms);
+    const pb = await priceAtOrBefore(assetId, asofB_ms);
     if (pa == null || pb == null || pa <= 0) {
       unpriced += w;
       continue;
@@ -251,15 +256,17 @@ function cashWeight(weights: Record<string, number>): number {
   return Math.max(0, 1 - sum);
 }
 
-function priceAtOrBefore(asset_id: string, ts_ms: number): number | null {
+async function priceAtOrBefore(
+  asset_id: string,
+  ts_ms: number,
+): Promise<number | null> {
   const dateStr = new Date(ts_ms).toISOString().slice(0, 10);
-  const row = db()
-    .prepare<[string, string], { close: number }>(
-      `SELECT close FROM klines_daily
-       WHERE asset_id = ? AND date <= ?
-       ORDER BY date DESC LIMIT 1`,
-    )
-    .get(asset_id, dateStr);
+  const row = await get<{ close: number }>(
+    `SELECT close FROM klines_daily
+     WHERE asset_id = ? AND date <= ?
+     ORDER BY date DESC LIMIT 1`,
+    [asset_id, dateStr],
+  );
   if (!row || row.close <= 0) return null;
   return row.close;
 }

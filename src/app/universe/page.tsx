@@ -17,10 +17,10 @@ const KIND_LABEL: Record<string, string> = {
   macro: "Macro",
 };
 
-export default function UniversePage() {
-  const all = Assets.getAllAssets();
-  const grouped = new Map<string, typeof all>();
-  for (const a of all) {
+export default async function UniversePage() {
+  const allAssets = await Assets.getAllAssets();
+  const grouped = new Map<string, typeof allAssets>();
+  for (const a of allAssets) {
     if (!grouped.has(a.kind)) grouped.set(a.kind, []);
     grouped.get(a.kind)!.push(a);
   }
@@ -42,7 +42,7 @@ export default function UniversePage() {
         <header>
           <h1 className="text-xl font-semibold text-fg">Asset Universe</h1>
           <p className="text-sm text-fg-muted">
-            {all.length} instruments tracked across crypto / RWA / ETFs / stocks /
+            {allAssets.length} instruments tracked across crypto / RWA / ETFs / stocks /
             sector indexes / macro indicators.
           </p>
         </header>

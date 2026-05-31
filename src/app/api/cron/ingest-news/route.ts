@@ -31,9 +31,9 @@ async function handle(req: Request): Promise<NextResponse> {
   }
 
   // Ensure assets table is populated before we link events.
-  if (Assets.getAllAssets().length === 0) {
+  if ((await Assets.getAllAssets()).length === 0) {
     const resolved = await resolveUniverse(DEFAULT_UNIVERSE);
-    Assets.upsertAssets(resolved);
+    await Assets.upsertAssets(resolved);
   }
 
   const url = new URL(req.url);

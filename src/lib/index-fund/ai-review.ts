@@ -67,18 +67,19 @@ const reviewTool: Anthropic.Tool = {
   },
 };
 
-function buildPrompt(candidate: CandidatePortfolio): string {
-  // Sort weights desc for readability.
-  const lines = Object.entries(candidate.weights)
-    .sort((a, b) => b[1] - a[1])
-    .map(([id, w]) => {
-      const asset = Assets.getAssetById(id);
-      const sym = asset?.symbol ?? id;
-      const score = candidate.scores.find((s) => s.asset.id === id);
-      const drivers = score?.drivers.join("; ") ?? "anchor allocation";
-      return `  ${id} (${sym}): ${(w * 100).toFixed(2)}%  ← ${drivers}`;
-    })
-    .join("\n");
+async function buildPrompt(candidate: CandidatePortfolio): Promise<string> {
+  const sorted = Object.entries(candidate.weights).sort(
+    (a, b) => b[1] - a[1],
+  );
+  const lineParts: string[] = [];
+  for (const [id, w] of sorted) {
+    const asset = await Assets.getAssetById(id);
+    const sym = asset?.symbol ?? id;
+    const score = candidate.scores.find((s) => s.asset.id === id);
+    const drivers = score?.drivers.join("; ") ?? "anchor allocation";
+    lineParts.push(`  ${id} (${sym}): ${(w * 100).toFixed(2)}%  ← ${drivers}`);
+  }
+  const lines = lineParts.join("\n");
 
   return (
     `Candidate AlphaIndex rebalance. Please sanity-check.\n\n` +
@@ -96,7 +97,7 @@ function buildPrompt(candidate: CandidatePortfolio): string {
 export async function reviewCandidate(
   candidate: CandidatePortfolio,
 ): Promise<ReviewResult> {
-  const settings = Settings.getSettings();
+  const settings = await Settings.getSettings();
   const model = getModel();
 
   // If user disabled Claude review, return the rule output with templated reasoning.
@@ -116,7 +117,7 @@ export async function reviewCandidate(
       max_tokens: 1024,
       tools: [reviewTool],
       tool_choice: { type: "tool", name: "review_index_rebalance" },
-      messages: [{ role: "user", content: buildPrompt(candidate) }],
+      messages: [{ role: "user", content: await buildPrompt(candidate) }],
     });
 
     const toolUse = res.content.find(
@@ -133,9 +134,11 @@ export async function reviewCandidate(
       // Sanity: make sure the sum is reasonable, renormalise to leave room
       // for cash reserve.
       const adj = parsed.adjusted_weights;
-      const validIds = Object.keys(adj).filter(
-        (id) => Assets.getAssetById(id)?.tradable,
-      );
+      const validIds: string[] = [];
+      for (const id of Object.keys(adj)) {
+        const a = await Assets.getAssetById(id);
+        if (a?.tradable) validIds.push(id);
+      }
       const cleaned: Record<string, number> = {};
       let sum = 0;
       for (const id of validIds) {

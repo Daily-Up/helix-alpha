@@ -12,7 +12,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { Briefings, db } from "@/lib/db";
+import { Briefings, get } from "@/lib/db";
 import { Market } from "@/lib/sodex";
 
 export const runtime = "nodejs";
@@ -80,17 +80,16 @@ async function findTopPickTrade(
     asset_relevance: number | null;
     source_tier: number | null;
   }
-  const sig = db()
-    .prepare<[string, string], Row>(
-      `SELECT id, sodex_symbol, tier, confidence, catalyst_subtype,
-              suggested_size_usd, suggested_stop_pct, suggested_target_pct,
-              expected_horizon, expires_at, asset_relevance, source_tier
-       FROM signals
-       WHERE asset_id = ? AND direction = ? AND status = 'pending'
-       ORDER BY confidence DESC
-       LIMIT 1`,
-    )
-    .get(asset_id, direction);
+  const sig = await get<Row>(
+    `SELECT id, sodex_symbol, tier, confidence, catalyst_subtype,
+            suggested_size_usd, suggested_stop_pct, suggested_target_pct,
+            expected_horizon, expires_at, asset_relevance, source_tier
+     FROM signals
+     WHERE asset_id = ? AND direction = ? AND status = 'pending'
+     ORDER BY confidence DESC
+     LIMIT 1`,
+    [asset_id, direction],
+  );
   if (!sig) return null;
 
   // Pull the source event's classification so we can look up the backtest
@@ -100,14 +99,13 @@ async function findTopPickTrade(
     event_type: string;
     sentiment: string;
   }
-  const cls = db()
-    .prepare<[string], ClassRow>(
-      `SELECT c.event_type, c.sentiment
-       FROM signals s
-       JOIN classifications c ON c.event_id = s.triggered_by_event_id
-       WHERE s.id = ?`,
-    )
-    .get(sig.id);
+  const cls = await get<ClassRow>(
+    `SELECT c.event_type, c.sentiment
+     FROM signals s
+     JOIN classifications c ON c.event_id = s.triggered_by_event_id
+     WHERE s.id = ?`,
+    [sig.id],
+  );
 
   let backtest: TopPickTrade["backtest"] = null;
   if (cls) {
@@ -126,18 +124,17 @@ async function findTopPickTrade(
         : cls.sentiment === "negative"
           ? "im.impact_pct_1d < 0"
           : "1=0";
-    const bt = db()
-      .prepare<[string, string], BT>(
-        `SELECT COUNT(*) AS n,
-                ROUND(AVG(im.impact_pct_1d), 2) AS avg_1d,
-                ROUND(AVG(im.impact_pct_3d), 2) AS avg_3d,
-                SUM(CASE WHEN ${aligned} THEN 1 ELSE 0 END) AS hits_1d
-         FROM impact_metrics im
-         JOIN classifications c ON c.event_id = im.event_id
-         WHERE c.event_type = ? AND c.sentiment = ?
-           AND im.impact_pct_1d IS NOT NULL`,
-      )
-      .get(cls.event_type, cls.sentiment);
+    const bt = await get<BT>(
+      `SELECT COUNT(*) AS n,
+              ROUND(AVG(im.impact_pct_1d), 2) AS avg_1d,
+              ROUND(AVG(im.impact_pct_3d), 2) AS avg_3d,
+              SUM(CASE WHEN ${aligned} THEN 1 ELSE 0 END) AS hits_1d
+       FROM impact_metrics im
+       JOIN classifications c ON c.event_id = im.event_id
+       WHERE c.event_type = ? AND c.sentiment = ?
+         AND im.impact_pct_1d IS NOT NULL`,
+      [cls.event_type, cls.sentiment],
+    );
     if (bt && bt.n >= 3) {
       backtest = {
         sample_size: bt.n,
@@ -224,7 +221,7 @@ export async function GET(req: Request) {
   );
 
   if (date) {
-    const single = Briefings.getBriefing(date);
+    const single = await Briefings.getBriefing(date);
     let top_pick_trade: TopPickTrade | null = null;
     if (single?.top_pick) {
       const tp = single.top_pick as {
@@ -236,7 +233,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ briefing: single ?? null, top_pick_trade });
   }
 
-  const latest = Briefings.getLatestBriefing() ?? null;
+  const latest = (await Briefings.getLatestBriefing()) ?? null;
   let top_pick_trade: TopPickTrade | null = null;
   if (latest?.top_pick) {
     const tp = latest.top_pick as { asset_id?: string; direction?: string };
@@ -244,7 +241,7 @@ export async function GET(req: Request) {
   }
 
   // Archive excludes the latest so the UI doesn't render it twice.
-  const archive = Briefings.listBriefings(archiveLimit + 1).filter(
+  const archive = (await Briefings.listBriefings(archiveLimit + 1)).filter(
     (b) => !latest || b.date !== latest.date,
   );
 

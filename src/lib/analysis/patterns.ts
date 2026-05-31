@@ -14,7 +14,7 @@
  *                   negative sentiment → expect price down = hit if pct<0)
  */
 
-import { db } from "@/lib/db";
+import { all } from "@/lib/db";
 
 export type Horizon = "1d" | "3d" | "7d";
 
@@ -46,23 +46,23 @@ export interface PatternsByType {
  * Compute pattern stats for one horizon. Returns one row per
  * (event_type, sentiment) combo with at least 1 sample.
  */
-export function computePatterns(horizon: Horizon = "1d"): PatternStats[] {
+export async function computePatterns(
+  horizon: Horizon = "1d",
+): Promise<PatternStats[]> {
   const col = `impact_pct_${horizon}`;
   interface Row {
     event_type: string;
     sentiment: "positive" | "negative" | "neutral";
     impact: number;
   }
-  const rows = db()
-    .prepare<[], Row>(
-      `SELECT c.event_type AS event_type,
-              c.sentiment  AS sentiment,
-              im.${col}    AS impact
-       FROM impact_metrics im
-       JOIN classifications c ON c.event_id = im.event_id
-       WHERE im.${col} IS NOT NULL`,
-    )
-    .all();
+  const rows = await all<Row>(
+    `SELECT c.event_type AS event_type,
+            c.sentiment  AS sentiment,
+            im.${col}    AS impact
+     FROM impact_metrics im
+     JOIN classifications c ON c.event_id = im.event_id
+     WHERE im.${col} IS NOT NULL`,
+  );
 
   // Group
   const groups = new Map<string, Row[]>();
@@ -120,12 +120,14 @@ export function computePatterns(horizon: Horizon = "1d"): PatternStats[] {
 }
 
 /** All horizons, grouped by event_type. */
-export function computePatternsByEventType(): PatternsByType[] {
+export async function computePatternsByEventType(): Promise<PatternsByType[]> {
   const horizons: Horizon[] = ["1d", "3d", "7d"];
-  const all = horizons.flatMap((h) => computePatterns(h));
+  const allHorizons = (
+    await Promise.all(horizons.map((h) => computePatterns(h)))
+  ).flat();
 
   const byType = new Map<string, PatternStats[]>();
-  for (const p of all) {
+  for (const p of allHorizons) {
     const arr = byType.get(p.event_type) ?? [];
     arr.push(p);
     byType.set(p.event_type, arr);
@@ -166,10 +168,10 @@ export function computePatternsByEventType(): PatternsByType[] {
  * The signal generator wraps this in a bounded resolver so empirical
  * scores can adjust hardcoded baselines but can't crater them.
  */
-export function empiricalTradability(
+export async function empiricalTradability(
   minSamples = 8,
-): Map<string, number | null> {
-  const stats = computePatternsByEventType();
+): Promise<Map<string, number | null>> {
+  const stats = await computePatternsByEventType();
   const out = new Map<string, number | null>();
   for (const t of stats) {
     const oneDay = t.all.filter((s) => s.horizon === "1d");

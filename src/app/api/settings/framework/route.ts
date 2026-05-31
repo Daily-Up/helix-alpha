@@ -46,23 +46,23 @@ export async function POST(req: Request) {
   // Capture context for the switch journal (I-38). Compute trailing
   // 30d returns from each framework's last 30 NAV-history days, where
   // available. Best-effort: if data is sparse the field is null.
-  const settings = Settings.getSettings();
+  const settings = await Settings.getSettings();
   const previous = settings.index_framework_version ?? "v1";
   const switchedFrom = previous as "v1" | "v2";
   const switchedTo = framework as "v1" | "v2";
 
   // Apply the change first.
-  Settings.setSetting("index_framework_version", framework);
+  await Settings.setSetting("index_framework_version", framework);
 
   // Only journal real transitions; clicking the current framework is
   // a no-op.
   if (switchedFrom !== switchedTo) {
     try {
-      const liveShadow = ShadowPortfolio.getShadow(switchedTo);
-      const oldShadow = ShadowPortfolio.getShadow(switchedFrom);
-      const v1Ret = compute30dReturnFromRebalances("alphacore", "v1");
-      const v2Ret = compute30dReturnFromRebalances("alphacore", "v2");
-      FrameworkSwitches.recordSwitch({
+      const liveShadow = await ShadowPortfolio.getShadow(switchedTo);
+      const oldShadow = await ShadowPortfolio.getShadow(switchedFrom);
+      const v1Ret = await compute30dReturnFromRebalances("alphacore", "v1");
+      const v2Ret = await compute30dReturnFromRebalances("alphacore", "v2");
+      await FrameworkSwitches.recordSwitch({
         id: randomUUID(),
         from_version: switchedFrom,
         to_version: switchedTo,
@@ -89,11 +89,11 @@ export async function POST(req: Request) {
  * history. Returns the (last_post_nav − first_pre_nav) / first_pre_nav
  * over the last 30d, or null if fewer than 2 rows exist in the window.
  */
-function compute30dReturnFromRebalances(
+async function compute30dReturnFromRebalances(
   indexId: string,
   fw: "v1" | "v2",
-): number | null {
-  const rebs = IndexFund.listRebalances(indexId, 50)
+): Promise<number | null> {
+  const rebs = (await IndexFund.listRebalances(indexId, 50))
     .filter(
       (r) =>
         (r.framework_version ?? "v1") === fw &&
@@ -108,6 +108,6 @@ function compute30dReturnFromRebalances(
 }
 
 export async function GET() {
-  const s = Settings.getSettings();
+  const s = await Settings.getSettings();
   return NextResponse.json({ ok: true, framework: s.index_framework_version });
 }

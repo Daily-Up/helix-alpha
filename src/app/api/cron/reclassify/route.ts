@@ -14,7 +14,7 @@
 import { NextResponse } from "next/server";
 import { assertCronAuth, cronAuthErrorResponse } from "@/lib/cron-auth";
 import { classifyBatch, CLASSIFY_PROMPT_VERSION } from "@/lib/ai";
-import { db, Cron } from "@/lib/db";
+import { all, run, Cron } from "@/lib/db";
 import type { StoredEvent } from "@/lib/db/repos/events";
 
 export const runtime = "nodejs";
@@ -70,38 +70,31 @@ async function handle(req: Request): Promise<NextResponse> {
       // existing classifications so the new one writes cleanly).
       let rows: EventRow[];
       if (targetIds && targetIds.length > 0) {
-        // Wipe any existing classifications for the targeted ids so the
-        // upsert produces a fresh row under the current prompt_version.
-        const delStmt = db().prepare(
-          "DELETE FROM classifications WHERE event_id = ?",
-        );
-        for (const id of targetIds) delStmt.run(id);
-
+        for (const id of targetIds) {
+          await run("DELETE FROM classifications WHERE event_id = ?", [id]);
+        }
         const placeholders = targetIds.map(() => "?").join(",");
-        rows = db()
-          .prepare<string[], EventRow>(
-            `SELECT * FROM news_events WHERE id IN (${placeholders})`,
-          )
-          .all(...targetIds);
+        rows = await all<EventRow>(
+          `SELECT * FROM news_events WHERE id IN (${placeholders})`,
+          targetIds,
+        );
       } else if (force) {
-        rows = db()
-          .prepare<[number], EventRow>(
-            `SELECT n.* FROM news_events n
-             LEFT JOIN classifications c ON c.event_id = n.id
-             ORDER BY n.release_time DESC LIMIT ?`,
-          )
-          .all(limit);
+        rows = await all<EventRow>(
+          `SELECT n.* FROM news_events n
+           LEFT JOIN classifications c ON c.event_id = n.id
+           ORDER BY n.release_time DESC LIMIT ?`,
+          [limit],
+        );
       } else {
-        rows = db()
-          .prepare<[string, number], EventRow>(
-            `SELECT n.* FROM news_events n
-             LEFT JOIN classifications c ON c.event_id = n.id
-             WHERE c.event_id IS NULL
-                OR c.prompt_version IS NULL
-                OR c.prompt_version != ?
-             ORDER BY n.release_time DESC LIMIT ?`,
-          )
-          .all(CLASSIFY_PROMPT_VERSION, limit);
+        rows = await all<EventRow>(
+          `SELECT n.* FROM news_events n
+           LEFT JOIN classifications c ON c.event_id = n.id
+           WHERE c.event_id IS NULL
+              OR c.prompt_version IS NULL
+              OR c.prompt_version != ?
+           ORDER BY n.release_time DESC LIMIT ?`,
+          [CLASSIFY_PROMPT_VERSION, limit],
+        );
       }
 
       // Convert raw rows into the StoredEvent shape the classifier expects.

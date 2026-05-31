@@ -16,7 +16,7 @@ export async function runSectorsSnapshot(): Promise<SectorsIngestSummary> {
   const t0 = Date.now();
   const data = await Sector.getSectorSpotlight();
   const sectors = data.sector ?? [];
-  Sectors.snapshotSectors(t0, sectors);
+  await Sectors.snapshotSectors(t0, sectors);
   return { sectors_recorded: sectors.length, latency_ms: Date.now() - t0 };
 }
 

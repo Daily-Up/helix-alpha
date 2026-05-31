@@ -5,8 +5,8 @@ import { fmtRelative } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-export default function JobsPage() {
-  const runs = Cron.recentRuns(50);
+export default async function JobsPage() {
+  const runs = await Cron.recentRuns(50);
   return (
     <Shell>
       <div className="flex flex-col gap-5">

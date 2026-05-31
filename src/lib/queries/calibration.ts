@@ -1,19 +1,12 @@
 /**
- * Calibration dashboard SQL aggregates — Part 2.
- *
- * Five pure SQL queries against `signal_outcomes`. No LLM calls; designed
- * to render in <500ms even at 10k+ rows (each query touches one of the
- * indexes added in the schema).
- *
- * Companion tests: tests/calibration-queries.test.ts.
+ * Calibration dashboard SQL aggregates — Part 2. Wave 2: async.
  */
 
-import { db } from "@/lib/db";
+import { all } from "@/lib/db";
 
 interface WindowOpts {
   window_days: number;
   now_ms?: number;
-  /** Filter outcomes to a single framework_version. Omit for "All". */
   frameworkVersion?: "v1" | "v2" | string;
 }
 
@@ -22,19 +15,10 @@ function sinceMs(o: WindowOpts): number {
   return now - o.window_days * 24 * 3600 * 1000;
 }
 
-/**
- * Build a SQL fragment + parameter for the framework filter. When the
- * caller doesn't specify a framework, returns an empty fragment so the
- * existing aggregate path is unchanged.
- */
 function fwFilter(o: WindowOpts): { sql: string; param: string | null } {
   if (!o.frameworkVersion) return { sql: "", param: null };
   return { sql: " AND framework_version = ? ", param: o.frameworkVersion };
 }
-
-// ─────────────────────────────────────────────────────────────────────────
-// Panel 1 — hit rate by tier
-// ─────────────────────────────────────────────────────────────────────────
 
 export interface HitRateByTierRow {
   tier: "auto" | "review" | "info";
@@ -43,14 +27,14 @@ export interface HitRateByTierRow {
   stop_hit: number;
   flat: number;
   dismissed: number;
-  /** sample size of resolved-with-PnL outcomes (target/stop/flat). */
   resolved_sample: number;
-  /** target_hit / resolved_sample (excludes dismissed/blocked/null). */
   hit_rate: number | null;
   mean_realized_pct: number | null;
 }
 
-export function hitRateByTier(o: WindowOpts): HitRateByTierRow[] {
+export async function hitRateByTier(
+  o: WindowOpts,
+): Promise<HitRateByTierRow[]> {
   const since = sinceMs(o);
   const fw = fwFilter(o);
   const sql = `SELECT
@@ -70,7 +54,7 @@ export function hitRateByTier(o: WindowOpts): HitRateByTierRow[] {
        ORDER BY CASE tier WHEN 'auto' THEN 0 WHEN 'review' THEN 1 ELSE 2 END`;
   const params: Array<number | string> = [since];
   if (fw.param) params.push(fw.param);
-  const rows = db().prepare(sql).all(...params) as Array<{
+  const rows = await all<{
     tier: "auto" | "review" | "info";
     sample: number;
     target_hit: number;
@@ -78,7 +62,7 @@ export function hitRateByTier(o: WindowOpts): HitRateByTierRow[] {
     flat: number;
     dismissed: number;
     mean_realized: number | null;
-  }>;
+  }>(sql, params);
 
   return rows.map((r) => {
     const resolved = r.target_hit + r.stop_hit + r.flat;
@@ -96,10 +80,6 @@ export function hitRateByTier(o: WindowOpts): HitRateByTierRow[] {
   });
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// Panel 2 — hit rate by catalyst subtype (n >= 5 only)
-// ─────────────────────────────────────────────────────────────────────────
-
 export interface HitRateBySubtypeRow {
   catalyst_subtype: string;
   sample: number;
@@ -112,9 +92,9 @@ export interface HitRateBySubtypeRow {
   total_pnl_usd: number;
 }
 
-export function hitRateByCatalystSubtype(
+export async function hitRateByCatalystSubtype(
   o: WindowOpts,
-): HitRateBySubtypeRow[] {
+): Promise<HitRateBySubtypeRow[]> {
   const since = sinceMs(o);
   const fw = fwFilter(o);
   const sql = `SELECT
@@ -133,7 +113,7 @@ export function hitRateByCatalystSubtype(
        ORDER BY sample DESC`;
   const params: Array<number | string> = [since];
   if (fw.param) params.push(fw.param);
-  const aggregateRows = db().prepare(sql).all(...params) as Array<{
+  const aggregateRows = await all<{
     catalyst_subtype: string;
     sample: number;
     target_hit: number;
@@ -141,11 +121,8 @@ export function hitRateByCatalystSubtype(
     flat: number;
     mean_realized: number | null;
     total_pnl: number | null;
-  }>;
+  }>(sql, params);
 
-  // SQLite doesn't have a built-in MEDIAN aggregate; pull the realized_pct
-  // distribution per subtype and compute it in JS. Cheap enough at the
-  // scales we're targeting (resolved sample per subtype is in the hundreds).
   const out: HitRateBySubtypeRow[] = [];
   for (const r of aggregateRows) {
     const medianSql = `SELECT realized_pct FROM signal_outcomes
@@ -155,9 +132,10 @@ export function hitRateByCatalystSubtype(
          ORDER BY realized_pct ASC`;
     const medianParams: Array<number | string> = [r.catalyst_subtype, since];
     if (fw.param) medianParams.push(fw.param);
-    const realizedRows = db()
-      .prepare(medianSql)
-      .all(...medianParams) as Array<{ realized_pct: number }>;
+    const realizedRows = await all<{ realized_pct: number }>(
+      medianSql,
+      medianParams,
+    );
     const median = computeMedian(realizedRows.map((x) => x.realized_pct));
 
     const resolved = r.target_hit + r.stop_hit + r.flat;
@@ -185,22 +163,17 @@ function computeMedian(sorted: number[]): number | null {
   return sorted[mid];
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// Panel 3 — conviction calibration curve
-// ─────────────────────────────────────────────────────────────────────────
-
 export interface CalibrationBin {
-  /** Bin lower bound, percent (0,10,20,...,90). */
   bin_start: number;
   bin_end: number;
   sample: number;
-  /** Mean stated conviction within the bin. */
   mean_conviction: number;
-  /** Realized hit rate (target_hit / resolved_sample) within the bin. */
   hit_rate: number | null;
 }
 
-export function convictionCalibrationCurve(o: WindowOpts): CalibrationBin[] {
+export async function convictionCalibrationCurve(
+  o: WindowOpts,
+): Promise<CalibrationBin[]> {
   const since = sinceMs(o);
   const fw = fwFilter(o);
   const sql = `SELECT
@@ -216,13 +189,13 @@ export function convictionCalibrationCurve(o: WindowOpts): CalibrationBin[] {
        ORDER BY bin_start ASC`;
   const params: Array<number | string> = [since];
   if (fw.param) params.push(fw.param);
-  const rows = db().prepare(sql).all(...params) as Array<{
+  const rows = await all<{
     bin_start: number;
     sample: number;
     mean_conviction: number;
     target_hit: number;
     resolved: number;
-  }>;
+  }>(sql, params);
 
   return rows.map((r) => ({
     bin_start: r.bin_start,
@@ -233,10 +206,6 @@ export function convictionCalibrationCurve(o: WindowOpts): CalibrationBin[] {
   }));
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// Panel 4 — PnL by (catalyst_subtype, asset_class)
-// ─────────────────────────────────────────────────────────────────────────
-
 export interface PnlCellRow {
   catalyst_subtype: string;
   asset_class: string;
@@ -245,7 +214,9 @@ export interface PnlCellRow {
   total_pnl_usd: number;
 }
 
-export function pnlBySubtypeAndAssetClass(o: WindowOpts): PnlCellRow[] {
+export async function pnlBySubtypeAndAssetClass(
+  o: WindowOpts,
+): Promise<PnlCellRow[]> {
   const since = sinceMs(o);
   const fw = fwFilter(o);
   const sql = `SELECT
@@ -262,27 +233,21 @@ export function pnlBySubtypeAndAssetClass(o: WindowOpts): PnlCellRow[] {
        ORDER BY sample DESC`;
   const params: Array<number | string> = [since];
   if (fw.param) params.push(fw.param);
-  return (
-    db().prepare(sql).all(...params) as Array<{
-      catalyst_subtype: string;
-      asset_class: string;
-      sample: number;
-      mean_realized: number | null;
-      total_pnl: number | null;
-    }>
-  ).map((r) => ({
-      catalyst_subtype: r.catalyst_subtype,
-      asset_class: r.asset_class,
-      sample: r.sample,
-      mean_realized_pct: r.mean_realized,
-      total_pnl_usd: r.total_pnl ?? 0,
-    }));
+  const rows = await all<{
+    catalyst_subtype: string;
+    asset_class: string;
+    sample: number;
+    mean_realized: number | null;
+    total_pnl: number | null;
+  }>(sql, params);
+  return rows.map((r) => ({
+    catalyst_subtype: r.catalyst_subtype,
+    asset_class: r.asset_class,
+    sample: r.sample,
+    mean_realized_pct: r.mean_realized,
+    total_pnl_usd: r.total_pnl ?? 0,
+  }));
 }
-
-
-// ─────────────────────────────────────────────────────────────────────────
-// Panel 5 — top winners + losers
-// ─────────────────────────────────────────────────────────────────────────
 
 export interface ExtremeOutcomeRow {
   signal_id: string;
@@ -298,9 +263,9 @@ export interface ExtremeOutcomeRow {
   generated_at: number;
 }
 
-export function topWinnersAndLosers(
+export async function topWinnersAndLosers(
   o: WindowOpts & { limit?: number },
-): { winners: ExtremeOutcomeRow[]; losers: ExtremeOutcomeRow[] } {
+): Promise<{ winners: ExtremeOutcomeRow[]; losers: ExtremeOutcomeRow[] }> {
   const since = sinceMs(o);
   const limit = o.limit ?? 10;
   const fw = fwFilter(o);
@@ -328,14 +293,10 @@ export function topWinnersAndLosers(
   }
   winnerParams.push(limit);
   loserParams.push(limit);
-  const winners = db().prepare(winnerSql).all(...winnerParams) as ExtremeOutcomeRow[];
-  const losers = db().prepare(loserSql).all(...loserParams) as ExtremeOutcomeRow[];
+  const winners = await all<ExtremeOutcomeRow>(winnerSql, winnerParams);
+  const losers = await all<ExtremeOutcomeRow>(loserSql, loserParams);
   return { winners, losers };
 }
-
-// ─────────────────────────────────────────────────────────────────────────
-// Part 1 of v2.1 attribution — comparison queries (framework × ...)
-// ─────────────────────────────────────────────────────────────────────────
 
 export interface FrameworkTierRow {
   framework_version: string;
@@ -348,25 +309,11 @@ export interface FrameworkTierRow {
   mean_realized_pct: number | null;
 }
 
-export function getHitRateByFrameworkAndTier(
+export async function getHitRateByFrameworkAndTier(
   o: WindowOpts,
-): FrameworkTierRow[] {
+): Promise<FrameworkTierRow[]> {
   const since = sinceMs(o);
-  const rows = db()
-    .prepare(
-      `SELECT framework_version, tier,
-              SUM(CASE WHEN outcome IN ('target_hit','stop_hit','flat') THEN 1 ELSE 0 END) AS sample,
-              SUM(CASE WHEN outcome = 'target_hit' THEN 1 ELSE 0 END) AS target_hit,
-              SUM(CASE WHEN outcome = 'stop_hit'   THEN 1 ELSE 0 END) AS stop_hit,
-              SUM(CASE WHEN outcome = 'flat'       THEN 1 ELSE 0 END) AS flat,
-              AVG(CASE WHEN outcome IN ('target_hit','stop_hit','flat') THEN realized_pct END) AS mean_realized
-       FROM signal_outcomes
-       WHERE outcome IN ('target_hit','stop_hit','flat')
-         AND generated_at >= ?
-       GROUP BY framework_version, tier
-       ORDER BY framework_version, tier`,
-    )
-    .all(since) as Array<{
+  const rows = await all<{
     framework_version: string;
     tier: "auto" | "review" | "info";
     sample: number;
@@ -374,7 +321,20 @@ export function getHitRateByFrameworkAndTier(
     stop_hit: number;
     flat: number;
     mean_realized: number | null;
-  }>;
+  }>(
+    `SELECT framework_version, tier,
+            SUM(CASE WHEN outcome IN ('target_hit','stop_hit','flat') THEN 1 ELSE 0 END) AS sample,
+            SUM(CASE WHEN outcome = 'target_hit' THEN 1 ELSE 0 END) AS target_hit,
+            SUM(CASE WHEN outcome = 'stop_hit'   THEN 1 ELSE 0 END) AS stop_hit,
+            SUM(CASE WHEN outcome = 'flat'       THEN 1 ELSE 0 END) AS flat,
+            AVG(CASE WHEN outcome IN ('target_hit','stop_hit','flat') THEN realized_pct END) AS mean_realized
+     FROM signal_outcomes
+     WHERE outcome IN ('target_hit','stop_hit','flat')
+       AND generated_at >= ?
+     GROUP BY framework_version, tier
+     ORDER BY framework_version, tier`,
+    [since],
+  );
   return rows.map((r) => ({
     framework_version: r.framework_version,
     tier: r.tier,
@@ -395,31 +355,29 @@ export interface FrameworkSubtypePnlRow {
   total_pnl_usd: number;
 }
 
-export function getPnlByFrameworkAndCatalystSubtype(
+export async function getPnlByFrameworkAndCatalystSubtype(
   o: WindowOpts,
-): FrameworkSubtypePnlRow[] {
+): Promise<FrameworkSubtypePnlRow[]> {
   const since = sinceMs(o);
-  return (
-    db()
-      .prepare(
-        `SELECT framework_version, catalyst_subtype,
-                COUNT(*) AS sample,
-                AVG(realized_pct) AS mean_realized,
-                SUM(realized_pnl_usd) AS total_pnl
-         FROM signal_outcomes
-         WHERE outcome IN ('target_hit','stop_hit','flat')
-           AND generated_at >= ?
-         GROUP BY framework_version, catalyst_subtype
-         ORDER BY framework_version, sample DESC`,
-      )
-      .all(since) as Array<{
-      framework_version: string;
-      catalyst_subtype: string;
-      sample: number;
-      mean_realized: number | null;
-      total_pnl: number | null;
-    }>
-  ).map((r) => ({
+  const rows = await all<{
+    framework_version: string;
+    catalyst_subtype: string;
+    sample: number;
+    mean_realized: number | null;
+    total_pnl: number | null;
+  }>(
+    `SELECT framework_version, catalyst_subtype,
+            COUNT(*) AS sample,
+            AVG(realized_pct) AS mean_realized,
+            SUM(realized_pnl_usd) AS total_pnl
+     FROM signal_outcomes
+     WHERE outcome IN ('target_hit','stop_hit','flat')
+       AND generated_at >= ?
+     GROUP BY framework_version, catalyst_subtype
+     ORDER BY framework_version, sample DESC`,
+    [since],
+  );
+  return rows.map((r) => ({
     framework_version: r.framework_version,
     catalyst_subtype: r.catalyst_subtype,
     sample: r.sample,
@@ -428,12 +386,9 @@ export function getPnlByFrameworkAndCatalystSubtype(
   }));
 }
 
-export function getCalibrationCurveByFramework(
+export async function getCalibrationCurveByFramework(
   o: WindowOpts,
-): CalibrationBin[] {
-  // Same logic as convictionCalibrationCurve but always with a
-  // framework filter. Caller usually passes one fw at a time and
-  // renders the two curves overlayed.
+): Promise<CalibrationBin[]> {
   return convictionCalibrationCurve(o);
 }
 
@@ -450,7 +405,6 @@ export interface FrameworkSummaryEntry {
 export interface FrameworkSummary {
   v1: FrameworkSummaryEntry;
   v2: FrameworkSummaryEntry;
-  /** v2 minus v1 — positive numbers favor v2.1. */
   delta: {
     hit_rate: number;
     total_pnl_usd: number;
@@ -459,23 +413,11 @@ export interface FrameworkSummary {
   };
 }
 
-export function getFrameworkSummary(o: WindowOpts): FrameworkSummary {
+export async function getFrameworkSummary(
+  o: WindowOpts,
+): Promise<FrameworkSummary> {
   const since = sinceMs(o);
-  const rows = db()
-    .prepare(
-      `SELECT framework_version,
-              SUM(CASE WHEN outcome IN ('target_hit','stop_hit','flat') THEN 1 ELSE 0 END) AS sample,
-              SUM(CASE WHEN outcome = 'target_hit' THEN 1 ELSE 0 END) AS target_hit,
-              SUM(CASE WHEN outcome = 'stop_hit'   THEN 1 ELSE 0 END) AS stop_hit,
-              SUM(CASE WHEN outcome = 'flat'       THEN 1 ELSE 0 END) AS flat,
-              SUM(realized_pnl_usd) AS total_pnl,
-              AVG(realized_pct) AS mean_realized
-       FROM signal_outcomes
-       WHERE outcome IN ('target_hit','stop_hit','flat')
-         AND generated_at >= ?
-       GROUP BY framework_version`,
-    )
-    .all(since) as Array<{
+  const rows = await all<{
     framework_version: string;
     sample: number;
     target_hit: number;
@@ -483,7 +425,20 @@ export function getFrameworkSummary(o: WindowOpts): FrameworkSummary {
     flat: number;
     total_pnl: number | null;
     mean_realized: number | null;
-  }>;
+  }>(
+    `SELECT framework_version,
+            SUM(CASE WHEN outcome IN ('target_hit','stop_hit','flat') THEN 1 ELSE 0 END) AS sample,
+            SUM(CASE WHEN outcome = 'target_hit' THEN 1 ELSE 0 END) AS target_hit,
+            SUM(CASE WHEN outcome = 'stop_hit'   THEN 1 ELSE 0 END) AS stop_hit,
+            SUM(CASE WHEN outcome = 'flat'       THEN 1 ELSE 0 END) AS flat,
+            SUM(realized_pnl_usd) AS total_pnl,
+            AVG(realized_pct) AS mean_realized
+     FROM signal_outcomes
+     WHERE outcome IN ('target_hit','stop_hit','flat')
+       AND generated_at >= ?
+     GROUP BY framework_version`,
+    [since],
+  );
   const empty: FrameworkSummaryEntry = {
     sample: 0,
     target_hit: 0,

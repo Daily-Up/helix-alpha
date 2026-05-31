@@ -51,8 +51,8 @@ export async function runKlinesIngest(
   const daysBack = Math.min(90, Math.max(1, opts.daysBack ?? 90));
   const delayMs = opts.delayMs ?? 600;
 
-  const all = Assets.getAllAssets();
-  const targets: Asset[] = all.filter(
+  const allAssets = await Assets.getAllAssets();
+  const targets: Asset[] = allAssets.filter(
     (a) => a.kind === "token" || a.kind === "rwa" || a.kind === "stock",
   );
 
@@ -91,7 +91,7 @@ export async function runKlinesIngest(
         continue;
       }
 
-      const upserted = Klines.upsertKlines(asset.id, klines);
+      const upserted = await Klines.upsertKlines(asset.id, klines);
       candles += upserted;
       tally(asset.kind, upserted, true);
     } catch (err) {

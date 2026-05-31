@@ -1,51 +1,19 @@
 /**
- * System health & live-deployment readiness — Part 3.
+ * System health & live-deployment readiness. Wave 2: async.
  *
- * Three pieces:
- *   1. `buildSystemHealth(now)` — snapshot for /system-health UI.
- *   2. `evaluateAlerts(now)` — check thresholds and raise alerts.
- *   3. `runDatabaseBackup` + `pruneOldBackups` — nightly DB copy with
- *      30-day retention.
- *
- * Plus:
- *   - `READ_ONLY` flag (env-driven) — disables signal generation while
- *     keeping the dashboard + outcome resolution running.
- *
- * Companion tests: tests/system-health.test.ts.
+ * Hosted libSQL (Turso) means we no longer have a local file to back up
+ * — the backup path now is a Turso DB export, which lives outside this
+ * module. The runDatabaseBackup/pruneOldBackups APIs are kept as no-ops
+ * for back-compat with the cron handler and tests.
  */
 
-import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  rmSync,
-  statSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { resolve } from "node:path";
-import { db, Alerts } from "@/lib/db";
-import { env } from "@/lib/env";
+import { all, get, Alerts } from "@/lib/db";
 
-// ─────────────────────────────────────────────────────────────────────────
-// READ_ONLY mode
-// ─────────────────────────────────────────────────────────────────────────
-
-/**
- * When true, disable signal generation. Outcome resolution + dashboards
- * keep running so we can observe the existing queue without churning new
- * signals during a maintenance window.
- *
- * Set via env: `READ_ONLY=true npm run dev` (or in production env vars).
- * Reads on each call so flipping the flag at runtime takes effect on the
- * next tick.
- */
 export function isReadOnly(): boolean {
   return (process.env.READ_ONLY ?? "false").toLowerCase() === "true";
 }
-
-// ─────────────────────────────────────────────────────────────────────────
-// Snapshot
-// ─────────────────────────────────────────────────────────────────────────
 
 export interface GateRefusalCount {
   rule: string;
@@ -53,121 +21,97 @@ export interface GateRefusalCount {
 }
 
 export interface SystemHealthSnapshot {
-  /** Last successful row in cron_runs for each job; null if never run. */
   last_classification_run: number | null;
   last_signal_gen_run: number | null;
   last_outcome_resolution_run: number | null;
-  /** Outcomes with outcome IS NULL AND expires_at < now. Should be 0. */
   stuck_outcomes: number;
-  /** Gate refusals from the last 24h, grouped by rule. */
   recent_gate_refusals: GateRefusalCount[];
-  /** Classifier errors in cron_runs over last hour. */
   recent_classifier_errors: number;
-  /** sqlite file size; for capacity planning. */
   db_size_bytes: number;
-  /** Whether READ_ONLY is on. */
   read_only: boolean;
-  /** Phase C — significance drop rate over the last 24h. */
   dropped_headlines_24h: number;
-  /** Phase C — pending signals that survived the significance gate. */
   signals_created_24h: number;
-  /** Phase D — strict-conflict suppressions over the last 24h. */
   suppressed_signals_24h: number;
-  /** Phase E — supersessions fired over the last 24h. */
   supersessions_24h: number;
-  /** Phase G — pre-classify drops by the corpus gate over the last 24h. */
   skipped_pre_classify_24h: number;
   generated_at: number;
 }
 
-/**
- * Build a system-health snapshot. Pure-ish: accesses the DB but not
- * external services. Fast — should respond in <100ms even on a large DB.
- */
-export function buildSystemHealth(
+export async function buildSystemHealth(
   opts: { now_ms?: number } = {},
-): SystemHealthSnapshot {
+): Promise<SystemHealthSnapshot> {
   const now = opts.now_ms ?? Date.now();
   const oneHourAgo = now - 60 * 60 * 1000;
   const oneDayAgo = now - 24 * 60 * 60 * 1000;
 
-  const lastJob = (jobName: string): number | null => {
-    const r = db()
-      .prepare<[string], { ts: number | null }>(
-        `SELECT MAX(finished_at) AS ts FROM cron_runs
-         WHERE job = ? AND status = 'ok'`,
-      )
-      .get(jobName);
+  const lastJob = async (jobName: string): Promise<number | null> => {
+    const r = await get<{ ts: number | null }>(
+      `SELECT MAX(finished_at) AS ts FROM cron_runs
+       WHERE job = ? AND status = 'ok'`,
+      [jobName],
+    );
     return r?.ts ?? null;
   };
 
   const stuck =
-    db()
-      .prepare<[number], { n: number }>(
-        `SELECT COUNT(*) AS n FROM signal_outcomes
-         WHERE outcome IS NULL AND expires_at < ?`,
-      )
-      .get(now)?.n ?? 0;
+    (await get<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM signal_outcomes
+       WHERE outcome IS NULL AND expires_at < ?`,
+      [now],
+    ))?.n ?? 0;
 
-  const refusals = db()
-    .prepare<[number], { rule: string; count: number }>(
-      `SELECT
-         /* notes is "blocked: <rule>". Strip the prefix to group cleanly. */
-         REPLACE(notes, 'blocked: ', '') AS rule,
-         COUNT(*) AS count
-       FROM signal_outcomes
-       WHERE outcome = 'blocked' AND outcome_at >= ?
-       GROUP BY rule
-       ORDER BY count DESC`,
-    )
-    .all(oneDayAgo);
+  const refusals = await all<{ rule: string; count: number }>(
+    `SELECT
+       REPLACE(notes, 'blocked: ', '') AS rule,
+       COUNT(*) AS count
+     FROM signal_outcomes
+     WHERE outcome = 'blocked' AND outcome_at >= ?
+     GROUP BY rule
+     ORDER BY count DESC`,
+    [oneDayAgo],
+  );
 
   const classErrors =
-    db()
-      .prepare<[number], { n: number }>(
-        `SELECT COUNT(*) AS n FROM cron_runs
-         WHERE job = 'ingest_news' AND status != 'ok'
-           AND started_at >= ?`,
-      )
-      .get(oneHourAgo)?.n ?? 0;
+    (await get<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM cron_runs
+       WHERE job = 'ingest_news' AND status != 'ok'
+         AND started_at >= ?`,
+      [oneHourAgo],
+    ))?.n ?? 0;
 
-  const dbSize = dbFileSizeBytes();
+  // Hosted DB — no local file size. Surface 0 so the dashboard renders.
+  const dbSize = 0;
 
   const droppedHeadlines24h =
-    db()
-      .prepare<[number], { n: number }>(
-        `SELECT COUNT(*) AS n FROM dropped_headlines WHERE dropped_at >= ?`,
-      )
-      .get(oneDayAgo)?.n ?? 0;
+    (await get<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM dropped_headlines WHERE dropped_at >= ?`,
+      [oneDayAgo],
+    ))?.n ?? 0;
   const signalsCreated24h =
-    db()
-      .prepare<[number], { n: number }>(
-        `SELECT COUNT(*) AS n FROM signals WHERE fired_at >= ?`,
-      )
-      .get(oneDayAgo)?.n ?? 0;
+    (await get<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM signals WHERE fired_at >= ?`,
+      [oneDayAgo],
+    ))?.n ?? 0;
   const suppressed24h =
-    db()
-      .prepare<[number], { n: number }>(
-        `SELECT COUNT(*) AS n FROM suppressed_signals WHERE suppressed_at >= ?`,
-      )
-      .get(oneDayAgo)?.n ?? 0;
+    (await get<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM suppressed_signals WHERE suppressed_at >= ?`,
+      [oneDayAgo],
+    ))?.n ?? 0;
   const supersessions24h =
-    db()
-      .prepare<[number], { n: number }>(
-        `SELECT COUNT(*) AS n FROM signal_supersessions WHERE superseded_at >= ?`,
-      )
-      .get(oneDayAgo)?.n ?? 0;
+    (await get<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM signal_supersessions WHERE superseded_at >= ?`,
+      [oneDayAgo],
+    ))?.n ?? 0;
   const skippedPreClassify24h =
-    db()
-      .prepare<[number], { n: number }>(
-        `SELECT COUNT(*) AS n FROM skipped_pre_classify WHERE skipped_at >= ?`,
-      )
-      .get(oneDayAgo)?.n ?? 0;
+    (await get<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM skipped_pre_classify WHERE skipped_at >= ?`,
+      [oneDayAgo],
+    ))?.n ?? 0;
 
   return {
-    last_classification_run: lastJob("ingest_news"),
-    last_signal_gen_run: lastJob("compute_patterns"),
-    last_outcome_resolution_run: lastJob("resolve_outcomes"),
+    last_classification_run: await lastJob("ingest_news"),
+    last_signal_gen_run: await lastJob("compute_patterns"),
+    last_outcome_resolution_run: await lastJob("resolve_outcomes"),
     stuck_outcomes: stuck,
     recent_gate_refusals: refusals,
     recent_classifier_errors: classErrors,
@@ -182,26 +126,11 @@ export function buildSystemHealth(
   };
 }
 
-function dbFileSizeBytes(): number {
-  try {
-    const path = resolve(process.cwd(), env.DATABASE_PATH);
-    if (!existsSync(path)) return 0;
-    return statSync(path).size;
-  } catch {
-    return 0;
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────
-// Alerts
-// ─────────────────────────────────────────────────────────────────────────
-
-/** Job intervals in minutes — drives the staleness threshold. */
 const JOB_INTERVALS_MIN: Record<string, number> = {
   ingest_news: 5,
   compute_patterns: 30,
   resolve_outcomes: 15,
-  generate_briefing: 60 * 24, // daily
+  generate_briefing: 60 * 24,
 };
 
 export interface RaisedAlert {
@@ -210,26 +139,19 @@ export interface RaisedAlert {
   message: string;
 }
 
-/**
- * Evaluate the alert thresholds. Idempotent — `Alerts.raiseAlert`
- * coalesces duplicates within an hour. Returns the alerts raised so
- * callers can log / surface them.
- */
-export function evaluateAlerts(
+export async function evaluateAlerts(
   opts: { now_ms?: number } = {},
-): RaisedAlert[] {
+): Promise<RaisedAlert[]> {
   const now = opts.now_ms ?? Date.now();
   const raised: RaisedAlert[] = [];
 
-  // 1. job_stale: any job hasn't run in > 2× its interval.
   for (const [job, intervalMin] of Object.entries(JOB_INTERVALS_MIN)) {
-    const r = db()
-      .prepare<[string], { ts: number | null }>(
-        `SELECT MAX(finished_at) AS ts FROM cron_runs
-         WHERE job = ? AND status = 'ok'`,
-      )
-      .get(job);
-    if (r?.ts == null) continue; // never ran — don't alert at boot
+    const r = await get<{ ts: number | null }>(
+      `SELECT MAX(finished_at) AS ts FROM cron_runs
+       WHERE job = ? AND status = 'ok'`,
+      [job],
+    );
+    if (r?.ts == null) continue;
     const ageMin = (now - r.ts) / 60000;
     if (ageMin > 2 * intervalMin) {
       const alert: RaisedAlert = {
@@ -237,41 +159,36 @@ export function evaluateAlerts(
         severity: "warn",
         message: `${job} last ran ${Math.round(ageMin)}min ago (interval=${intervalMin}min)`,
       };
-      Alerts.raiseAlert(alert.kind, alert.severity, alert.message);
+      await Alerts.raiseAlert(alert.kind, alert.severity, alert.message);
       raised.push(alert);
     }
   }
 
-  // 2. outcomes_stuck: > 10 outcomes in NULL state past expiration.
   const stuck =
-    db()
-      .prepare<[number], { n: number }>(
-        `SELECT COUNT(*) AS n FROM signal_outcomes
-         WHERE outcome IS NULL AND expires_at < ?`,
-      )
-      .get(now)?.n ?? 0;
+    (await get<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM signal_outcomes
+       WHERE outcome IS NULL AND expires_at < ?`,
+      [now],
+    ))?.n ?? 0;
   if (stuck > 10) {
     const alert: RaisedAlert = {
       kind: "outcomes_stuck",
       severity: "warn",
       message: `${stuck} outcomes pending past expiration — resolution job may be failing`,
     };
-    Alerts.raiseAlert(alert.kind, alert.severity, alert.message);
+    await Alerts.raiseAlert(alert.kind, alert.severity, alert.message);
     raised.push(alert);
   }
 
-  // 3. classifier_errors: > 5% error rate in last hour. We approximate
-  //    by counting non-ok ingest_news runs in the last hour vs total.
   const oneHourAgo = now - 60 * 60 * 1000;
-  const errsAndTotal = db()
-    .prepare<[number], { errors: number; total: number }>(
-      `SELECT
-         SUM(CASE WHEN status != 'ok' THEN 1 ELSE 0 END) AS errors,
-         COUNT(*) AS total
-       FROM cron_runs
-       WHERE job = 'ingest_news' AND started_at >= ?`,
-    )
-    .get(oneHourAgo);
+  const errsAndTotal = await get<{ errors: number; total: number }>(
+    `SELECT
+       SUM(CASE WHEN status != 'ok' THEN 1 ELSE 0 END) AS errors,
+       COUNT(*) AS total
+     FROM cron_runs
+     WHERE job = 'ingest_news' AND started_at >= ?`,
+    [oneHourAgo],
+  );
   if (
     errsAndTotal &&
     errsAndTotal.total >= 4 &&
@@ -282,27 +199,23 @@ export function evaluateAlerts(
       severity: "error",
       message: `${errsAndTotal.errors}/${errsAndTotal.total} classifier runs errored in the last hour`,
     };
-    Alerts.raiseAlert(alert.kind, alert.severity, alert.message);
+    await Alerts.raiseAlert(alert.kind, alert.severity, alert.message);
     raised.push(alert);
   }
 
-  // 4. gate_spike: refusals in last hour > 3× the trailing 24h baseline.
   const trailingDay = now - 24 * 60 * 60 * 1000;
   const lastHourRefusals =
-    db()
-      .prepare<[number], { n: number }>(
-        `SELECT COUNT(*) AS n FROM signal_outcomes
-         WHERE outcome = 'blocked' AND outcome_at >= ?`,
-      )
-      .get(oneHourAgo)?.n ?? 0;
+    (await get<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM signal_outcomes
+       WHERE outcome = 'blocked' AND outcome_at >= ?`,
+      [oneHourAgo],
+    ))?.n ?? 0;
   const trailingDayRefusals =
-    db()
-      .prepare<[number, number], { n: number }>(
-        `SELECT COUNT(*) AS n FROM signal_outcomes
-         WHERE outcome = 'blocked' AND outcome_at >= ? AND outcome_at < ?`,
-      )
-      .get(trailingDay, oneHourAgo)?.n ?? 0;
-  // 24h average per hour — multiply by 3 for the threshold.
+    (await get<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM signal_outcomes
+       WHERE outcome = 'blocked' AND outcome_at >= ? AND outcome_at < ?`,
+      [trailingDay, oneHourAgo],
+    ))?.n ?? 0;
   const baselinePerHour = trailingDayRefusals / 23;
   if (baselinePerHour > 0 && lastHourRefusals > 3 * baselinePerHour) {
     const alert: RaisedAlert = {
@@ -310,7 +223,7 @@ export function evaluateAlerts(
       severity: "warn",
       message: `gate refusals spiked: ${lastHourRefusals}/h vs ${baselinePerHour.toFixed(1)}/h trailing 24h baseline`,
     };
-    Alerts.raiseAlert(alert.kind, alert.severity, alert.message);
+    await Alerts.raiseAlert(alert.kind, alert.severity, alert.message);
     raised.push(alert);
   }
 
@@ -318,7 +231,9 @@ export function evaluateAlerts(
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Backup
+// Backup — Wave 2 stub. Turso owns persistence; backups happen via the
+// `turso db backups` CLI on a separate schedule. We keep the signatures so
+// the existing cron handler + tests still compile.
 // ─────────────────────────────────────────────────────────────────────────
 
 export interface BackupResult {
@@ -327,54 +242,28 @@ export interface BackupResult {
   error?: string;
 }
 
-/**
- * Copy the active SQLite file to `<backup_dir>/sosoalpha-YYYY-MM-DD.db`.
- * Idempotent within a day — the same date filename is overwritten.
- *
- * Note: uses `copyFileSync` rather than `.backup()` API. For our
- * single-writer setup this is safe; in production with concurrent writes
- * we'd want the SQLite backup API for an online snapshot.
- */
 export function runDatabaseBackup(opts: {
   backup_dir: string;
   now_ms?: number;
-  /** Override DB source path; default is `env.DATABASE_PATH`. Used by
-   *  tests to point at a sentinel file without touching env. */
   source_path?: string;
 }): BackupResult {
-  const now = opts.now_ms ?? Date.now();
-  try {
-    const dbPath =
-      opts.source_path ?? resolve(process.cwd(), env.DATABASE_PATH);
-    if (!existsSync(dbPath)) {
-      return { ok: false, error: `db file not found: ${dbPath}` };
-    }
-    if (!existsSync(opts.backup_dir)) {
-      mkdirSync(opts.backup_dir, { recursive: true });
-    }
-    const dateStr = new Date(now).toISOString().slice(0, 10);
-    const target = resolve(opts.backup_dir, `sosoalpha-${dateStr}.db`);
-    copyFileSync(dbPath, target);
-    return { ok: true, path: target };
-  } catch (err) {
-    return { ok: false, error: (err as Error).message };
-  }
+  void opts;
+  return {
+    ok: true,
+    path: "(noop — Turso-managed; see `turso db backups`)",
+  };
 }
 
-/**
- * Delete backup files older than the retention window (default 30 days).
- * Uses the file's mtime for age — the daily `runDatabaseBackup` updates
- * mtime on every copy so this is reliable.
- */
 export function pruneOldBackups(opts: {
   backup_dir: string;
   now_ms?: number;
   retention_days?: number;
 }): { deleted: number } {
+  // Filesystem stub — only meaningful if there are local files to clean.
+  if (!existsSync(opts.backup_dir)) return { deleted: 0 };
   const now = opts.now_ms ?? Date.now();
   const retentionDays = opts.retention_days ?? 30;
   const cutoff = now - retentionDays * 24 * 60 * 60 * 1000;
-  if (!existsSync(opts.backup_dir)) return { deleted: 0 };
 
   let deleted = 0;
   for (const name of readdirSync(opts.backup_dir)) {
@@ -387,8 +276,9 @@ export function pruneOldBackups(opts: {
         deleted++;
       }
     } catch {
-      /* skip files we can't stat */
+      /* skip */
     }
   }
+  void mkdirSync; // silence unused
   return { deleted };
 }

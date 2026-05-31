@@ -22,12 +22,12 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const indexId = url.searchParams.get("id") ?? "alphacore";
 
-  const idx = IndexFund.getIndex(indexId);
+  const idx = await IndexFund.getIndex(indexId);
   if (!idx) {
     return NextResponse.json({ ok: false, error: "index not found" }, { status: 404 });
   }
 
-  const rows = IndexFund.listSignalAttributions(indexId, 30);
+  const rows = await IndexFund.listSignalAttributions(indexId, 30);
   if (rows.length === 0) {
     return NextResponse.json({
       ok: true,
@@ -48,7 +48,7 @@ export async function GET(req: Request) {
   }
   const symbols: Record<string, { symbol: string; name: string }> = {};
   for (const id of allAssetIds) {
-    const a = Assets.getAssetById(id);
+    const a = await Assets.getAssetById(id);
     if (a) symbols[id] = { symbol: a.symbol, name: a.name };
   }
 

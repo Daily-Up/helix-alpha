@@ -38,9 +38,9 @@ export async function runETFIngest(
   const limit = Math.min(300, Math.max(1, opts.limit ?? 30));
   const delayMs = opts.delayMs ?? 600;
 
-  const all = Assets.getAllAssets();
-  const aggregates = all.filter((a): a is Asset => a.kind === "etf_aggregate");
-  const funds = all.filter((a): a is Asset => a.kind === "etf_fund");
+  const allAssets = await Assets.getAllAssets();
+  const aggregates = allAssets.filter((a): a is Asset => a.kind === "etf_aggregate");
+  const funds = allAssets.filter((a): a is Asset => a.kind === "etf_fund");
 
   let aggRows = 0;
   let aggFailed = 0;
@@ -59,7 +59,7 @@ export async function runETFIngest(
         country_code: country,
         limit,
       });
-      aggRows += ETFFlows.upsertAggregateFlows(symbol, country, rows);
+      aggRows += await ETFFlows.upsertAggregateFlows(symbol, country, rows);
     } catch (err) {
       aggFailed++;
       errors.push({
@@ -76,7 +76,7 @@ export async function runETFIngest(
     const ticker = f.sosovalue.ticker;
     try {
       const rows = await ETFs.getETFHistory(ticker, { limit });
-      fundRows += ETFFlows.upsertFundFlows(rows);
+      fundRows += await ETFFlows.upsertFundFlows(rows);
     } catch (err) {
       fundFailed++;
       errors.push({

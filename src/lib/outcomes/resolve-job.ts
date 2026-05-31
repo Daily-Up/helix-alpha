@@ -1,21 +1,8 @@
 /**
- * Resolution job — Part 1.
- *
- * Walks `signal_outcomes WHERE outcome IS NULL`, fetches the price
- * window from klines_daily, and applies the pure `resolveOutcome` to
- * each. Verdicts:
- *
- *   target_hit / stop_hit / flat → applyResolution writes the outcome
- *   pending                       → leave NULL, retry next run
- *
- * Designed to run every 15 minutes (call site: src/jobs/resolve-outcomes.ts
- * via the existing cron tick). Idempotent.
- *
- * Backfill: same code path. `runResolutionJob` returns counts; callers
- * can call it once at boot to backfill historical signals.
+ * Resolution job — Part 1. Wave 2: async.
  */
 
-import { db, Outcomes } from "@/lib/db";
+import { all, get, Outcomes } from "@/lib/db";
 import {
   resolveOutcome,
   type DailyKline,
@@ -32,15 +19,11 @@ export interface ResolutionJobResult {
   errors: number;
 }
 
-/**
- * Run one pass of the resolution job. Pure orchestration on top of the
- * pure `resolveOutcome` and the outcomes repo.
- */
-export function runResolutionJob(
+export async function runResolutionJob(
   opts: { now?: number } = {},
-): ResolutionJobResult {
+): Promise<ResolutionJobResult> {
   const now = opts.now ?? Date.now();
-  const pending = Outcomes.listPendingOutcomes();
+  const pending = await Outcomes.listPendingOutcomes();
   const result: ResolutionJobResult = {
     pending_before: pending.length,
     resolved_target_hit: 0,
@@ -53,9 +36,8 @@ export function runResolutionJob(
 
   for (const row of pending) {
     try {
-      const klines = klinesForWindow(row.asset_id, row.generated_at, now);
+      const klines = await klinesForWindow(row.asset_id, row.generated_at, now);
       if (klines.length === 0 && now <= row.expires_at) {
-        // No price data yet AND horizon hasn't passed — wait.
         result.skipped_no_prices++;
         result.still_pending++;
         continue;
@@ -74,7 +56,7 @@ export function runResolutionJob(
         result.still_pending++;
         continue;
       }
-      Outcomes.applyResolution(row.signal_id, {
+      await Outcomes.applyResolution(row.signal_id, {
         outcome: verdict.outcome,
         outcome_at_ms: verdict.outcome_at_ms ?? now,
         price_at_outcome: verdict.price_at_outcome,
@@ -93,31 +75,22 @@ export function runResolutionJob(
   return result;
 }
 
-/**
- * Backfill outcomes for signals that fired BEFORE the outcomes table
- * existed. For each pending signal that lacks an outcome row, insert
- * the row, then run the resolution pass.
- *
- * Skips signals whose asset has no klines_daily history at all.
- */
-export function backfillOutcomesForExistingSignals(): {
+export async function backfillOutcomesForExistingSignals(): Promise<{
   inserted: number;
   skipped_no_asset_class: number;
   skipped_no_klines: number;
-} {
+}> {
   interface SigRow {
     id: string;
     asset_id: string;
     fired_at: number;
   }
-  const stragglers = db()
-    .prepare<[], SigRow>(
-      `SELECT s.id, s.asset_id, s.fired_at
-       FROM signals s
-       LEFT JOIN signal_outcomes o ON o.signal_id = s.id
-       WHERE o.signal_id IS NULL`,
-    )
-    .all();
+  const stragglers = await all<SigRow>(
+    `SELECT s.id, s.asset_id, s.fired_at
+     FROM signals s
+     LEFT JOIN signal_outcomes o ON o.signal_id = s.id
+     WHERE o.signal_id IS NULL`,
+  );
 
   const out = {
     inserted: 0,
@@ -126,32 +99,30 @@ export function backfillOutcomesForExistingSignals(): {
   };
 
   for (const sig of stragglers) {
-    // Resolve asset class. Pulled here to avoid a circular import on
-    // signal-generator's `classifyAssetClass` import path.
     interface AssetRow {
       kind: string;
       symbol: string;
     }
-    const a = db()
-      .prepare<[string], AssetRow>(
-        `SELECT kind, symbol FROM assets WHERE id = ?`,
-      )
-      .get(sig.asset_id);
+    const a = await get<AssetRow>(
+      `SELECT kind, symbol FROM assets WHERE id = ?`,
+      [sig.asset_id],
+    );
     if (!a) {
       out.skipped_no_asset_class++;
       continue;
     }
-    const klines = klinesForWindow(sig.asset_id, sig.fired_at, Date.now());
+    const klines = await klinesForWindow(sig.asset_id, sig.fired_at, Date.now());
     if (klines.length === 0) {
       out.skipped_no_klines++;
       continue;
     }
-    // priceAtOrBefore for fire time — fall back to first available kline.
     const catalystPrice =
-      priceAtOrBefore(sig.asset_id, sig.fired_at) ?? klines[0]?.close ?? null;
+      (await priceAtOrBefore(sig.asset_id, sig.fired_at)) ??
+      klines[0]?.close ??
+      null;
 
     try {
-      Outcomes.insertOutcomeFromSignal({
+      await Outcomes.insertOutcomeFromSignal({
         signal_id: sig.id,
         asset_class: classifyForBackfill(a),
         price_at_generation: catalystPrice,
@@ -166,16 +137,11 @@ export function backfillOutcomesForExistingSignals(): {
   return out;
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// Helpers — klines fetch + asset_class lookup duplicated locally to avoid
-// pulling signal-generator into the outcomes module
-// ─────────────────────────────────────────────────────────────────────────
-
-function klinesForWindow(
+async function klinesForWindow(
   assetId: string,
   fromMs: number,
   toMs: number,
-): DailyKline[] {
+): Promise<DailyKline[]> {
   const fromDate = new Date(fromMs).toISOString().slice(0, 10);
   const toDate = new Date(toMs).toISOString().slice(0, 10);
   interface Row {
@@ -185,13 +151,12 @@ function klinesForWindow(
     low: number;
     close: number;
   }
-  const rows = db()
-    .prepare<[string, string, string], Row>(
-      `SELECT date, open, high, low, close FROM klines_daily
-       WHERE asset_id = ? AND date >= ? AND date <= ?
-       ORDER BY date ASC`,
-    )
-    .all(assetId, fromDate, toDate);
+  const rows = await all<Row>(
+    `SELECT date, open, high, low, close FROM klines_daily
+     WHERE asset_id = ? AND date >= ? AND date <= ?
+     ORDER BY date ASC`,
+    [assetId, fromDate, toDate],
+  );
   return rows.map((r) => ({
     asset_id: assetId,
     date: r.date,
@@ -207,22 +172,20 @@ function klinesForWindow(
   }));
 }
 
-function priceAtOrBefore(assetId: string, ts: number): number | null {
+async function priceAtOrBefore(
+  assetId: string,
+  ts: number,
+): Promise<number | null> {
   const date = new Date(ts).toISOString().slice(0, 10);
-  const r = db()
-    .prepare<[string, string], { close: number }>(
-      `SELECT close FROM klines_daily
-       WHERE asset_id = ? AND date <= ?
-       ORDER BY date DESC LIMIT 1`,
-    )
-    .get(assetId, date);
+  const r = await get<{ close: number }>(
+    `SELECT close FROM klines_daily
+     WHERE asset_id = ? AND date <= ?
+     ORDER BY date DESC LIMIT 1`,
+    [assetId, date],
+  );
   return r && r.close > 0 ? r.close : null;
 }
 
-/** Local copy of the simple asset_class classifier used by base-rates.
- *  Intentionally NOT imported from base-rates so the backfill can run
- *  in isolation. Falls back to "small_cap_crypto" / "broad_equity" when
- *  the symbol isn't in the curated lists. */
 function classifyForBackfill(a: { kind: string; symbol: string }): string {
   const s = a.symbol.toUpperCase();
   if (a.kind === "token" || a.kind === "rwa") {

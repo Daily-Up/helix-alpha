@@ -19,7 +19,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   const t0 = Date.now();
-  const periods = discoverReplayPeriods();
+  const periods = await discoverReplayPeriods();
   if (periods.length === 0) {
     return NextResponse.json({
       ok: false,
@@ -29,8 +29,10 @@ export async function GET() {
       latency_ms: Date.now() - t0,
     });
   }
-  const replays = periods.map((p) =>
-    runHistoricalReplay(p.start_date, p.end_date, p.label),
+  const replays = await Promise.all(
+    periods.map((p) =>
+      runHistoricalReplay(p.start_date, p.end_date, p.label),
+    ),
   );
   return NextResponse.json({
     ok: true,

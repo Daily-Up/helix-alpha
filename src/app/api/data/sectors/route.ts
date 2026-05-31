@@ -34,7 +34,7 @@ export async function GET() {
   const sectors = Sectors.getLatestSectors();
 
   // ── SSI index momentum (live) ─────────────────────────────────
-  const indexAssets = Assets.getAssetsByKind("index");
+  const indexAssets = await Assets.getAssetsByKind("index");
   const indices: IndexRow[] = [];
 
   // Sequential to respect rate limits.

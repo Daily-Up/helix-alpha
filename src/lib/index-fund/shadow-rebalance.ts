@@ -22,7 +22,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { Assets, IndexFund, Outcomes, ShadowPortfolio, db } from "@/lib/db";
+import { Assets, IndexFund, Outcomes, ShadowPortfolio, all, get } from "@/lib/db";
 import { Market } from "@/lib/sodex";
 import { computeCandidatePortfolio } from "./weights";
 import { computeCandidatePortfolioV2 } from "@/lib/alphaindex/v2/live-adapter";
@@ -59,8 +59,8 @@ export async function runShadowRebalance(
   const shadowFw: "v1" | "v2" = liveFramework === "v1" ? "v2" : "v1";
 
   // ── 1. Read shadow's previous state
-  ShadowPortfolio.ensureShadowsSeeded(10_000);
-  const shadow = ShadowPortfolio.getShadow(shadowFw);
+  await ShadowPortfolio.ensureShadowsSeeded(10_000);
+  const shadow = await ShadowPortfolio.getShadow(shadowFw);
   if (!shadow) {
     throw new Error(`shadow ${shadowFw} row missing after seed`);
   }
@@ -68,16 +68,12 @@ export async function runShadowRebalance(
 
   // ── 2. Mark-to-market against the previous rebalance's new_weights.
   // We pull the most recent rebalance for this index AND framework.
-  const lastReb = db()
-    .prepare<
-      [string, string],
-      { new_weights: string; rebalanced_at: number }
-    >(
-      `SELECT new_weights, rebalanced_at FROM index_rebalances
-       WHERE index_id = ? AND framework_version = ?
-       ORDER BY rebalanced_at DESC LIMIT 1`,
-    )
-    .get(indexId, shadowFw);
+  const lastReb = await get<{ new_weights: string; rebalanced_at: number }>(
+    `SELECT new_weights, rebalanced_at FROM index_rebalances
+     WHERE index_id = ? AND framework_version = ?
+     ORDER BY rebalanced_at DESC LIMIT 1`,
+    [indexId, shadowFw],
+  );
 
   let postPnLNav = prevNav;
   if (lastReb) {
@@ -90,21 +86,17 @@ export async function runShadowRebalance(
     let nextNotional = 0;
     let oldNotional = 0;
     for (const [assetId, w] of Object.entries(oldWeights)) {
-      const a = Assets.getAssetById(assetId);
+      const a = await Assets.getAssetById(assetId);
       if (!a?.tradable) continue;
       const sodex = a.tradable.symbol;
       const livePx = livePrice(tickers, sodex);
-      const klineRow = db()
-        .prepare<
-          [string, number],
-          { close: number }
-        >(
-          `SELECT close FROM klines_daily
-           WHERE asset_id = ?
-             AND date <= date(?, 'unixepoch')
-           ORDER BY date DESC LIMIT 1`,
-        )
-        .get(assetId, lastReb.rebalanced_at / 1000);
+      const klineRow = await get<{ close: number }>(
+        `SELECT close FROM klines_daily
+         WHERE asset_id = ?
+           AND date <= date(?, 'unixepoch')
+         ORDER BY date DESC LIMIT 1`,
+        [assetId, lastReb.rebalanced_at / 1000],
+      );
       if (livePx == null || !klineRow || klineRow.close <= 0) continue;
       const dollarsAtRebalance = prevNav * w;
       const qty = dollarsAtRebalance / klineRow.close;
@@ -122,11 +114,13 @@ export async function runShadowRebalance(
 
   // ── 3. Compute fresh shadow weights
   const candidate =
-    shadowFw === "v2" ? computeCandidatePortfolioV2() : computeCandidatePortfolio();
+    shadowFw === "v2"
+      ? await computeCandidatePortfolioV2()
+      : await computeCandidatePortfolio();
 
   // ── 4. Persist the new shadow NAV
   const cashUsd = postPnLNav * candidate.cash_weight;
-  ShadowPortfolio.updateShadow(
+  await ShadowPortfolio.updateShadow(
     shadowFw,
     postPnLNav,
     cashUsd,
@@ -138,7 +132,7 @@ export async function runShadowRebalance(
   // string makes the shadow nature explicit so the rebalance history
   // panel can group / filter accordingly.
   const rebalanceId = randomUUID();
-  IndexFund.insertRebalance({
+  await IndexFund.insertRebalance({
     id: rebalanceId,
     index_id: indexId,
     triggered_by: "scheduled",
@@ -170,19 +164,23 @@ export async function runShadowRebalance(
       id: string;
       asset_id: string;
     }
-    const sigs = db()
-      .prepare<[number], SigPickRow>(
-        `SELECT id, asset_id FROM signals
-         WHERE fired_at >= ? AND status IN ('pending','executed')`,
-      )
-      .all(cutoff);
+    const sigs = await all<SigPickRow>(
+      `SELECT id, asset_id FROM signals
+       WHERE fired_at >= ? AND status IN ('pending','executed')`,
+      [cutoff],
+    );
     const targets = SHADOW_TARGETS[shadowFw];
     for (const s of sigs) {
       if (!heldAssets.has(s.asset_id)) continue;
-      const a = Assets.getAssetById(s.asset_id);
+      const a = await Assets.getAssetById(s.asset_id);
       const sodex = a?.tradable?.symbol;
-      const px = sodex ? livePrice(await Market.getAllTickersBySymbol().catch(() => new Map()), sodex) : null;
-      Outcomes.recordShadowOutcomeFromSignal({
+      const px = sodex
+        ? livePrice(
+            await Market.getAllTickersBySymbol().catch(() => new Map()),
+            sodex,
+          )
+        : null;
+      await Outcomes.recordShadowOutcomeFromSignal({
         signal_id: s.id,
         framework_version: shadowFw,
         asset_class: classifyAssetClass(s.asset_id),

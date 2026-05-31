@@ -51,11 +51,11 @@ export async function runMacroIngest(
   if (!opts.skipCalendar) {
     const days = await MacroAPI.getMacroCalendar();
     calendarDays = days.length;
-    calendarEventsUpserted = Macro.upsertCalendar(days);
+    calendarEventsUpserted = await Macro.upsertCalendar(days);
   }
 
   // ── 2. History per unique event name ──────────────────────────
-  const allNames = Macro.listCalendarEventNames();
+  const allNames = await Macro.listCalendarEventNames();
   const targets = opts.onlyEvents
     ? allNames.filter((n) => opts.onlyEvents!.includes(n))
     : allNames;
@@ -72,7 +72,7 @@ export async function runMacroIngest(
       historyEventsProcessed++;
       if (rows.length > 0) {
         historyEventsWithData++;
-        historyRowsUpserted += Macro.upsertEventHistory(event, rows);
+        historyRowsUpserted += await Macro.upsertEventHistory(event, rows);
       }
     } catch (err) {
       historyFailures++;

@@ -18,7 +18,7 @@
  *      signals are excluded entirely. Don't fight a downtrend.
  */
 
-import { Assets, db, Settings } from "@/lib/db";
+import { Assets, all, Settings } from "@/lib/db";
 import type { Asset } from "@/lib/universe";
 import type { CandidatePortfolio, CandidateScore } from "./types";
 
@@ -59,7 +59,9 @@ interface SignalAggRow {
  * Aggregate recent signals per asset. LONG = +conviction with linear
  * time-decay over the window. SHORT = -conviction.
  */
-function aggregateSignals(windowMs: number): Map<string, SignalAggRow> {
+async function aggregateSignals(
+  windowMs: number,
+): Promise<Map<string, SignalAggRow>> {
   const cutoff = Date.now() - windowMs;
   interface Row {
     asset_id: string;
@@ -67,14 +69,13 @@ function aggregateSignals(windowMs: number): Map<string, SignalAggRow> {
     confidence: number;
     fired_at: number;
   }
-  const rows = db()
-    .prepare<[number], Row>(
-      `SELECT asset_id, direction, confidence, fired_at
-       FROM signals
-       WHERE fired_at >= ?
-         AND status IN ('pending', 'executed')`,
-    )
-    .all(cutoff);
+  const rows = await all<Row>(
+    `SELECT asset_id, direction, confidence, fired_at
+     FROM signals
+     WHERE fired_at >= ?
+       AND status IN ('pending', 'executed')`,
+    [cutoff],
+  );
 
   const out = new Map<string, SignalAggRow>();
   const now = Date.now();
@@ -98,28 +99,26 @@ function aggregateSignals(windowMs: number): Map<string, SignalAggRow> {
  * 30-day return per asset from daily klines, expressed as a fraction
  * (e.g. 0.10 = +10%, -0.30 = -30%). Skips assets with insufficient history.
  */
-function loadMomentum30d(): Map<string, number> {
+async function loadMomentum30d(): Promise<Map<string, number>> {
   interface Row {
     asset_id: string;
     last_close: number;
     earlier_close: number;
   }
-  const rows = db()
-    .prepare<[], Row>(
-      `WITH ranked AS (
-         SELECT asset_id, close,
-                ROW_NUMBER() OVER (PARTITION BY asset_id ORDER BY date DESC) AS rn
-         FROM klines_daily
-       )
-       SELECT
-         a.asset_id   AS asset_id,
-         a.close      AS last_close,
-         b.close      AS earlier_close
-       FROM ranked a
-       JOIN ranked b ON b.asset_id = a.asset_id AND b.rn = 30
-       WHERE a.rn = 1`,
-    )
-    .all();
+  const rows = await all<Row>(
+    `WITH ranked AS (
+       SELECT asset_id, close,
+              ROW_NUMBER() OVER (PARTITION BY asset_id ORDER BY date DESC) AS rn
+       FROM klines_daily
+     )
+     SELECT
+       a.asset_id   AS asset_id,
+       a.close      AS last_close,
+       b.close      AS earlier_close
+     FROM ranked a
+     JOIN ranked b ON b.asset_id = a.asset_id AND b.rn = 30
+     WHERE a.rn = 1`,
+  );
 
   const out = new Map<string, number>();
   for (const r of rows) {
@@ -154,22 +153,22 @@ export interface ComputeOptions {
   /** Lookback window for signal aggregation. Default 14 days. */
   windowMs?: number;
   /** Override settings (used by tests). */
-  settings?: Partial<ReturnType<typeof Settings.getSettings>>;
+  settings?: Partial<Awaited<ReturnType<typeof Settings.getSettings>>>;
   /** Zero out the signal layer — used by attribution (Part 3) to build
    *  the momentum-only counterfactual. Does NOT affect live rebalancing. */
   skipSignals?: boolean;
 }
 
-export function computeCandidatePortfolio(
+export async function computeCandidatePortfolio(
   opts: ComputeOptions = {},
-): CandidatePortfolio {
-  const settings = { ...Settings.getSettings(), ...opts.settings };
+): Promise<CandidatePortfolio> {
+  const settings = { ...(await Settings.getSettings()), ...opts.settings };
   const windowMs = opts.windowMs ?? 14 * 24 * 60 * 60 * 1000;
 
   const signalAgg = opts.skipSignals
     ? new Map<string, SignalAggRow>()
-    : aggregateSignals(windowMs);
-  const momentum = loadMomentum30d();
+    : await aggregateSignals(windowMs);
+  const momentum = await loadMomentum30d();
   const cashFrac = settings.index_cash_reserve_pct / 100;
 
   // ── Step 1: Anchor weights ────────────────────────────────────
@@ -177,7 +176,7 @@ export function computeCandidatePortfolio(
   const scores: CandidateScore[] = [];
 
   for (const [assetId, baseW] of Object.entries(ANCHOR_WEIGHTS)) {
-    const asset = Assets.getAssetById(assetId);
+    const asset = await Assets.getAssetById(assetId);
     if (!asset?.tradable) continue;
 
     const sig = signalAgg.get(assetId);
@@ -209,7 +208,7 @@ export function computeCandidatePortfolio(
   }
 
   // ── Step 2: Tilt budget — top non-anchor assets by signal+momentum ──
-  const allAssets = Assets.getAllAssets().filter(
+  const allAssets = (await Assets.getAllAssets()).filter(
     (a) => a.tradable && !ANCHOR_WEIGHTS[a.id],
   );
 

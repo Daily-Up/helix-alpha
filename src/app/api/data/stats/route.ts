@@ -1,81 +1,62 @@
 /**
- * GET /api/data/stats
- *
- * High-level numbers for the dashboard top bar:
- *   - total events / classified / unclassified
- *   - last cron run summary
- *   - 24h event count
- *   - top sentiment breakdown
+ * GET /api/data/stats — high-level dashboard numbers. Wave 2: async.
  */
 
 import { NextResponse } from "next/server";
-import { db, Events } from "@/lib/db";
+import { all, get, Events } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const conn = db();
   const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
 
-  const totalEvents = (
-    conn.prepare("SELECT COUNT(*) AS n FROM news_events").get() as {
-      n: number;
-    }
-  ).n;
-  const totalClassified = (
-    conn.prepare("SELECT COUNT(*) AS n FROM classifications").get() as {
-      n: number;
-    }
-  ).n;
-  // "pending" only counts non-duplicate, classifiable events. Duplicates
-  // are intentionally never classified (they reuse the canonical event's
-  // classification) — including them inflated the displayed backlog.
-  const unclassified = Events.countUnclassifiedEvents();
-  const events24h = (
-    conn
-      .prepare<[number], { n: number }>(
+  const totalEvents =
+    (await get<{ n: number }>("SELECT COUNT(*) AS n FROM news_events"))?.n ?? 0;
+  const totalClassified =
+    (await get<{ n: number }>("SELECT COUNT(*) AS n FROM classifications"))
+      ?.n ?? 0;
+  const unclassified = await Events.countUnclassifiedEvents();
+  const events24h =
+    (
+      await get<{ n: number }>(
         "SELECT COUNT(*) AS n FROM news_events WHERE release_time >= ?",
+        [dayAgo],
       )
-      .get(dayAgo)
-  )!.n;
+    )?.n ?? 0;
 
-  const sentimentBreakdown = conn
-    .prepare(
-      `SELECT c.sentiment AS sentiment, COUNT(*) AS n
-       FROM classifications c
-       JOIN news_events e ON e.id = c.event_id
-       WHERE e.release_time >= ?
-       GROUP BY c.sentiment`,
-    )
-    .all(dayAgo) as Array<{ sentiment: string; n: number }>;
+  const sentimentBreakdown = await all<{ sentiment: string; n: number }>(
+    `SELECT c.sentiment AS sentiment, COUNT(*) AS n
+     FROM classifications c
+     JOIN news_events e ON e.id = c.event_id
+     WHERE e.release_time >= ?
+     GROUP BY c.sentiment`,
+    [dayAgo],
+  );
 
-  const eventTypeBreakdown = conn
-    .prepare(
-      `SELECT c.event_type AS event_type, COUNT(*) AS n
-       FROM classifications c
-       JOIN news_events e ON e.id = c.event_id
-       WHERE e.release_time >= ?
-       GROUP BY c.event_type
-       ORDER BY n DESC`,
-    )
-    .all(dayAgo) as Array<{ event_type: string; n: number }>;
+  const eventTypeBreakdown = await all<{ event_type: string; n: number }>(
+    `SELECT c.event_type AS event_type, COUNT(*) AS n
+     FROM classifications c
+     JOIN news_events e ON e.id = c.event_id
+     WHERE e.release_time >= ?
+     GROUP BY c.event_type
+     ORDER BY n DESC`,
+    [dayAgo],
+  );
 
-  const lastRun = conn
-    .prepare(
-      `SELECT id, job, started_at, finished_at, status, summary
-       FROM cron_runs
-       WHERE job = 'ingest_news'
-       ORDER BY started_at DESC LIMIT 1`,
-    )
-    .get() as {
+  const lastRun = await get<{
     id: number;
     job: string;
     started_at: number;
     finished_at: number | null;
     status: string;
     summary: string | null;
-  } | undefined;
+  }>(
+    `SELECT id, job, started_at, finished_at, status, summary
+     FROM cron_runs
+     WHERE job = 'ingest_news'
+     ORDER BY started_at DESC LIMIT 1`,
+  );
 
   return NextResponse.json({
     total_events: totalEvents,

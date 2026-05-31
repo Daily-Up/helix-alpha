@@ -46,7 +46,7 @@ export async function executeSignal(
   signalId: string,
   options: ExecuteOptions = {},
 ): Promise<ExecutionResult> {
-  const sig = Signals.getSignal(signalId);
+  const sig = await Signals.getSignal(signalId);
   if (!sig) return { ok: false, signal_id: signalId, error: "signal not found" };
   if (sig.status === "executed" && sig.paper_trade_id) {
     return {
@@ -63,7 +63,7 @@ export async function executeSignal(
     };
   }
 
-  const asset = Assets.getAssetById(sig.asset_id);
+  const asset = await Assets.getAssetById(sig.asset_id);
   if (!asset?.tradable) {
     return {
       ok: false,
@@ -106,7 +106,7 @@ export async function executeSignal(
       : lastPx * (1 - target_pct / 100);
 
   const tradeId = randomUUID();
-  PaperTrades.insertTrade({
+  await PaperTrades.insertTrade({
     id: tradeId,
     signal_id: sig.id,
     asset_id: sig.asset_id,
@@ -119,14 +119,16 @@ export async function executeSignal(
     target_price,
   });
 
-  Signals.markExecuted(sig.id, tradeId);
+  await Signals.markExecuted(sig.id, tradeId);
 
   return { ok: true, signal_id: sig.id, paper_trade_id: tradeId };
 }
 
 /** Dismiss a signal — user clicked ✕. */
-export function dismissSignal(signalId: string): ExecutionResult {
-  const sig = Signals.getSignal(signalId);
+export async function dismissSignal(
+  signalId: string,
+): Promise<ExecutionResult> {
+  const sig = await Signals.getSignal(signalId);
   if (!sig) return { ok: false, signal_id: signalId, error: "not found" };
   if (sig.status !== "pending") {
     return {
@@ -135,10 +137,10 @@ export function dismissSignal(signalId: string): ExecutionResult {
       error: `cannot dismiss ${sig.status}`,
     };
   }
-  Signals.markDismissed(signalId);
+  await Signals.markDismissed(signalId);
   // Part 1 hook: record the dismissal in signal_outcomes immediately.
   // No-op if no outcome row exists (legacy pre-Part-1 signals).
-  Outcomes.markOutcomeDismissed(signalId, "user_clicked_dismiss");
+  await Outcomes.markOutcomeDismissed(signalId, "user_clicked_dismiss");
   return { ok: true, signal_id: signalId };
 }
 
@@ -151,7 +153,7 @@ export async function autoExecutePending(): Promise<{
   skipped: number;
   reason: string | null;
 }> {
-  const settings = Settings.getSettings();
+  const settings = await Settings.getSettings();
   if (!settings.auto_trade_enabled) {
     return {
       executed: [],
@@ -160,7 +162,7 @@ export async function autoExecutePending(): Promise<{
     };
   }
 
-  const open = PaperTrades.listOpen();
+  const open = await PaperTrades.listOpen();
   if (open.length >= settings.max_concurrent_positions) {
     return {
       executed: [],
@@ -169,7 +171,7 @@ export async function autoExecutePending(): Promise<{
     };
   }
 
-  const pending = Signals.listSignals({ tier: "auto", status: "pending" });
+  const pending = await Signals.listSignals({ tier: "auto", status: "pending" });
   const executed: SignalRow[] = [];
 
   for (const s of pending) {
@@ -192,7 +194,7 @@ export async function reconcileOpenPositions(): Promise<{
   closed: number;
   reasons: Record<string, number>;
 }> {
-  const open = PaperTrades.listOpen();
+  const open = await PaperTrades.listOpen();
   if (open.length === 0)
     return { checked: 0, closed: 0, reasons: {} };
 
@@ -216,7 +218,7 @@ export async function reconcileOpenPositions(): Promise<{
     }
 
     if (closeReason) {
-      PaperTrades.closeTrade(t.id, px, closeReason);
+      await PaperTrades.closeTrade(t.id, px, closeReason);
       closedN++;
       reasons[closeReason] = (reasons[closeReason] ?? 0) + 1;
     }

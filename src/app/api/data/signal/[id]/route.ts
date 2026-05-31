@@ -1,23 +1,9 @@
 /**
- * GET /api/data/signal/{id}
- *
- * Per-signal audit blob — every input that shaped the signal.
- *
- * Returns:
- *   - signal core fields
- *   - the news event that triggered it (title, content, author)
- *   - all "corroborating" duplicate articles (other outlets' coverage)
- *   - the classification (event_type, sentiment, severity, reasoning)
- *   - measured impact (T+1d/3d/7d) if any
- *   - secondary assets the same event also affects
- *
- * Used by /signal/{id} to render a full decision chain so any signal
- * can be audited end-to-end. The buildathon critic flagged "no audit
- * trail" as a production-grade gap; this is the fix.
+ * GET /api/data/signal/{id} — per-signal audit blob. Wave 2: async.
  */
 
 import { NextResponse } from "next/server";
-import { Assets, Signals, db } from "@/lib/db";
+import { Assets, Signals, all, get } from "@/lib/db";
 import {
   getSupersessionForOld,
   listSupersessionsByNew,
@@ -82,7 +68,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const signal = Signals.getSignal(id);
+  const signal = await Signals.getSignal(id);
   if (!signal) {
     return NextResponse.json(
       { ok: false, error: "signal not found" },
@@ -90,7 +76,7 @@ export async function GET(
     );
   }
 
-  const asset = Assets.getAssetById(signal.asset_id);
+  const asset = await Assets.getAssetById(signal.asset_id);
 
   let event: EventRow | undefined;
   let classification: ClassRow | undefined;
@@ -98,65 +84,61 @@ export async function GET(
   let impact: ImpactRow | undefined;
 
   if (signal.triggered_by_event_id) {
-    event = db()
-      .prepare<[string], EventRow>(
-        `SELECT id, release_time, title, content, author, source_link,
-                original_link, category, is_blue_verified, duplicate_of
-         FROM news_events WHERE id = ?`,
-      )
-      .get(signal.triggered_by_event_id);
+    event = await get<EventRow>(
+      `SELECT id, release_time, title, content, author, source_link,
+              original_link, category, is_blue_verified, duplicate_of
+       FROM news_events WHERE id = ?`,
+      [signal.triggered_by_event_id],
+    );
 
-    classification = db()
-      .prepare<[string], ClassRow>(
-        `SELECT event_type, sentiment, severity, confidence, actionable,
-                event_recency, affected_asset_ids, reasoning, model,
-                prompt_version, classified_at
-         FROM classifications WHERE event_id = ?`,
-      )
-      .get(signal.triggered_by_event_id);
+    classification = await get<ClassRow>(
+      `SELECT event_type, sentiment, severity, confidence, actionable,
+              event_recency, affected_asset_ids, reasoning, model,
+              prompt_version, classified_at
+       FROM classifications WHERE event_id = ?`,
+      [signal.triggered_by_event_id],
+    );
 
-    // Corroborating sources: other articles flagged as duplicates of
-    // THIS canonical (or, if THIS is itself a duplicate, find the
-    // canonical and pull its other duplicates as siblings).
     const canonicalId = event?.duplicate_of ?? signal.triggered_by_event_id;
-    duplicates = db()
-      .prepare<[string, string, string], DupRow>(
-        `SELECT id, release_time, title, author, source_link
-         FROM news_events
-         WHERE (id = ? OR duplicate_of = ?)
-           AND id != ?
-         ORDER BY release_time ASC`,
-      )
-      .all(canonicalId, canonicalId, signal.triggered_by_event_id);
+    duplicates = await all<DupRow>(
+      `SELECT id, release_time, title, author, source_link
+       FROM news_events
+       WHERE (id = ? OR duplicate_of = ?)
+         AND id != ?
+       ORDER BY release_time ASC`,
+      [canonicalId, canonicalId, signal.triggered_by_event_id],
+    );
 
-    impact = db()
-      .prepare<[string, string], ImpactRow>(
-        `SELECT impact_pct_1d, impact_pct_3d, impact_pct_7d, computed_at
-         FROM impact_metrics
-         WHERE event_id = ? AND asset_id = ?`,
-      )
-      .get(signal.triggered_by_event_id, signal.asset_id);
+    impact = await get<ImpactRow>(
+      `SELECT impact_pct_1d, impact_pct_3d, impact_pct_7d, computed_at
+       FROM impact_metrics
+       WHERE event_id = ? AND asset_id = ?`,
+      [signal.triggered_by_event_id, signal.asset_id],
+    );
   }
 
   // Resolve secondary asset symbols for display.
   const secondary = signal.secondary_asset_ids
-    ? (JSON.parse(signal.secondary_asset_ids) as string[]).map((aid) => {
-        const a = Assets.getAssetById(aid);
-        return {
-          asset_id: aid,
-          symbol: a?.symbol ?? aid,
-          name: a?.name ?? aid,
-          tradable_symbol: a?.tradable?.symbol ?? null,
-        };
-      })
+    ? await Promise.all(
+        (JSON.parse(signal.secondary_asset_ids) as string[]).map(
+          async (aid) => {
+            const a = await Assets.getAssetById(aid);
+            return {
+              asset_id: aid,
+              symbol: a?.symbol ?? aid,
+              name: a?.name ?? aid,
+              tradable_symbol: a?.tradable?.symbol ?? null,
+            };
+          },
+        ),
+      )
     : [];
 
-  // Phase D/E audit context — if this signal was retired by a stronger
-  // opposite-direction signal, surface the supersession row + winner id.
-  // Conversely, if this signal retired others, list them.
-  const supersededByRow = Supersessions.getSupersessionForOld(signal.id);
-  const supersededOthers = Supersessions.listSupersessionsByNew(signal.id);
-  const suppressionsThisWon = Conflicts.listSuppressionsForConflict(signal.id);
+  const supersededByRow = await Supersessions.getSupersessionForOld(signal.id);
+  const supersededOthers = await Supersessions.listSupersessionsByNew(signal.id);
+  const suppressionsThisWon = await Conflicts.listSuppressionsForConflict(
+    signal.id,
+  );
 
   return NextResponse.json({
     signal: {

@@ -20,7 +20,7 @@
  *     horizon NULL and the engine will fill it on a later run
  */
 
-import { Cron, db, Impact } from "@/lib/db";
+import { Cron, all, Impact } from "@/lib/db";
 import { formatApiDate } from "@/lib/sosovalue";
 
 interface PriceRow {
@@ -30,15 +30,14 @@ interface PriceRow {
 }
 
 /** Pull all klines for an asset into a date→close map. */
-function loadCloses(assetId: string): Map<string, number> {
-  const rows = db()
-    .prepare<[string], PriceRow>(
-      `SELECT asset_id, date, close
-       FROM klines_daily
-       WHERE asset_id = ?
-       ORDER BY date ASC`,
-    )
-    .all(assetId);
+async function loadCloses(assetId: string): Promise<Map<string, number>> {
+  const rows = await all<PriceRow>(
+    `SELECT asset_id, date, close
+     FROM klines_daily
+     WHERE asset_id = ?
+     ORDER BY date ASC`,
+    [assetId],
+  );
   const m = new Map<string, number>();
   for (const r of rows) m.set(r.date, r.close);
   return m;
@@ -89,10 +88,11 @@ export async function runImpactCompute(
   const t0 = Date.now();
   const limit = opts.limit ?? 500;
 
-  const pending = Impact.getPendingImpactEvents(limit);
+  const pending = await Impact.getPendingImpactEvents(limit);
 
   // Group by asset_id so we load each asset's klines into memory once.
-  const byAsset = new Map<string, typeof pending>();
+  type PendingItem = (typeof pending)[number];
+  const byAsset = new Map<string, PendingItem[]>();
   for (const p of pending) {
     if (!byAsset.has(p.asset_id)) byAsset.set(p.asset_id, []);
     byAsset.get(p.asset_id)!.push(p);
@@ -104,7 +104,7 @@ export async function runImpactCompute(
   let errors = 0;
 
   for (const [assetId, items] of byAsset) {
-    const closes = loadCloses(assetId);
+    const closes = await loadCloses(assetId);
     if (closes.size === 0) {
       skippedNoKlines += items.length;
       continue;
@@ -146,7 +146,7 @@ export async function runImpactCompute(
             ? ((later - t0Price) / t0Price) * 100
             : null;
 
-        Impact.upsertImpact({
+        await Impact.upsertImpact({
           event_id: it.event_id,
           asset_id: it.asset_id,
           price_t0: t0Price,

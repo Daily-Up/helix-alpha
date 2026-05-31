@@ -14,7 +14,7 @@
 
 import { NextResponse } from "next/server";
 import { computePatternsByEventType, empiricalTradability } from "@/lib/analysis";
-import { db } from "@/lib/db";
+import { all } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,7 +42,7 @@ const HARDCODED_TRADABILITY: Record<string, number> = {
 };
 
 export async function GET() {
-  const byType = computePatternsByEventType();
+  const byType = await computePatternsByEventType();
   const MIN_SAMPLES = 5;
   // NOTE: empiricalTradability() returns a Map keyed by
   // `${event_type}|${sentiment}` — we DON'T want to use it here keyed
@@ -96,21 +96,19 @@ export async function GET() {
     n: number;
     avg: number;
   }
-  const perAsset = db()
-    .prepare<[], AssetRow>(
-      `SELECT c.event_type    AS event_type,
-              im.asset_id     AS asset_id,
-              COUNT(*)        AS n,
-              AVG(im.impact_pct_1d) AS avg
-       FROM impact_metrics im
-       JOIN classifications c ON c.event_id = im.event_id
-       WHERE im.impact_pct_1d IS NOT NULL
-       GROUP BY c.event_type, im.asset_id
-       HAVING n >= 2
-       ORDER BY n DESC, ABS(avg) DESC
-       LIMIT 50`,
-    )
-    .all();
+  const perAsset = await all<AssetRow>(
+    `SELECT c.event_type    AS event_type,
+            im.asset_id     AS asset_id,
+            COUNT(*)        AS n,
+            AVG(im.impact_pct_1d) AS avg
+     FROM impact_metrics im
+     JOIN classifications c ON c.event_id = im.event_id
+     WHERE im.impact_pct_1d IS NOT NULL
+     GROUP BY c.event_type, im.asset_id
+     HAVING n >= 2
+     ORDER BY n DESC, ABS(avg) DESC
+     LIMIT 50`,
+  );
 
   return NextResponse.json({
     sample_total: sampleTotal,

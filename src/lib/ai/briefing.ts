@@ -19,7 +19,7 @@ import {
   Postmortem,
   Settings,
   Treasuries,
-  db,
+  all,
   type BriefingInputsSummary,
   type Regime,
   type TopPick,
@@ -73,7 +73,6 @@ const ToolInputSchema = z.object({
 export async function gatherBriefingInputs(opts: {
   date: string;
 }): Promise<{ inputs: BriefingInputs; summary: BriefingInputsSummary }> {
-  const conn = db();
   const now = Date.now();
   const last24h = now - 24 * 60 * 60 * 1000;
 
@@ -88,19 +87,17 @@ export async function gatherBriefingInputs(opts: {
     fired_at: number;
     reasoning: string;
   }
-  const pendingRows = conn
-    .prepare<[], PSRow>(
-      `SELECT a.symbol AS asset_symbol, s.direction, s.tier, s.confidence,
-              c.event_type, n.title AS event_title, s.fired_at, s.reasoning
-       FROM signals s
-       JOIN assets a ON a.id = s.asset_id
-       LEFT JOIN news_events n ON n.id = s.triggered_by_event_id
-       LEFT JOIN classifications c ON c.event_id = s.triggered_by_event_id
-       WHERE s.status = 'pending'
-       ORDER BY s.confidence DESC, s.fired_at DESC
-       LIMIT 10`,
-    )
-    .all();
+  const pendingRows = await all<PSRow>(
+    `SELECT a.symbol AS asset_symbol, s.direction, s.tier, s.confidence,
+            c.event_type, n.title AS event_title, s.fired_at, s.reasoning
+     FROM signals s
+     JOIN assets a ON a.id = s.asset_id
+     LEFT JOIN news_events n ON n.id = s.triggered_by_event_id
+     LEFT JOIN classifications c ON c.event_id = s.triggered_by_event_id
+     WHERE s.status = 'pending'
+     ORDER BY s.confidence DESC, s.fired_at DESC
+     LIMIT 10`,
+  );
 
   const pending_signals = pendingRows.map((r) => ({
     asset_symbol: r.asset_symbol,
@@ -122,23 +119,22 @@ export async function gatherBriefingInputs(opts: {
     n: number;
     example_title: string;
   }
-  const classBuckets = conn
-    .prepare<[number, number], ClassBucket>(
-      `SELECT c.event_type AS event_type, COUNT(*) AS n,
-              (SELECT n2.title FROM news_events n2
-               JOIN classifications c2 ON c2.event_id = n2.id
-               WHERE c2.event_type = c.event_type AND n2.release_time >= ?
-               ORDER BY n2.release_time DESC LIMIT 1) AS example_title
-       FROM classifications c
-       JOIN news_events n ON n.id = c.event_id
-       WHERE n.release_time >= ?
-         AND n.duplicate_of IS NULL
-         AND c.actionable = 1
-       GROUP BY c.event_type
-       ORDER BY n DESC
-       LIMIT 8`,
-    )
-    .all(last24h, last24h);
+  const classBuckets = await all<ClassBucket>(
+    `SELECT c.event_type AS event_type, COUNT(*) AS n,
+            (SELECT n2.title FROM news_events n2
+             JOIN classifications c2 ON c2.event_id = n2.id
+             WHERE c2.event_type = c.event_type AND n2.release_time >= ?
+             ORDER BY n2.release_time DESC LIMIT 1) AS example_title
+     FROM classifications c
+     JOIN news_events n ON n.id = c.event_id
+     WHERE n.release_time >= ?
+       AND n.duplicate_of IS NULL
+       AND c.actionable = 1
+     GROUP BY c.event_type
+     ORDER BY n DESC
+     LIMIT 8`,
+    [last24h, last24h],
+  );
 
   const recent_classification_buckets = classBuckets.map((b) => ({
     event_type: b.event_type,
@@ -148,7 +144,7 @@ export async function gatherBriefingInputs(opts: {
 
   // ── AlphaIndex top 5 positions, marked-to-market ──────────────
   const indexId = "alphacore";
-  const idx = IndexFund.getIndex(indexId);
+  const idx = await IndexFund.getIndex(indexId);
   let tickers = new Map<string, { lastPx: string }>();
   try {
     tickers = (await Market.getAllTickersBySymbol()) as unknown as Map<
@@ -165,7 +161,7 @@ export async function gatherBriefingInputs(opts: {
     return Number.isFinite(n) && n > 0 ? n : null;
   };
 
-  const positions = IndexFund.listPositions(indexId);
+  const positions = await IndexFund.listPositions(indexId);
   let invested = 0;
   const positionViews: Array<{
     symbol: string;
@@ -175,7 +171,7 @@ export async function gatherBriefingInputs(opts: {
     value: number;
   }> = [];
   for (const p of positions) {
-    const a = Assets.getAssetById(p.asset_id);
+    const a = await Assets.getAssetById(p.asset_id);
     if (!a) continue;
     const sym = a.tradable?.symbol ?? "";
     const px = sym ? livePrice(sym) : null;
@@ -193,7 +189,7 @@ export async function gatherBriefingInputs(opts: {
       value,
     });
   }
-  const lastNav = IndexFund.listNavHistory(indexId, 1)[0];
+  const lastNav = (await IndexFund.listNavHistory(indexId, 1))[0];
   const navTotal = lastNav?.nav_usd ?? idx?.starting_nav ?? 0;
   const cash = Math.max(0, navTotal - invested);
   const totalNav = invested + cash;
@@ -221,13 +217,11 @@ export async function gatherBriefingInputs(opts: {
     change_pct_24h: number;
     marketcap_dom: number;
   }
-  const sectorsAll = conn
-    .prepare<[], SectorRow>(
-      `SELECT sector_name, change_pct_24h, marketcap_dom
-       FROM sector_snapshots
-       WHERE snapshot_at = (SELECT MAX(snapshot_at) FROM sector_snapshots)`,
-    )
-    .all();
+  const sectorsAll = await all<SectorRow>(
+    `SELECT sector_name, change_pct_24h, marketcap_dom
+     FROM sector_snapshots
+     WHERE snapshot_at = (SELECT MAX(snapshot_at) FROM sector_snapshots)`,
+  );
   const sectorsSorted = [...sectorsAll].sort(
     (a, b) => b.change_pct_24h - a.change_pct_24h,
   );
@@ -250,17 +244,15 @@ export async function gatherBriefingInputs(opts: {
     symbol: string;
     net_flow_usd: number;
   }
-  const etfRows = conn
-    .prepare<[], ETFRow>(
-      `SELECT symbol,
-              SUM(total_net_inflow) AS net_flow_usd
-       FROM etf_aggregate_daily
-       WHERE date = (SELECT MAX(date) FROM etf_aggregate_daily)
-       GROUP BY symbol
-       ORDER BY ABS(SUM(total_net_inflow)) DESC
-       LIMIT 8`,
-    )
-    .all();
+  const etfRows = await all<ETFRow>(
+    `SELECT symbol,
+            SUM(total_net_inflow) AS net_flow_usd
+     FROM etf_aggregate_daily
+     WHERE date = (SELECT MAX(date) FROM etf_aggregate_daily)
+     GROUP BY symbol
+     ORDER BY ABS(SUM(total_net_inflow)) DESC
+     LIMIT 8`,
+  );
   const etf_flows_24h = etfRows.filter(
     (e) => Number.isFinite(e.net_flow_usd),
   );
@@ -277,21 +269,20 @@ export async function gatherBriefingInputs(opts: {
   const tomorrowDate = new Date(now + 24 * 60 * 60 * 1000)
     .toISOString()
     .slice(0, 10);
-  const macroRows = conn
-    .prepare<[string, string], MacroRow>(
-      `SELECT date, event FROM macro_calendar
-       WHERE date IN (?, ?)
-       ORDER BY date ASC
-       LIMIT 5`,
-    )
-    .all(todayDate, tomorrowDate);
+  const macroRows = await all<MacroRow>(
+    `SELECT date, event FROM macro_calendar
+     WHERE date IN (?, ?)
+     ORDER BY date ASC
+     LIMIT 5`,
+    [todayDate, tomorrowDate],
+  );
   const upcoming_macro = macroRows.map((m) => ({
     name: m.event,
     release_time_iso: m.date, // YYYY-MM-DD; precise time unknown
   }));
 
   // ── Calibration: best-performing event_type from /learnings ────
-  const byEventType = Postmortem.statsByEventType({
+  const byEventType = await Postmortem.statsByEventType({
     since_ms: 30 * 24 * 60 * 60 * 1000,
   });
   const evaluable = byEventType.filter(
@@ -312,7 +303,7 @@ export async function gatherBriefingInputs(opts: {
   // dated, named-quantity smart-money signals. Massive value for the
   // briefing because it's HARD FACT, unlike news that's already
   // chewed by the time signals fire.
-  const recentPurchases = Treasuries.listRecentPurchases({
+  const recentPurchases = await Treasuries.listRecentPurchases({
     daysBack: 30,
     limit: 12,
   });
@@ -325,7 +316,7 @@ export async function gatherBriefingInputs(opts: {
     acq_cost_usd: p.acq_cost_usd,
     cost_per_btc_usd: p.avg_btc_cost_usd,
   }));
-  const treasuryAgg = Treasuries.getAggregateStats(30);
+  const treasuryAgg = await Treasuries.getAggregateStats(30);
   const treasury_stats_30d = {
     acquiring_companies: treasuryAgg.acquiring_companies_30d,
     net_btc_acquired: treasuryAgg.net_btc_acquired_30d,
@@ -336,7 +327,7 @@ export async function gatherBriefingInputs(opts: {
   // ── Macro print surprises (last 60d, top |actual - forecast|) ──
   // Hard, dated forecast misses — cooler-than-expected CPI is a real
   // tradeable input for the briefing's macro regime call.
-  const surpriseRows = Macro.listRecentSurprises({
+  const surpriseRows = await Macro.listRecentSurprises({
     daysBack: 60,
     limit: 6,
     requireForecast: true,
@@ -435,7 +426,7 @@ export async function runBriefing(opts: {
   const date = opts.date ?? Briefings.todayUtcDate();
 
   if (!opts.force) {
-    const existing = Briefings.getBriefing(date);
+    const existing = await Briefings.getBriefing(date);
     if (existing) {
       return {
         date,
@@ -487,7 +478,7 @@ export async function runBriefing(opts: {
       tokens.output * PRICING.output) /
     1_000_000;
 
-  Briefings.upsertBriefing({
+  await Briefings.upsertBriefing({
     date,
     generated_at: Date.now(),
     headline: parsed.headline,

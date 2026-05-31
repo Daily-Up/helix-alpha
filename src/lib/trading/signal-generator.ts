@@ -26,7 +26,7 @@ import {
   type Classification,
   type EventType,
 } from "@/lib/db";
-import { db, transaction } from "@/lib/db";
+import { all, get, run } from "@/lib/db";
 
 // ── Pipeline modules — single source of truth for stage-by-stage contracts ──
 // Each is independently tested in tests/*.test.ts and documented in
@@ -121,7 +121,9 @@ function classifySourceTier(scoreOrAuthor: {
 }
 
 /** Pull recent signals on an asset (last 7d) for entity-history adjustment. */
-function recentHistoryForAsset(assetId: string): PriorSignalRecord[] {
+async function recentHistoryForAsset(
+  assetId: string,
+): Promise<PriorSignalRecord[]> {
   const SEVEN_DAYS_MS = 7 * 24 * 3600 * 1000;
   const since = Date.now() - SEVEN_DAYS_MS;
   interface Row {
@@ -131,21 +133,20 @@ function recentHistoryForAsset(assetId: string): PriorSignalRecord[] {
     fired_at: number;
     event_chain_id: string | null;
   }
-  return db()
-    .prepare<[string, number], Row>(
-      `SELECT asset_id, direction, confidence, fired_at, event_chain_id
-       FROM signals
-       WHERE asset_id = ? AND fired_at >= ?
-         AND status IN ('pending', 'executed')`,
-    )
-    .all(assetId, since)
-    .map((r) => ({
-      asset_id: r.asset_id,
-      direction: r.direction,
-      conviction: r.confidence,
-      fired_at: r.fired_at,
-      event_chain_id: r.event_chain_id,
-    }));
+  const rows = await all<Row>(
+    `SELECT asset_id, direction, confidence, fired_at, event_chain_id
+     FROM signals
+     WHERE asset_id = ? AND fired_at >= ?
+       AND status IN ('pending', 'executed')`,
+    [assetId, since],
+  );
+  return rows.map((r) => ({
+    asset_id: r.asset_id,
+    direction: r.direction,
+    conviction: r.confidence,
+    fired_at: r.fired_at,
+    event_chain_id: r.event_chain_id,
+  }));
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -307,17 +308,16 @@ function riskProfileForSignal(
  * Returns annualized stddev of log returns, or null when we don't
  * have enough history. Cheap to call — caller should cache per asset.
  */
-function realizedVol30d(assetId: string): number | null {
+async function realizedVol30d(assetId: string): Promise<number | null> {
   interface Row {
     close: number;
   }
-  const rows = db()
-    .prepare<[string], Row>(
-      `SELECT close FROM klines_daily
-       WHERE asset_id = ?
-       ORDER BY date DESC LIMIT 31`,
-    )
-    .all(assetId);
+  const rows = await all<Row>(
+    `SELECT close FROM klines_daily
+     WHERE asset_id = ?
+     ORDER BY date DESC LIMIT 31`,
+    [assetId],
+  );
   if (rows.length < 10) return null;
   const closes = rows.map((r) => r.close).reverse();
   const rets: number[] = [];
@@ -340,15 +340,17 @@ function realizedVol30d(assetId: string): number | null {
  * Returns null if no kline exists for the lookback (e.g. asset isn't
  * priceable in our klines_daily table) — caller skips the check.
  */
-function priceAtOrBefore(assetId: string, ts: number): number | null {
+async function priceAtOrBefore(
+  assetId: string,
+  ts: number,
+): Promise<number | null> {
   const date = new Date(ts).toISOString().slice(0, 10);
-  const r = db()
-    .prepare<[string, string], { close: number }>(
-      `SELECT close FROM klines_daily
-       WHERE asset_id = ? AND date <= ?
-       ORDER BY date DESC LIMIT 1`,
-    )
-    .get(assetId, date);
+  const r = await get<{ close: number }>(
+    `SELECT close FROM klines_daily
+     WHERE asset_id = ? AND date <= ?
+     ORDER BY date DESC LIMIT 1`,
+    [assetId, date],
+  );
   return r && r.close > 0 ? r.close : null;
 }
 
@@ -366,14 +368,13 @@ function riskV2_horizon_hours_from_string(s: string): number | null {
  *  fall back to klines instead of the live SoDEX feed because (a) the
  *  feed is async and signal-gen is sync, and (b) klines are the same
  *  source the catalyst price came from, so the comparison is consistent. */
-function mostRecentClose(assetId: string): number | null {
-  const r = db()
-    .prepare<[string], { close: number }>(
-      `SELECT close FROM klines_daily
-       WHERE asset_id = ?
-       ORDER BY date DESC LIMIT 1`,
-    )
-    .get(assetId);
+async function mostRecentClose(assetId: string): Promise<number | null> {
+  const r = await get<{ close: number }>(
+    `SELECT close FROM klines_daily
+     WHERE asset_id = ?
+     ORDER BY date DESC LIMIT 1`,
+    [assetId],
+  );
   return r && r.close > 0 ? r.close : null;
 }
 
@@ -705,18 +706,17 @@ function polarityClarityScore(
 
 /** Novelty — penalize stories that already have many near-duplicates
  *  classified ahead of this one (likely already priced in). */
-function noveltyScore(eventId: string): number {
+async function noveltyScore(eventId: string): Promise<number> {
   // Count how many duplicate news_events point at the same canonical.
   // The first occurrence is the canonical (no `duplicate_of` row points
   // at it); subsequent copies have `duplicate_of=this_event`.
   interface Row {
     n: number;
   }
-  const r = db()
-    .prepare<[string], Row>(
-      `SELECT COUNT(*) AS n FROM news_events WHERE duplicate_of = ?`,
-    )
-    .get(eventId);
+  const r = await get<Row>(
+    `SELECT COUNT(*) AS n FROM news_events WHERE duplicate_of = ?`,
+    [eventId],
+  );
   const dups = r?.n ?? 0;
   // 0 dups = fully novel (score 1.0). Each additional copy reduces
   // novelty since the market has had more time to price it in.
@@ -727,14 +727,14 @@ function noveltyScore(eventId: string): number {
   return 0.40;
 }
 
-function computeConvictionAxes(
+async function computeConvictionAxes(
   classificationConfidence: number,
   eventType: EventType,
   severity: "high" | "medium" | "low",
   sentiment: "positive" | "negative" | "neutral",
   sourceMeta: { is_blue_verified: number | null; author: string | null },
   eventId: string,
-): ConvictionAxes {
+): Promise<ConvictionAxes> {
   const axes = {
     classifier_confidence: classificationConfidence,
     tradability: resolveTradability(eventType, sentiment).score,
@@ -745,7 +745,7 @@ function computeConvictionAxes(
     ),
     polarity_clarity: polarityClarityScore(sentiment),
     event_type_weight: EVENT_TYPE_WEIGHT[eventType] ?? 0.2,
-    novelty: noveltyScore(eventId),
+    novelty: await noveltyScore(eventId),
   };
   const total =
     axes.classifier_confidence * AXIS_WEIGHTS.classifier_confidence +
@@ -1016,7 +1016,7 @@ function reasoningContradictsDirection(
 
 function resolveTier(
   confidence: number,
-  s: ReturnType<typeof Settings.getSettings>,
+  s: Awaited<ReturnType<typeof Settings.getSettings>>,
 ): "auto" | "review" | "info" | null {
   if (confidence >= s.auto_trade_min_confidence) return "auto";
   if (confidence >= s.review_min_confidence) return "review";
@@ -1044,18 +1044,17 @@ function resolveTier(
  * that pass AUTO threshold but lack corroboration are downgraded to
  * REVIEW so the human-in-the-loop can verify.
  */
-function corroborationCount(
+async function corroborationCount(
   eventId: string,
   releaseTime: number,
   eventType: string,
   affectedIds: string[],
-): number {
+): Promise<number> {
   // Path 1: explicit duplicates linked by the news ingest dedup.
-  const explicit = db()
-    .prepare<[string], { n: number }>(
-      `SELECT COUNT(*) AS n FROM news_events WHERE duplicate_of = ?`,
-    )
-    .get(eventId);
+  const explicit = await get<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM news_events WHERE duplicate_of = ?`,
+    [eventId],
+  );
 
   // Path 2: other classified events covering the same story within
   // ±24h. Match by event_type + ≥1 shared affected_asset_id.
@@ -1069,21 +1068,20 @@ function corroborationCount(
     event_id: string;
     affected_asset_ids: string;
   }
-  const cands = db()
-    .prepare<[number, number, string, string], Cand>(
-      `SELECT c.event_id, c.affected_asset_ids
-       FROM classifications c
-       JOIN news_events n ON n.id = c.event_id
-       WHERE n.release_time BETWEEN ? AND ?
-         AND c.event_type = ?
-         AND c.event_id != ?`,
-    )
-    .all(
+  const cands = await all<Cand>(
+    `SELECT c.event_id, c.affected_asset_ids
+     FROM classifications c
+     JOIN news_events n ON n.id = c.event_id
+     WHERE n.release_time BETWEEN ? AND ?
+       AND c.event_type = ?
+       AND c.event_id != ?`,
+    [
       releaseTime - WINDOW_MS,
       releaseTime + WINDOW_MS,
       eventType,
       eventId,
-    );
+    ],
+  );
 
   const newSet = new Set(affectedIds);
   let implicit = 0;
@@ -1146,14 +1144,14 @@ export async function runSignalGen(
   const lookbackMs = (opts.lookbackHours ?? 72) * 60 * 60 * 1000;
   const since = Date.now() - lookbackMs;
 
-  const settings = Settings.getSettings();
+  const settings = await Settings.getSettings();
 
   // Load empirical tradability scores from impact_metrics. Override
   // hardcoded values when we have ≥5 samples per event_type. Imported
   // here to avoid a circular dependency at module load.
   try {
     const { empiricalTradability } = await import("@/lib/analysis/patterns");
-    _empiricalCache = empiricalTradability(5);
+    _empiricalCache = await empiricalTradability(5);
   } catch {
     _empiricalCache = null;
   }
@@ -1163,7 +1161,7 @@ export async function runSignalGen(
   // still-zero corroborating sources. AUTHORITATIVE: pipeline/lifecycle.ts
   // + repos/signals.sweepExpiredSignals. Idempotent — runs every gen cycle.
   try {
-    const swept = Signals.sweepExpiredSignals();
+    const swept = await Signals.sweepExpiredSignals();
     if (swept.stale_unexecuted + swept.uncorroborated > 0) {
       console.log(
         `[signal-gen] lifecycle sweep: stale=${swept.stale_unexecuted} uncorroborated=${swept.uncorroborated}`,
@@ -1183,21 +1181,20 @@ export async function runSignalGen(
   }
   // Pull recent classifications joined with event metadata.
   // Includes author + is_blue_verified for the source-tier axis.
-  const rows = db()
-    .prepare<[number], RowWithTitle>(
-      `SELECT c.event_id, c.event_type, c.sentiment, c.severity, c.confidence,
-              c.actionable, c.event_recency,
-              c.affected_asset_ids, c.reasoning,
-              c.mechanism_length, c.counterfactual_strength,
-              c.coverage_continuation_of,
-              n.release_time, n.title, n.content,
-              n.is_blue_verified, n.author
-       FROM classifications c
-       JOIN news_events n ON n.id = c.event_id
-       WHERE n.release_time >= ?
-       ORDER BY n.release_time DESC`,
-    )
-    .all(since);
+  const rows = await all<RowWithTitle>(
+    `SELECT c.event_id, c.event_type, c.sentiment, c.severity, c.confidence,
+            c.actionable, c.event_recency,
+            c.affected_asset_ids, c.reasoning,
+            c.mechanism_length, c.counterfactual_strength,
+            c.coverage_continuation_of,
+            n.release_time, n.title, n.content,
+            n.is_blue_verified, n.author
+     FROM classifications c
+     JOIN news_events n ON n.id = c.event_id
+     WHERE n.release_time >= ?
+     ORDER BY n.release_time DESC`,
+    [since],
+  );
 
   // Window for dedup of similar signals (same asset/direction/event_type).
   // Set to 12h: a single news cycle (Coinbase Q1 miss, SEC announcement,
@@ -1313,7 +1310,7 @@ export async function runSignalGen(
     // Compute conviction across multiple weighted axes. Each axis is
     // tracked individually so the signal's reasoning can show the user
     // exactly why it scored high or low.
-    const axes = computeConvictionAxes(
+    const axes = await computeConvictionAxes(
       r.confidence,
       r.event_type,
       r.severity,
@@ -1328,7 +1325,7 @@ export async function runSignalGen(
     // story). A single tweet at AUTO conviction is too risky to
     // auto-execute on. Downgrade to REVIEW (= manual approval).
     // Compute corroboration once for both AUTO downgrade + age-staleness check.
-    const corroboration = corroborationCount(
+    const corroboration = await corroborationCount(
       r.event_id,
       r.release_time,
       r.event_type,
@@ -1368,13 +1365,18 @@ export async function runSignalGen(
       earnings: ["stock", "treasury"],
       // (no others restricted today — add as we observe miscategorisations)
     };
-    const allowedKinds = allowedKindsByEventType[r.event_type];
-    const filteredIds = allowedKinds
-      ? affectedIds.filter((id) => {
-          const a = Assets.getAssetById(id);
-          return a && allowedKinds.includes(a.kind);
-        })
-      : affectedIds;
+    const allowedKinds: Array<string> | undefined =
+      allowedKindsByEventType[r.event_type];
+    let filteredIds: string[];
+    if (allowedKinds) {
+      filteredIds = [];
+      for (const id of affectedIds) {
+        const a = await Assets.getAssetById(id);
+        if (a && allowedKinds.includes(a.kind)) filteredIds.push(id);
+      }
+    } else {
+      filteredIds = affectedIds;
+    }
     // If smart routing eliminated everything, fall back so we don't drop
     // the signal entirely.
     const baseIds = filteredIds.length > 0 ? filteredIds : affectedIds;
@@ -1396,18 +1398,22 @@ export async function runSignalGen(
     // the named affected entities (Bug 1: MAG7 fired on COIN/MSTR news).
     // It also has a listing-event override (Bug 1: BTC fired on PROS
     // listing because BTC appeared as quote currency in the trading pair).
-    const candidatesForRouter = baseIds
-      .map((id) => {
-        const a = Assets.getAssetById(id);
-        if (!a) return null;
-        return {
-          asset_id: a.id,
-          symbol: a.symbol,
-          kind: a.kind,
-          tradable: !!a.tradable,
-        };
-      })
-      .filter((c): c is NonNullable<typeof c> => c !== null);
+    const candidatesForRouter: Array<{
+      asset_id: string;
+      symbol: string;
+      kind: string;
+      tradable: boolean;
+    }> = [];
+    for (const id of baseIds) {
+      const a = await Assets.getAssetById(id);
+      if (!a) continue;
+      candidatesForRouter.push({
+        asset_id: a.id,
+        symbol: a.symbol,
+        kind: a.kind,
+        tradable: !!a.tradable,
+      });
+    }
 
     const routing = routeAssets({
       title: r.title,
@@ -1457,7 +1463,7 @@ export async function runSignalGen(
     // drop this event. If we're stronger → defer the supersede call
     // until we have a new signal id (see below at insertSignal).
     const STORY_WINDOW_MS = 12 * 60 * 60 * 1000;
-    const storyMatches = Signals.findStoryOverlap({
+    const storyMatches = await Signals.findStoryOverlap({
       asset_ids: affectedIds,
       event_type: r.event_type,
       direction,
@@ -1481,15 +1487,16 @@ export async function runSignalGen(
     // ONE story; surfacing it as 3 signals inflated the active list
     // and made the dashboard look noisier than the news flow actually
     // was.
-    let primaryAsset: ReturnType<typeof Assets.getAssetById> = undefined;
+    let primaryAsset: Awaited<ReturnType<typeof Assets.getAssetById>> =
+      undefined;
     let primaryAssetId: string | null = null;
-    let opposite: ReturnType<
-      typeof Signals.findOppositePendingForAsset
+    let opposite: Awaited<
+      ReturnType<typeof Signals.findOppositePendingForAsset>
     > = undefined;
     const candidateAssets: string[] = [];
 
     for (const assetId of idsToUse) {
-      const asset = Assets.getAssetById(assetId);
+      const asset = await Assets.getAssetById(assetId);
       if (!asset?.tradable) {
         skipNoTradable++;
         continue;
@@ -1503,7 +1510,7 @@ export async function runSignalGen(
         skipNoTradable++;
         continue;
       }
-      if (Signals.existsForEventAsset(r.event_id, assetId)) {
+      if (await Signals.existsForEventAsset(r.event_id, assetId)) {
         skipDup++;
         continue;
       }
@@ -1542,7 +1549,7 @@ export async function runSignalGen(
         continue;
       }
       if (
-        Signals.existsRecentForAssetDirection(
+        await Signals.existsRecentForAssetDirection(
           assetId,
           direction,
           r.event_type,
@@ -1562,7 +1569,7 @@ export async function runSignalGen(
       // disagreeing on an asset (MSTR LONG from JPMorgan vs MSTR SHORT
       // from UBS) are both legitimate and tradeable. Those go through
       // `findOppositePendingForAsset` below for conflict resolution.
-      const sameDirPending = Signals.findSameDirectionPendingForAsset(
+      const sameDirPending = await Signals.findSameDirectionPendingForAsset(
         assetId,
         direction,
       );
@@ -1615,9 +1622,14 @@ export async function runSignalGen(
         `AUTO tier requires ≥2 independent outlets covering the story.`;
     }
     if (candidateAssets.length > 0) {
-      const symbols = candidateAssets
-        .map((id) => Assets.getAssetById(id)?.symbol ?? id)
-        .join(", ");
+      const symbols = (
+        await Promise.all(
+          candidateAssets.map(async (id) => {
+            const a = await Assets.getAssetById(id);
+            return a?.symbol ?? id;
+          }),
+        )
+      ).join(", ");
       enrichedReasoning += `\n\nAlso affected: ${symbols}.`;
     }
 
@@ -1646,7 +1658,7 @@ export async function runSignalGen(
       title: r.title,
       sentiment: r.sentiment,
     });
-    const vol = realizedVol30d(primaryAssetId);
+    const vol = await realizedVol30d(primaryAssetId);
 
     // ── Risk derivation: base rate table → vol-aware fallback ──
     // AUTHORITATIVE: src/lib/pipeline/base-rates.ts (Dimension 5).
@@ -1672,7 +1684,7 @@ export async function runSignalGen(
     // The drop gate at 0.25 fires uniformly. ALL persisted signals MUST
     // carry a non-null significance_score (invariant I-45).
     const assetRelevanceScore = relevanceScoreFromLevel(routing.primary.relevance);
-    const recentHeadlines = recentHeadlinesForAsset(primaryAssetId);
+    const recentHeadlines = await recentHeadlinesForAsset(primaryAssetId);
     const sig = scoreSignificance({
       headline: r.title,
       subtype,
@@ -1685,7 +1697,7 @@ export async function runSignalGen(
       recent_headlines: recentHeadlines,
     });
     if (sig.tier === "drop") {
-      insertDroppedHeadline({
+      await insertDroppedHeadline({
         id: `${r.event_id}:${primaryAssetId}`,
         headline_text: r.title,
         classified_subtype: subtype,
@@ -1789,7 +1801,7 @@ export async function runSignalGen(
       new_conviction: conviction,
       primary_asset_id: primaryAssetId,
       new_event_chain_id: eventChainId,
-      history: recentHistoryForAsset(primaryAssetId),
+      history: await recentHistoryForAsset(primaryAssetId),
     });
     const finalConviction = historyAdjust.adjusted_conviction;
     if (historyAdjust.adjusted_conviction < conviction) {
@@ -1841,8 +1853,8 @@ export async function runSignalGen(
     // drop. Prices come from klines_daily (we have 30+d for most assets);
     // when missing, the check returns null and we proceed unaffected.
     const expectedMovePct = baseRate?.mean_move_pct ?? targetPct;
-    const catalystPrice = priceAtOrBefore(primaryAssetId, r.release_time);
-    const currentPrice = mostRecentClose(primaryAssetId);
+    const catalystPrice = await priceAtOrBefore(primaryAssetId, r.release_time);
+    const currentPrice = await mostRecentClose(primaryAssetId);
     const realizedFraction = computeRealizedFraction({
       direction,
       catalyst_price: catalystPrice,
@@ -2017,7 +2029,7 @@ export async function runSignalGen(
     // sensibly; when missing, skip Phase D/E (the signal still inserts
     // with its non-null significance score).
     if (assetClass) {
-      const oppositePending = Signals.findOppositePendingForAsset(
+      const oppositePending = await Signals.findOppositePendingForAsset(
         primaryAssetId,
         direction,
       );
@@ -2046,7 +2058,7 @@ export async function runSignalGen(
         };
         const verdict = resolveConflict(newCand, existingCand);
         if (verdict.kind === "suppress_new") {
-          insertSuppressedSignal({
+          await insertSuppressedSignal({
             suppressed_signal_data: {
               event_id: r.event_id,
               asset_id: primaryAssetId,
@@ -2064,8 +2076,8 @@ export async function runSignalGen(
           continue;
         }
         if (verdict.kind === "suppress_existing") {
-          Signals.markSuppressed(oppositePending.id, newSignalId);
-          insertSuppressedSignal({
+          await Signals.markSuppressed(oppositePending.id, newSignalId);
+          await insertSuppressedSignal({
             suppressed_signal_data: { existing_signal_id: oppositePending.id },
             reason: verdict.reason,
             conflicting_signal_id: newSignalId,
@@ -2073,8 +2085,8 @@ export async function runSignalGen(
             significance_winner: verdict.winner_significance,
           });
         } else if (verdict.kind === "supersede_existing") {
-          Signals.markSupersededByConflict(oppositePending.id, newSignalId);
-          insertSupersession({
+          await Signals.markSupersededByConflict(oppositePending.id, newSignalId);
+          await insertSupersession({
             superseded_signal_id: oppositePending.id,
             superseding_signal_id: newSignalId,
             significance_ratio: verdict.ratio,
@@ -2119,58 +2131,53 @@ export async function runSignalGen(
           `subtype=${subtype} — significance pipeline must produce a score.`,
       );
     }
-    transaction(() => {
-      // Same-direction-same-asset supersession: a new stronger signal
-      // retires the prior pending one on this asset+direction. Story-
-      // level supersession: same UNDERLYING story (different primary
-      // asset) — retires duplicate coverage on the dashboard.
-      // BOTH must live inside this transaction so a downstream throw
-      // (e.g. outcome insert failing) rolls them back along with the
-      // insert. Pre-Phase-G these ran above the gate and persisted
-      // even when the new signal didn't, producing phantom
-      // supersessions referencing a UUID that never existed.
-      if (opposite && opposite.confidence < conviction) {
-        Signals.markSuperseded(opposite.id, newSignalId);
-      }
-      if (storyConflict && storyConflict.confidence < conviction) {
-        Signals.markSuperseded(storyConflict.id, newSignalId);
-      }
-      Signals.insertSignal({
-        id: newSignalId,
-        triggered_by_event_id: r.event_id,
-        pattern_id: null,
-        asset_id: primaryAssetId,
-        sodex_symbol: sodexSymbol,
-        direction,
-        tier,
-        confidence: finalConviction,
-        expected_impact_pct: null,
-        expected_horizon: horizon,
-        suggested_size_usd: size,
-        suggested_stop_pct: stopPct,
-        suggested_target_pct: targetPct,
-        reasoning: enrichedReasoning,
-        secondary_asset_ids:
-          candidateAssets.length > 0 ? JSON.stringify(candidateAssets) : null,
-        catalyst_subtype: subtype,
-        expires_at: lifecycle.expires_at,
-        corroboration_deadline: lifecycle.corroboration_deadline,
-        event_chain_id: eventChainId,
-        asset_relevance: preSave.asset_relevance,
-        promotional_score: promo.score,
-        source_tier: sourceTier,
-        significance_score: significanceScore,
-      });
-      Outcomes.insertOutcomeFromSignal({
-        signal_id: newSignalId,
-        asset_class: assetClass ?? "unknown",
-        price_at_generation: catalystPrice,
-      });
+    // Wave 2: libSQL transactions are async and per-statement; the
+    // operations below are individually idempotent (markSuperseded only
+    // touches status='pending' rows; insertSignal is uuid-keyed) so we
+    // execute them sequentially. If insertOutcomeFromSignal throws we
+    // surface the error and the caller re-runs — Outcomes.outcomeExistsFor
+    // below confirms the I-30 invariant held.
+    if (opposite && opposite.confidence < conviction) {
+      await Signals.markSuperseded(opposite.id, newSignalId);
+    }
+    if (storyConflict && storyConflict.confidence < conviction) {
+      await Signals.markSuperseded(storyConflict.id, newSignalId);
+    }
+    await Signals.insertSignal({
+      id: newSignalId,
+      triggered_by_event_id: r.event_id,
+      pattern_id: null,
+      asset_id: primaryAssetId,
+      sodex_symbol: sodexSymbol,
+      direction,
+      tier,
+      confidence: finalConviction,
+      expected_impact_pct: null,
+      expected_horizon: horizon,
+      suggested_size_usd: size,
+      suggested_stop_pct: stopPct,
+      suggested_target_pct: targetPct,
+      reasoning: enrichedReasoning,
+      secondary_asset_ids:
+        candidateAssets.length > 0 ? JSON.stringify(candidateAssets) : null,
+      catalyst_subtype: subtype,
+      expires_at: lifecycle.expires_at,
+      corroboration_deadline: lifecycle.corroboration_deadline,
+      event_chain_id: eventChainId,
+      asset_relevance: preSave.asset_relevance,
+      promotional_score: promo.score,
+      source_tier: sourceTier,
+      significance_score: significanceScore,
+    });
+    await Outcomes.insertOutcomeFromSignal({
+      signal_id: newSignalId,
+      asset_class: assetClass ?? "unknown",
+      price_at_generation: catalystPrice,
     });
     // I-30 fallback assertion: confirm the outcome row landed. If it
     // didn't, throw — this exits the per-event loop before incrementing
     // `created` so the run summary stays honest.
-    if (!Outcomes.outcomeExistsFor(newSignalId)) {
+    if (!(await Outcomes.outcomeExistsFor(newSignalId))) {
       console.error(
         `[signal-gen] I-30 violation: signal ${newSignalId} persisted without outcome row (outcome_record_failed)`,
       );
