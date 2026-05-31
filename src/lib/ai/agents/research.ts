@@ -30,6 +30,9 @@ import type {
 import { searchOutletCoverageTool } from "./tools/search-outlet-coverage";
 import { assetHistoryTool } from "./tools/asset-history";
 import { eventTypeStatsTool } from "./tools/event-type-stats";
+import { fetchFullArticleTool } from "./tools/fetch-full-article";
+import { queryBaseRateTool } from "./tools/query-base-rate";
+import { queryPriceAroundCatalystTool } from "./tools/query-price-around-catalyst";
 import type { AgentTool } from "./tools/types";
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -37,7 +40,7 @@ import type { AgentTool } from "./tools/types";
 // ─────────────────────────────────────────────────────────────────────────
 
 const PRICING = { input: 3, cached: 0.3, output: 15 }; // per 1M tokens
-const MAX_ROUNDS = 6;
+const MAX_ROUNDS = 8;
 const MAX_OUTPUT_TOKENS = 2000;
 
 // Registry of tools the research agent can call. Adding a tool here is
@@ -47,6 +50,9 @@ const TOOLS: Record<string, AgentTool> = {
   search_outlet_coverage: searchOutletCoverageTool as AgentTool,
   query_asset_history: assetHistoryTool as AgentTool,
   query_event_type_stats: eventTypeStatsTool as AgentTool,
+  fetch_full_article: fetchFullArticleTool as AgentTool,
+  query_base_rate: queryBaseRateTool as AgentTool,
+  query_price_around_catalyst: queryPriceAroundCatalystTool as AgentTool,
 };
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -153,12 +159,19 @@ function systemPrompt(universe: Array<{ id: string; symbol: string; name: string
     "GUIDELINES:",
     "  - Don't burn rounds on obviously-clear news. If a Reuters",
     "    headline names a CEO change at a major company, just classify.",
+    "  - If the headline is ambiguous, call fetch_full_article on the",
+    "    source_link to read the body before classifying.",
     "  - If the headline mentions a specific asset, query_asset_history",
     "    is usually worth one call.",
-    "  - If you're proposing a high-conviction direction, calling",
-    "    query_event_type_stats is a good idea — measured hit rates often",
-    "    contradict the model's intuition.",
+    "  - Before proposing a high-conviction direction, check that the",
+    "    price hasn't already moved by calling query_price_around_catalyst",
+    "    — chasing a move that's already in the tape is the #1 risk.",
+    "  - Calibrate conviction against history: query_event_type_stats",
+    "    for the broad type, query_base_rate for the specific subtype.",
+    "    If the base rate says ~3% mean move and you proposed a 15%",
+    "    target, dial down — the model's intuition is mis-calibrated.",
     "  - Cite specific tool results in your final `reasoning` string.",
+    "    Numbers and named outlets, not adjectives.",
     "",
     "AVAILABLE ASSETS (use the exact id):",
     universeList,
@@ -176,6 +189,7 @@ function buildInitialUserContent(event: StoredEvent): string {
     `Title: ${event.title}`,
     `Author: ${event.author ?? "(unknown)"}`,
     `Released: ${new Date(event.release_time).toISOString()}`,
+    event.source_link ? `source_link: ${event.source_link}` : "",
     event.content
       ? `Body (first 400 chars): ${event.content.slice(0, 400)}`
       : "",
