@@ -6,13 +6,8 @@
  * right aggregates.
  */
 
-import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  bootstrapSchema,
-  _setDatabaseForTests,
-  db,
-} from "@/lib/db/client";
+import { run } from "@/lib/db/client";
 import {
   hitRateByTier,
   hitRateByCatalystSubtype,
@@ -20,6 +15,7 @@ import {
   pnlBySubtypeAndAssetClass,
   topWinnersAndLosers,
 } from "@/lib/queries/calibration";
+import { setupMemoryDb, teardownMemoryDb } from "./db-setup";
 
 interface SeedRow {
   signal_id: string;
@@ -95,43 +91,36 @@ function seedRows(): SeedRow[] {
   return rows;
 }
 
-function insertRows(rows: SeedRow[]): void {
-  // Need parent assets + signal stubs because applyResolution joins on
-  // signals.suggested_size_usd. Easier: insert rows directly into
-  // signal_outcomes (we're testing queries, not the DB integrity layer).
-  const stmt = db().prepare(
-    `INSERT INTO signal_outcomes (
-       signal_id, asset_id, direction, catalyst_subtype, asset_class,
-       tier, conviction,
-       generated_at, horizon_hours, expires_at,
-       price_at_generation, target_pct, stop_pct,
-       outcome, outcome_at, price_at_outcome, realized_pct, realized_pnl_usd,
-       recorded_at
-     ) VALUES (
-       @signal_id, 'tok-test', 'long', @catalyst_subtype, @asset_class,
-       @tier, @conviction,
-       @generated_at, 48, @generated_at + 48*3600*1000,
-       100, 5, 3,
-       @outcome, @outcome_at, 105, @realized_pct, @realized_pnl_usd,
-       @generated_at
-     )`,
-  );
+async function insertRows(rows: SeedRow[]): Promise<void> {
+  const sql = `INSERT INTO signal_outcomes (
+     signal_id, asset_id, direction, catalyst_subtype, asset_class,
+     tier, conviction,
+     generated_at, horizon_hours, expires_at,
+     price_at_generation, target_pct, stop_pct,
+     outcome, outcome_at, price_at_outcome, realized_pct, realized_pnl_usd,
+     recorded_at
+   ) VALUES (?, 'tok-test', 'long', ?, ?, ?, ?, ?, 48, ?, 100, 5, 3, ?, ?, 105, ?, ?, ?)`;
   for (const r of rows) {
-    stmt.run({
-      signal_id: r.signal_id,
-      catalyst_subtype: r.catalyst_subtype,
-      asset_class: r.asset_class,
-      tier: r.tier,
-      conviction: r.conviction,
-      generated_at: r.generated_at,
-      outcome: r.outcome,
-      outcome_at:
-        r.outcome === "target_hit" || r.outcome === "stop_hit" || r.outcome === "flat"
-          ? r.generated_at + 24 * 3600 * 1000
-          : null,
-      realized_pct: r.realized_pct,
-      realized_pnl_usd: r.realized_pnl_usd,
-    });
+    const outcome_at =
+      r.outcome === "target_hit" ||
+      r.outcome === "stop_hit" ||
+      r.outcome === "flat"
+        ? r.generated_at + 24 * 3600 * 1000
+        : null;
+    await run(sql, [
+      r.signal_id,
+      r.catalyst_subtype,
+      r.asset_class,
+      r.tier,
+      r.conviction,
+      r.generated_at,
+      r.generated_at + 48 * 3600 * 1000,
+      r.outcome,
+      outcome_at,
+      r.realized_pct,
+      r.realized_pnl_usd,
+      r.generated_at,
+    ]);
   }
 }
 
@@ -140,24 +129,15 @@ function insertRows(rows: SeedRow[]): void {
 // ────────────────────────────────────────────────────────────────────────
 
 describe("Part 2 — calibration queries", () => {
-  let memDb: Database.Database;
-
-  beforeEach(() => {
-    memDb = new Database(":memory:");
-    memDb.pragma("foreign_keys = ON");
-    bootstrapSchema(memDb);
-    _setDatabaseForTests(memDb);
-    insertRows(seedRows());
+  beforeEach(async () => {
+    await setupMemoryDb();
+    await insertRows(seedRows());
   });
-
-  afterEach(() => {
-    _setDatabaseForTests(null);
-    memDb.close();
-  });
+  afterEach(() => teardownMemoryDb());
 
   // Panel 1
-  it("hitRateByTier — 30d window, AUTO has 5w/2l/1f, REVIEW has 11w/6l/3f", () => {
-    const rows = hitRateByTier({ window_days: 30, now_ms: NOW });
+  it("hitRateByTier — 30d window, AUTO has 5w/2l/1f, REVIEW has 11w/6l/3f", async () => {
+    const rows = await hitRateByTier({ window_days: 30, now_ms: NOW });
     const auto = rows.find((r) => r.tier === "auto")!;
     expect(auto.target_hit).toBe(5);
     expect(auto.stop_hit).toBe(2);
@@ -176,44 +156,47 @@ describe("Part 2 — calibration queries", () => {
     expect(info.stop_hit).toBe(2);
   });
 
-  it("hitRateByTier — narrower 7d window returns smaller sample", () => {
-    const rows = hitRateByTier({ window_days: 7, now_ms: NOW });
+  it("hitRateByTier — narrower 7d window returns smaller sample", async () => {
+    const rows = await hitRateByTier({ window_days: 7, now_ms: NOW });
     const review = rows.find((r) => r.tier === "review");
-    // We seeded review rows from daysAgo=0..19, so 7d only catches 0..6.
     expect(review!.sample).toBeLessThan(20);
   });
 
   // Panel 2
-  it("hitRateByCatalystSubtype — earnings_reaction has 5w/2l/1f over 8 (n>=5 passes filter)", () => {
-    const rows = hitRateByCatalystSubtype({ window_days: 90, now_ms: NOW });
+  it("hitRateByCatalystSubtype — earnings_reaction has 5w/2l/1f over 8", async () => {
+    const rows = await hitRateByCatalystSubtype({
+      window_days: 90,
+      now_ms: NOW,
+    });
     const er = rows.find((r) => r.catalyst_subtype === "earnings_reaction");
     expect(er).toBeDefined();
     expect(er!.sample).toBe(8);
     expect(er!.target_hit).toBe(5);
-    // mean realized: (6*5 + (-7)*2 + 0.5)/8 = 16.5/8 = 2.0625
     expect(er!.mean_realized_pct).toBeCloseTo(2.06, 1);
   });
 
-  it("hitRateByCatalystSubtype — drops subtypes with sample < 5", () => {
-    // We seeded 0 of any subtype with n<5 in this fixture, but the filter
-    // should be present. Insert a spurious row for a never-seen subtype:
-    db()
-      .prepare(
-        `INSERT INTO signal_outcomes (
-           signal_id, asset_id, direction, catalyst_subtype, asset_class,
-           tier, conviction, generated_at, horizon_hours, expires_at,
-           target_pct, stop_pct, outcome, realized_pct, recorded_at
-         ) VALUES ('one-off', 'tok-test', 'long', 'rare_subtype', 'x', 'info', 0.5, ?, 24, ?, 5, 3, 'flat', 0, ?)`,
-      )
-      .run(NOW, NOW + 24 * 3600 * 1000, NOW);
-    const rows = hitRateByCatalystSubtype({ window_days: 90, now_ms: NOW });
+  it("hitRateByCatalystSubtype — drops subtypes with sample < 5", async () => {
+    await run(
+      `INSERT INTO signal_outcomes (
+         signal_id, asset_id, direction, catalyst_subtype, asset_class,
+         tier, conviction, generated_at, horizon_hours, expires_at,
+         target_pct, stop_pct, outcome, realized_pct, recorded_at
+       ) VALUES ('one-off', 'tok-test', 'long', 'rare_subtype', 'x', 'info', 0.5, ?, 24, ?, 5, 3, 'flat', 0, ?)`,
+      [NOW, NOW + 24 * 3600 * 1000, NOW],
+    );
+    const rows = await hitRateByCatalystSubtype({
+      window_days: 90,
+      now_ms: NOW,
+    });
     expect(rows.find((r) => r.catalyst_subtype === "rare_subtype")).toBeUndefined();
   });
 
   // Panel 3
-  it("convictionCalibrationCurve — bins are 10-point ranges, hit_rate per bin", () => {
-    const bins = convictionCalibrationCurve({ window_days: 90, now_ms: NOW });
-    // 80-90 bin: 8 rows (auto), 5 wins / 2 losses / 1 flat → hit_rate = 5/8 = 0.625
+  it("convictionCalibrationCurve — bins are 10-point ranges", async () => {
+    const bins = await convictionCalibrationCurve({
+      window_days: 90,
+      now_ms: NOW,
+    });
     const b80 = bins.find((b) => b.bin_start === 80);
     expect(b80).toBeDefined();
     expect(b80!.sample).toBe(8);
@@ -224,17 +207,22 @@ describe("Part 2 — calibration queries", () => {
     expect(b80!.mean_conviction).toBeCloseTo(0.83, 1);
   });
 
-  it("convictionCalibrationCurve — empty bins are not returned", () => {
-    const bins = convictionCalibrationCurve({ window_days: 90, now_ms: NOW });
-    // We didn't seed anything in 0-10, 10-20, 20-30 ranges.
+  it("convictionCalibrationCurve — empty bins are not returned", async () => {
+    const bins = await convictionCalibrationCurve({
+      window_days: 90,
+      now_ms: NOW,
+    });
     expect(bins.find((b) => b.bin_start === 0)).toBeUndefined();
     expect(bins.find((b) => b.bin_start === 10)).toBeUndefined();
     expect(bins.find((b) => b.bin_start === 20)).toBeUndefined();
   });
 
   // Panel 4
-  it("pnlBySubtypeAndAssetClass — earnings_reaction × crypto_adjacent_equity exists with mean ~2.06", () => {
-    const rows = pnlBySubtypeAndAssetClass({ window_days: 90, now_ms: NOW });
+  it("pnlBySubtypeAndAssetClass — earnings_reaction × crypto_adjacent_equity with mean ~2.06", async () => {
+    const rows = await pnlBySubtypeAndAssetClass({
+      window_days: 90,
+      now_ms: NOW,
+    });
     const cell = rows.find(
       (r) =>
         r.catalyst_subtype === "earnings_reaction" &&
@@ -246,8 +234,12 @@ describe("Part 2 — calibration queries", () => {
   });
 
   // Panel 5
-  it("topWinnersAndLosers — best are target_hit rows, worst are stop_hit", () => {
-    const r = topWinnersAndLosers({ limit: 5, window_days: 90, now_ms: NOW });
+  it("topWinnersAndLosers — best are target_hit rows, worst are stop_hit", async () => {
+    const r = await topWinnersAndLosers({
+      limit: 5,
+      window_days: 90,
+      now_ms: NOW,
+    });
     expect(r.winners.length).toBeGreaterThan(0);
     expect(r.losers.length).toBeGreaterThan(0);
     // All winners should have realized_pct > 0

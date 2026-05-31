@@ -28,27 +28,12 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import Database from "better-sqlite3";
-import {
-  bootstrapSchema,
-  _setDatabaseForTests,
-  db,
-} from "@/lib/db/client";
+import { all, get, run } from "@/lib/db/client";
 import { Assets } from "@/lib/db";
 import { runSignalGen } from "@/lib/trading/signal-generator";
 import { FIXTURES, type Fixture } from "./adversarial-fixtures";
 import type { Asset, SodexTradable } from "@/lib/universe";
-
-// ────────────────────────────────────────────────────────────────────────
-// Test harness
-// ────────────────────────────────────────────────────────────────────────
-
-function makeMemoryDb(): Database.Database {
-  const conn = new Database(":memory:");
-  conn.pragma("foreign_keys = ON");
-  bootstrapSchema(conn);
-  return conn;
-}
+import { setupMemoryDb, teardownMemoryDb } from "./db-setup";
 
 function tradable(symbol: string, market: "spot" | "perp"): SodexTradable {
   return { symbol, market, base: symbol.split(/_|-/)[0], quote: "vUSDC" };
@@ -115,55 +100,41 @@ const TEST_ASSETS: Asset[] = [
  * asset gates — `actionable=1`, `event_recency='today'` — so we can
  * observe what happens at the routing/risk/lifecycle stages.
  */
-function seedFixture(f: Fixture): void {
-  const handle = db();
-  handle
-    .prepare(
-      `INSERT INTO news_events (
-         id, release_time, title, content, author, source_link, original_link,
-         category, tags, matched_currencies,
-         impression_count, like_count, retweet_count, is_blue_verified,
-         raw_json
-       ) VALUES (
-         @id, @release_time, @title, @content, @author, NULL, NULL,
-         1, '[]', '[]',
-         NULL, NULL, NULL, @is_blue_verified,
-         @raw_json
-       )`,
-    )
-    .run({
-      id: f.id,
-      release_time: f.raw.release_time,
-      title: f.raw.title,
-      content: f.raw.content,
-      author: f.raw.author,
-      is_blue_verified: f.raw.is_blue_verified ? 1 : 0,
-      raw_json: JSON.stringify(f.raw),
-    });
+async function seedFixture(f: Fixture): Promise<void> {
+  await run(
+    `INSERT INTO news_events (
+       id, release_time, title, content, author, source_link, original_link,
+       category, tags, matched_currencies,
+       impression_count, like_count, retweet_count, is_blue_verified,
+       raw_json
+     ) VALUES (?, ?, ?, ?, ?, NULL, NULL, 1, '[]', '[]', NULL, NULL, NULL, ?, ?)`,
+    [
+      f.id,
+      f.raw.release_time,
+      f.raw.title,
+      f.raw.content,
+      f.raw.author,
+      f.raw.is_blue_verified ? 1 : 0,
+      JSON.stringify(f.raw),
+    ],
+  );
 
-  handle
-    .prepare(
-      `INSERT INTO classifications (
-         event_id, event_type, sentiment, severity, confidence,
-         actionable, event_recency, affected_asset_ids,
-         reasoning, model, prompt_version
-       ) VALUES (
-         @event_id, @event_type, @sentiment, @severity, @confidence,
-         1, 'today', @affected_asset_ids,
-         @reasoning, 'test-model', 'v1'
-       )`,
-    )
-    .run({
-      event_id: f.id,
-      event_type: f.classification.event_type,
-      sentiment: f.classification.sentiment,
-      severity: f.classification.severity,
-      confidence: f.classification.confidence,
-      affected_asset_ids: JSON.stringify(
-        f.classification.affected_asset_ids,
-      ),
-      reasoning: f.classification.reasoning,
-    });
+  await run(
+    `INSERT INTO classifications (
+       event_id, event_type, sentiment, severity, confidence,
+       actionable, event_recency, affected_asset_ids,
+       reasoning, model, prompt_version
+     ) VALUES (?, ?, ?, ?, ?, 1, 'today', ?, ?, 'test-model', 'v1')`,
+    [
+      f.id,
+      f.classification.event_type,
+      f.classification.sentiment,
+      f.classification.severity,
+      f.classification.confidence,
+      JSON.stringify(f.classification.affected_asset_ids),
+      f.classification.reasoning,
+    ],
+  );
 }
 
 interface PersistedSignal {
@@ -181,36 +152,25 @@ interface PersistedSignal {
   fired_at: number;
 }
 
-function readSignals(): PersistedSignal[] {
-  return db()
-    .prepare<[], PersistedSignal>(
-      `SELECT id, asset_id, direction, tier, confidence,
-              catalyst_subtype, asset_relevance, expires_at,
-              corroboration_deadline, source_tier, expected_horizon,
-              fired_at
-       FROM signals
-       WHERE status = 'pending'
-       ORDER BY confidence DESC`,
-    )
-    .all();
+async function readSignals(): Promise<PersistedSignal[]> {
+  return all<PersistedSignal>(
+    `SELECT id, asset_id, direction, tier, confidence,
+            catalyst_subtype, asset_relevance, expires_at,
+            corroboration_deadline, source_tier, expected_horizon,
+            fired_at
+     FROM signals
+     WHERE status = 'pending'
+     ORDER BY confidence DESC`,
+  );
 }
 
-// ────────────────────────────────────────────────────────────────────────
-// Lifecycle
-// ────────────────────────────────────────────────────────────────────────
-
-let memDb: Database.Database;
-
-beforeEach(() => {
-  memDb = makeMemoryDb();
-  _setDatabaseForTests(memDb);
-  // Seed the asset universe — every fixture references a subset.
-  Assets.upsertAssets(TEST_ASSETS);
+beforeEach(async () => {
+  await setupMemoryDb();
+  await Assets.upsertAssets(TEST_ASSETS);
 });
 
 afterEach(() => {
-  _setDatabaseForTests(null);
-  if (memDb) memDb.close();
+  teardownMemoryDb();
 });
 
 // ────────────────────────────────────────────────────────────────────────
@@ -221,7 +181,7 @@ describe("Integration: pipeline metadata persists end-to-end (Gap D)", () => {
   it("F03 — MSTR treasury catalyst persists treasury_action subtype + 1.00 relevance + multi-day expiry", async () => {
     const f = FIXTURES.find((x) => x.id === "F03_mstr_bsketed_to_mag7");
     expect(f, "fixture F03 must exist").toBeDefined();
-    seedFixture(f!);
+    await seedFixture(f!);
 
     const summary = await runSignalGen({ lookbackHours: 168 });
 
@@ -231,7 +191,7 @@ describe("Integration: pipeline metadata persists end-to-end (Gap D)", () => {
     // but MSTR comes earlier in the title ("Strategy added 145,834 BTC").
     expect(summary.signals_created).toBeGreaterThanOrEqual(1);
 
-    const signals = readSignals();
+    const signals = await readSignals();
     expect(signals.length).toBeGreaterThanOrEqual(1);
     const primary = signals.find((s) => s.asset_id === "trs-mstr");
     expect(primary, "MSTR must be selected as primary").toBeDefined();
@@ -275,12 +235,12 @@ describe("Integration: pipeline metadata persists end-to-end (Gap D)", () => {
   it("F05 — Coinbase outage persists transient_operational subtype + hours-scale expiry", async () => {
     const f = FIXTURES.find((x) => x.id === "F05_aws_outage_short_horizon");
     expect(f).toBeDefined();
-    seedFixture(f!);
+    await seedFixture(f!);
 
     const summary = await runSignalGen({ lookbackHours: 168 });
     expect(summary.signals_created).toBeGreaterThanOrEqual(1);
 
-    const signals = readSignals();
+    const signals = await readSignals();
     const coin = signals.find((s) => s.asset_id === "stk-coin");
     expect(coin, "COIN signal must fire").toBeDefined();
 
@@ -320,7 +280,7 @@ describe("Integration: pipeline metadata persists end-to-end (Gap D)", () => {
   it("F09 — Crypto One Liners digest is BLOCKED end-to-end (no signal row at all)", async () => {
     const f = FIXTURES.find((x) => x.id === "F09_crypto_one_liners_digest");
     expect(f).toBeDefined();
-    seedFixture(f!);
+    await seedFixture(f!);
 
     const summary = await runSignalGen({ lookbackHours: 168 });
 
@@ -330,17 +290,11 @@ describe("Integration: pipeline metadata persists end-to-end (Gap D)", () => {
     // appear here and this assertion would fail.
     expect(summary.signals_created).toBe(0);
 
-    const signals = readSignals();
+    const signals = await readSignals();
     expect(signals).toHaveLength(0);
 
-    // Every catalyst-aware column on the persisted row should be absent
-    // because the row never existed in the first place. Belt-and-suspenders
-    // assertion: read the table directly and confirm zero rows.
-    const totalRows = (
-      memDb
-        .prepare<[], { n: number }>(`SELECT COUNT(*) AS n FROM signals`)
-        .get() as { n: number }
-    ).n;
+    const totalRows =
+      (await get<{ n: number }>(`SELECT COUNT(*) AS n FROM signals`))?.n ?? -1;
     expect(totalRows).toBe(0);
   });
 });
