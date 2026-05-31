@@ -33,7 +33,7 @@ async function handle(req: Request): Promise<NextResponse> {
       const r = runDatabaseBackup({ backup_dir: backupDir });
       const p = pruneOldBackups({ backup_dir: backupDir, retention_days: 30 });
       if (!r.ok) {
-        Alerts.raiseAlert("backup_failed", "error", r.error ?? "unknown");
+        await Alerts.raiseAlert("backup_failed", "error", r.error ?? "unknown");
       }
       return {
         summary: `backup ${r.ok ? "ok" : "FAILED"}: ${r.path ?? r.error} · pruned ${p.deleted}`,

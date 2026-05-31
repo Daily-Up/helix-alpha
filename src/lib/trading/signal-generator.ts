@@ -1989,7 +1989,7 @@ export async function runSignalGen(
         const firstRule =
           gateResult.violations.find((v) => v.severity === "block")?.rule ??
           "unknown_rule";
-        Outcomes.insertBlockedOutcome({
+        await Outcomes.insertBlockedOutcome({
           signal_id: newSignalId,
           asset_id: primaryAssetId,
           asset_class: assetClass ?? "unknown",

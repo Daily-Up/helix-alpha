@@ -133,7 +133,7 @@ export async function classifyEvent(
   };
 
   if (persist) {
-    Classifications.upsertClassification({
+    await Classifications.upsertClassification({
       event_id: event.id,
       event_type: result.event_type,
       sentiment: result.sentiment,
@@ -159,7 +159,7 @@ export async function classifyEvent(
     });
 
     // Link Claude's affected_asset_ids into event_assets as 'inferred'.
-    Events.linkEventAssets(
+    await Events.linkEventAssets(
       event.id,
       result.affected_asset_ids,
       "inferred",

@@ -26,7 +26,7 @@ const Patch = z
   .strict();
 
 export async function GET() {
-  return NextResponse.json(Settings.getSettings());
+  return NextResponse.json(await Settings.getSettings());
 }
 
 export async function POST(req: Request) {
@@ -39,6 +39,6 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   }
-  Settings.setSettings(patch);
-  return NextResponse.json({ ok: true, settings: Settings.getSettings() });
+  await Settings.setSettings(patch);
+  return NextResponse.json({ ok: true, settings: await Settings.getSettings() });
 }

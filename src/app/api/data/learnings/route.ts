@@ -39,12 +39,15 @@ export async function GET(req: Request) {
   const since_ms = parseWindow(url.searchParams.get("window"));
   const filter = since_ms != null ? { since_ms } : {};
 
-  const overall = Postmortem.overallStats(filter);
-  const byConfidence = Postmortem.statsByConfidence(filter);
-  const byEventType = Postmortem.statsByEventType(filter);
-  const byTier = Postmortem.statsByTier(filter);
-  const byAssetKind = Postmortem.statsByAssetKind(filter);
-  const recent = Postmortem.recentSignalOutcomes(150, filter);
+  const [overall, byConfidence, byEventType, byTier, byAssetKind, recent] =
+    await Promise.all([
+      Postmortem.overallStats(filter),
+      Postmortem.statsByConfidence(filter),
+      Postmortem.statsByEventType(filter),
+      Postmortem.statsByTier(filter),
+      Postmortem.statsByAssetKind(filter),
+      Postmortem.recentSignalOutcomes(150, filter),
+    ]);
 
   return NextResponse.json({
     window: url.searchParams.get("window") ?? "30d",

@@ -13,8 +13,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const snapshot = buildSystemHealth();
-  const open_alerts = Alerts.listOpenAlerts();
-  const recent_alerts = Alerts.listRecentAlerts(20);
+  const snapshot = await buildSystemHealth();
+  const open_alerts = await Alerts.listOpenAlerts();
+  const recent_alerts = await Alerts.listRecentAlerts(20);
   return NextResponse.json({ snapshot, open_alerts, recent_alerts });
 }

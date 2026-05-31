@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const limit = clamp(numParam(url, "limit") ?? 10, 1, 100);
-  const rows = FrameworkSwitches.listSwitches(limit);
+  const rows = await FrameworkSwitches.listSwitches(limit);
   return NextResponse.json({ ok: true, rows });
 }
 

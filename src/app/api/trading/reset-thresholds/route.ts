@@ -13,12 +13,12 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST() {
-  Settings.setSettings({
+  await Settings.setSettings({
     auto_trade_min_confidence: 0.75,
     review_min_confidence: 0.5,
     info_min_confidence: 0.3,
   });
-  return NextResponse.json({ ok: true, settings: Settings.getSettings() });
+  return NextResponse.json({ ok: true, settings: await Settings.getSettings() });
 }
 
 export async function GET() {

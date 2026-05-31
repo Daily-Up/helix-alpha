@@ -21,13 +21,15 @@ export async function GET(req: Request) {
   );
 
   const today = new Date().toISOString().slice(0, 10);
-  const upcoming = Macro.getUpcomingMacroEvents(today, 30);
-  const recent = Macro.listRecentHistory({ daysBack: days, limit: 80 });
-  const surprises = Macro.listRecentSurprises({
-    daysBack: days,
-    limit: 8,
-    requireForecast: true,
-  });
+  const [upcoming, recent, surprises] = await Promise.all([
+    Macro.getUpcomingMacroEvents(today, 30),
+    Macro.listRecentHistory({ daysBack: days, limit: 80 }),
+    Macro.listRecentSurprises({
+      daysBack: days,
+      limit: 8,
+      requireForecast: true,
+    }),
+  ]);
 
   return NextResponse.json({
     upcoming,

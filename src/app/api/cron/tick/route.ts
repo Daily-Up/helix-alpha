@@ -17,7 +17,7 @@
 
 import { NextResponse } from "next/server";
 import { assertCronAuth, cronAuthErrorResponse } from "@/lib/cron-auth";
-import { runNewsIngest } from "@/lib/ingest";
+import { runNewsIngest, runSectorsSnapshotWithAudit } from "@/lib/ingest";
 import {
   runSignalGen,
   autoExecutePending,
@@ -160,7 +160,16 @@ async function handle(req: Request): Promise<NextResponse> {
     summary.outcome_resolution = { error: (err as Error).message };
   }
 
-  // 8) Evaluate system-health alert thresholds (Part 3). Idempotent —
+  // 8) Snapshot sectors (cheap — single SoSoValue call). Runs every
+  //    tick so /sectors and the briefing always see a recent reading.
+  try {
+    const snap = await runSectorsSnapshotWithAudit();
+    summary.sectors_snapshot = snap;
+  } catch (err) {
+    summary.sectors_snapshot = { error: (err as Error).message };
+  }
+
+  // 9) Evaluate system-health alert thresholds (Part 3). Idempotent —
   //    Alerts.raiseAlert coalesces duplicates within 1h.
   try {
     const raised = await evaluateAlerts();

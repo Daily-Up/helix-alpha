@@ -31,7 +31,7 @@ interface IndexRow {
 
 export async function GET() {
   // ── Sector dominance from cached snapshot ─────────────────────
-  const sectors = Sectors.getLatestSectors();
+  const sectors = await Sectors.getLatestSectors();
 
   // ── SSI index momentum (live) ─────────────────────────────────
   const indexAssets = await Assets.getAssetsByKind("index");

@@ -99,7 +99,7 @@ export function IndexDashboard() {
     setLastRebalanceMsg(null);
     try {
       const r = await fetch(
-        "/api/cron/rebalance-index?triggered_by=manual",
+        "/api/public/rebalance-index",
         { method: "POST" },
       );
       const json = await r.json();

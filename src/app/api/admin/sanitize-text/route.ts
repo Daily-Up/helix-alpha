@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
 
 export async function POST() {
   const t0 = Date.now();
-  const result = Events.backfillSanitizeText();
+  const result = await Events.backfillSanitizeText();
   return NextResponse.json({
     ok: true,
     ...result,

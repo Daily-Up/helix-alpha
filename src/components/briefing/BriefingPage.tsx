@@ -151,14 +151,17 @@ export function BriefingPage() {
     fetchData().finally(() => setLoading(false));
   }, []);
 
-  const generateNow = async (force = false) => {
+  const generateNow = async (_force = false) => {
+    // We hit the public regenerate endpoint, which always re-runs the
+    // briefing (with a 5-minute rate limit) so the button on the live
+    // deploy actually does something without the cron secret.
+    void _force;
     setGenerating(true);
     setError(null);
     try {
-      const r = await fetch(
-        `/api/cron/generate-briefing${force ? "?force=1" : ""}`,
-        { method: "POST" },
-      );
+      const r = await fetch(`/api/public/regenerate-briefing`, {
+        method: "POST",
+      });
       const j = await r.json();
       if (!j.ok) {
         setError(j.error ?? "generation failed");
