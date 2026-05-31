@@ -13,6 +13,11 @@
 
 import { Assets, Cron, Events, Classifications } from "@/lib/db";
 import { classifyBatch } from "@/lib/ai";
+import {
+  classifyBatchWithAgent,
+  agentClassifierCap,
+  agentClassifierEnabled,
+} from "@/lib/ai/agents/classify-batch";
 import { News } from "@/lib/sosovalue";
 import {
   DEFAULT_UNIVERSE,
@@ -60,6 +65,8 @@ export interface NewsIngestSummary {
   skipped_pre_classify: number;
   /** Classification failures. */
   classification_errors: number;
+  /** How many events the research agent handled this cycle (Wave 2). */
+  agent_classified: number;
   /** Token totals for Claude. */
   tokens: { input: number; output: number; cached: number };
   /** Approx Claude cost in USD. */
@@ -212,6 +219,7 @@ export async function runNewsIngest(
   // ── 4. Classify ────────────────────────────────────────────────
   let classified = 0;
   let classificationErrors = 0;
+  let summaryAgentClassified = 0;
   const tokens = { input: 0, output: 0, cached: 0 };
 
   // ── KILL SWITCH ──
@@ -280,18 +288,49 @@ export async function runNewsIngest(
       targets.push(e);
     }
 
-    if (targets.length > 0) {
-      const { results, errors, totals } = await classifyBatch(targets, {
+    let agentClassified = 0;
+    let agentRemaining = targets;
+
+    if (targets.length > 0 && agentClassifierEnabled()) {
+      // Run the research agent on the most-recent N events. Anything
+      // above the cap falls through to the Wave 1 batch classifier so a
+      // burst of incoming news doesn't blow the budget.
+      const cap = agentClassifierCap();
+      const sliceForAgent = targets.slice(0, cap);
+      agentRemaining = targets.slice(cap);
+      try {
+        const agentRes = await classifyBatchWithAgent(sliceForAgent, {
+          universe,
+        });
+        agentClassified = agentRes.results.length;
+        classified += agentRes.results.length;
+        classificationErrors += agentRes.errors.length;
+        tokens.input += agentRes.totals.input;
+        tokens.output += agentRes.totals.output;
+        tokens.cached += agentRes.totals.cached;
+      } catch (err) {
+        console.warn(
+          `[news-ingest] agent classifier failed; falling back: ${(err as Error).message}`,
+        );
+        // Fall back: re-queue everything to the Wave 1 batch path.
+        agentRemaining = targets;
+      }
+    }
+
+    if (agentRemaining.length > 0) {
+      const { results, errors, totals } = await classifyBatch(agentRemaining, {
         universe,
         embeddings: precomputedEmbeddings,
         coverageContinuations,
       });
-      classified = results.length;
-      classificationErrors = errors.length;
-      tokens.input = totals.input;
-      tokens.output = totals.output;
-      tokens.cached = totals.cached;
+      classified += results.length;
+      classificationErrors += errors.length;
+      tokens.input += totals.input;
+      tokens.output += totals.output;
+      tokens.cached += totals.cached;
     }
+    // Stash on summary via the outer-scope variable.
+    summaryAgentClassified = agentClassified;
   }
 
   const cost_usd =
@@ -308,6 +347,7 @@ export async function runNewsIngest(
     classified,
     skipped_pre_classify: skippedPreClassify,
     classification_errors: classificationErrors,
+    agent_classified: summaryAgentClassified,
     tokens,
     cost_usd,
     latency_ms: Date.now() - t0,

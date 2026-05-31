@@ -37,6 +37,10 @@ const NAV: Array<{ section: string; items: NavItem[] }> = [
     ],
   },
   {
+    section: "Agents",
+    items: [{ href: "/agents", label: "Agent Activity", badge: "NEW" }],
+  },
+  {
     section: "System",
     items: [
       // Cron & Audit and System Health are internal monitoring surfaces.
