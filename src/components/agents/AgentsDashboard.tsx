@@ -13,6 +13,7 @@ import Link from "next/link";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { fmtRelative } from "@/lib/format";
+import { BuildathonModeCard } from "./BuildathonModeCard";
 
 interface ToolFreq {
   tool: string;
@@ -91,6 +92,8 @@ export function AgentsDashboard() {
           tool-using decision — click through for the full transcript.
         </p>
       </header>
+
+      <BuildathonModeCard variant="agents" />
 
       {/* 24h overview */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">

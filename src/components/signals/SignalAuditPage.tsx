@@ -26,6 +26,8 @@ import { fmtRelative, fmtSodexSymbol, fmtUsd } from "@/lib/format";
 import { stripTechnicalScoring } from "@/lib/format/reasoning";
 import { cn } from "@/components/ui/cn";
 import { AgentTraceCard, type AgentTraceData } from "./AgentTraceCard";
+import { BuildathonModeCard } from "@/components/agents/BuildathonModeCard";
+import { RunLiveAgentButton } from "@/components/agents/RunLiveAgentButton";
 
 interface AuditResp {
   signal: {
@@ -514,7 +516,18 @@ export function SignalAuditPage({ signalId }: { signalId: string }) {
         </Card>
       ) : null}
 
-      {/* Wave 2 — every agent trace associated with this signal */}
+      {/* Wave 2 — buildathon explainer + live trigger buttons */}
+      <BuildathonModeCard variant="audit" />
+      <div className="flex flex-wrap items-start gap-3">
+        <RunLiveAgentButton
+          mode="research"
+          event_id={s.triggered_by_event_id}
+        />
+        <RunLiveAgentButton mode="verification" signal_id={s.id} />
+        <RunLiveAgentButton mode="debate" signal_id={s.id} />
+      </div>
+
+      {/* Every agent trace associated with this signal */}
       {data.agent_traces && data.agent_traces.length > 0 ? (
         <div className="flex flex-col gap-4">
           {data.agent_traces.map((t) => (
