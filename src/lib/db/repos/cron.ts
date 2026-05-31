@@ -22,7 +22,11 @@ export type JobName =
   | "generate_briefing"
   | "ingest_btc_treasuries"
   | "resolve_outcomes"
-  | "backup_db";
+  | "backup_db"
+  // Public-action rate-limit keys (recorded by /api/public/* endpoints
+  // so the cron_runs table doubles as the rate-limit ledger).
+  | "public_tick"
+  | "public_generate_signals";
 
 export interface CronRunRow {
   id: number;

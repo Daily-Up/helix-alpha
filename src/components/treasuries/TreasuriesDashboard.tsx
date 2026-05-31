@@ -79,7 +79,7 @@ export function TreasuriesDashboard() {
     setRunning(true);
     setError(null);
     try {
-      const r = await fetch("/api/cron/ingest-btc-treasuries", {
+      const r = await fetch("/api/public/refresh-treasuries", {
         method: "POST",
       });
       const j = await r.json();

@@ -68,6 +68,14 @@ function humanJob(j: JobName): string {
       return "briefing generation";
     case "compute_patterns":
       return "rebalance";
+    case "ingest_macro":
+      return "macro refresh";
+    case "ingest_btc_treasuries":
+      return "treasuries refresh";
+    case "public_tick":
+      return "pipeline tick";
+    case "public_generate_signals":
+      return "signal generation";
     default:
       return j.replace(/_/g, " ");
   }

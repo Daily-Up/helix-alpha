@@ -114,7 +114,7 @@ export function MacroDashboard() {
     setRunning(true);
     setError(null);
     try {
-      const r = await fetch("/api/cron/ingest-macro", { method: "POST" });
+      const r = await fetch("/api/public/refresh-macro", { method: "POST" });
       const j = await r.json();
       if (!j.ok) setError(j.error ?? "ingest failed");
       else await fetchData();

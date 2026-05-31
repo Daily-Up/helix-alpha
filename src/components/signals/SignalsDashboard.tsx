@@ -8,6 +8,7 @@ import { StatSkeleton, PanelSkeleton } from "@/components/ui/Skeleton";
 import { useBulkMountReveal } from "@/hooks/useMountReveal";
 import { SignalCard, type SignalCardData } from "./SignalCard";
 import { cn } from "@/components/ui/cn";
+import { isPublicMode } from "@/lib/public-mode";
 
 export function SignalsDashboard() {
   const [signals, setSignals] = useState<SignalCardData[]>([]);
@@ -58,11 +59,18 @@ export function SignalsDashboard() {
   }, []);
 
   // Run one tick (master pipeline). Returns the summary so we can show it.
+  // In public mode we hit /api/public/run-tick (rate-limited); in dev we
+  // hit the cron endpoint directly.
   const runTick = useCallback(async () => {
     try {
-      const res = await fetch("/api/cron/tick", { method: "POST" });
+      const url = isPublicMode() ? "/api/public/run-tick" : "/api/cron/tick";
+      const res = await fetch(url, { method: "POST" });
       const data = await res.json();
       setLastTickAt(Date.now());
+      if (!data.ok) {
+        setLastTickSummary(`tick failed: ${data.error ?? "unknown"}`);
+        return;
+      }
       const s = data.summary ?? {};
       const ing = s.ingest ?? {};
       const gen = s.signal_gen ?? {};
@@ -78,8 +86,12 @@ export function SignalsDashboard() {
     }
   }, [fetchData]);
 
-  // While liveMode is on, run a tick every 5 minutes.
+  // While liveMode is on, run a tick every 5 minutes. Disabled in
+  // public mode — the GitHub-Actions cron already pokes /api/cron/tick
+  // every 15 min, and we don't want anonymous visitors firing it from
+  // every open browser tab.
   useEffect(() => {
+    if (isPublicMode()) return;
     if (typeof window !== "undefined") {
       window.localStorage.setItem(
         "sosoalpha:live-mode",
@@ -105,7 +117,14 @@ export function SignalsDashboard() {
   const generateNow = async () => {
     setGeneratingNow(true);
     try {
-      await fetch("/api/cron/generate-signals", { method: "POST" });
+      const url = isPublicMode()
+        ? "/api/public/generate-signals"
+        : "/api/cron/generate-signals";
+      const res = await fetch(url, { method: "POST" });
+      const j = await res.json();
+      if (!j.ok) {
+        setLastTickSummary(`signal gen failed: ${j.error ?? "unknown"}`);
+      }
       await fetchData();
     } finally {
       setGeneratingNow(false);
@@ -205,29 +224,38 @@ export function SignalsDashboard() {
 
       {/* Action bar */}
       <div className="flex flex-wrap items-center gap-2">
-        <button
-          onClick={() => setLiveMode((v) => !v)}
-          className={cn(
-            "rounded border px-3 py-1.5 text-xs font-medium transition-colors",
-            liveMode
-              ? "border-info/40 bg-info/15 text-info hover:bg-info/25"
-              : "border-line bg-surface text-fg-muted hover:border-line-2 hover:text-fg",
-          )}
-          title="When ON, runs the full pipeline every 5 minutes: pull news → classify → generate signals → auto-execute → reconcile."
-        >
-          {liveMode ? "● Live mode ON" : "○ Live mode OFF"}
-        </button>
-        <button
-          onClick={toggleAuto}
-          className={cn(
-            "rounded border px-3 py-1.5 text-xs font-medium transition-colors",
-            autoTrade
-              ? "border-positive/40 bg-positive/15 text-positive hover:bg-positive/25"
-              : "border-line bg-surface text-fg-muted hover:border-line-2 hover:text-fg",
-          )}
-        >
-          {autoTrade ? "● Auto-Trade ON" : "○ Enable Auto-Trade"}
-        </button>
+        {/* Live mode is dev-only — in public, the GitHub Actions cron
+            runs the tick every 15 min, so we don't expose a per-tab
+            5-min auto-poller that anonymous visitors could pile on. */}
+        {!isPublicMode() ? (
+          <button
+            onClick={() => setLiveMode((v) => !v)}
+            className={cn(
+              "rounded border px-3 py-1.5 text-xs font-medium transition-colors",
+              liveMode
+                ? "border-info/40 bg-info/15 text-info hover:bg-info/25"
+                : "border-line bg-surface text-fg-muted hover:border-line-2 hover:text-fg",
+            )}
+            title="When ON, runs the full pipeline every 5 minutes: pull news → classify → generate signals → auto-execute → reconcile."
+          >
+            {liveMode ? "● Live mode ON" : "○ Live mode OFF"}
+          </button>
+        ) : null}
+        {/* Auto-trade is a portfolio-mutating setting — not something to
+            expose on the public deploy. */}
+        {!isPublicMode() ? (
+          <button
+            onClick={toggleAuto}
+            className={cn(
+              "rounded border px-3 py-1.5 text-xs font-medium transition-colors",
+              autoTrade
+                ? "border-positive/40 bg-positive/15 text-positive hover:bg-positive/25"
+                : "border-line bg-surface text-fg-muted hover:border-line-2 hover:text-fg",
+            )}
+          >
+            {autoTrade ? "● Auto-Trade ON" : "○ Enable Auto-Trade"}
+          </button>
+        ) : null}
         <button
           onClick={generateNow}
           disabled={generatingNow}
@@ -243,17 +271,20 @@ export function SignalsDashboard() {
         <button
           onClick={runTick}
           className="rounded border border-line px-3 py-1.5 text-xs font-medium text-fg-muted transition-colors hover:border-info/40 hover:text-info"
-          title="Run the full pipeline once (ingest → classify → generate → auto-execute → reconcile)."
+          title="Run the full pipeline once (ingest → classify → generate → reconcile)."
         >
           ⟳ Tick now
         </button>
-        <button
-          onClick={purgePending}
-          className="rounded border border-line px-3 py-1.5 text-xs font-medium text-fg-muted transition-colors hover:border-negative/40 hover:text-negative"
-          title="Delete all pending signals (does NOT close open positions)"
-        >
-          Purge pending
-        </button>
+        {/* Purge pending is destructive — hide on the public deploy. */}
+        {!isPublicMode() ? (
+          <button
+            onClick={purgePending}
+            className="rounded border border-line px-3 py-1.5 text-xs font-medium text-fg-muted transition-colors hover:border-negative/40 hover:text-negative"
+            title="Delete all pending signals (does NOT close open positions)"
+          >
+            Purge pending
+          </button>
+        ) : null}
         <span className="ml-auto text-xs text-fg-dim">
           {loading ? "loading…" : `${filtered.length} of ${counts.all}`}
         </span>
