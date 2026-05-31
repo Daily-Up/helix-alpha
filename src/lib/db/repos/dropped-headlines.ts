@@ -1,12 +1,9 @@
 /**
  * Repo for the dropped_headlines table (invariant I-41).
- *
- * Headlines with significance score < 0.25 are persisted here instead of
- * the signals table. Used by /system-health to surface drop-rate and by
- * calibration auditors to spot-check false negatives.
+ * Wave 2: async.
  */
 
-import { db } from "../client";
+import { all, get, run } from "../client";
 import type { SignificanceComponents } from "../../calibration/significance";
 
 export interface DroppedHeadline {
@@ -31,7 +28,7 @@ interface DroppedRow {
   dropped_at: number;
 }
 
-export function insertDroppedHeadline(d: {
+export async function insertDroppedHeadline(d: {
   id: string;
   headline_text: string;
   classified_subtype: string | null;
@@ -39,15 +36,13 @@ export function insertDroppedHeadline(d: {
   significance_score: number;
   significance_components: SignificanceComponents;
   significance_reasoning: string | null;
-}): void {
-  db()
-    .prepare(
-      `INSERT OR REPLACE INTO dropped_headlines
-         (id, headline_text, classified_subtype, classified_asset,
-          significance_score, significance_components, significance_reasoning)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
+}): Promise<void> {
+  await run(
+    `INSERT OR REPLACE INTO dropped_headlines
+       (id, headline_text, classified_subtype, classified_asset,
+        significance_score, significance_components, significance_reasoning)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
       d.id,
       d.headline_text,
       d.classified_subtype,
@@ -55,24 +50,25 @@ export function insertDroppedHeadline(d: {
       d.significance_score,
       JSON.stringify(d.significance_components),
       d.significance_reasoning,
-    );
+    ],
+  );
 }
 
-export function listRecentDropped(limit = 50): DroppedHeadline[] {
-  const rows = db()
-    .prepare<[number], DroppedRow>(
-      `SELECT * FROM dropped_headlines ORDER BY dropped_at DESC LIMIT ?`,
-    )
-    .all(limit);
+export async function listRecentDropped(
+  limit = 50,
+): Promise<DroppedHeadline[]> {
+  const rows = await all<DroppedRow>(
+    `SELECT * FROM dropped_headlines ORDER BY dropped_at DESC LIMIT ?`,
+    [limit],
+  );
   return rows.map(rowToDropped);
 }
 
-export function countDroppedSince(ts: number): number {
-  const r = db()
-    .prepare<[number], { c: number }>(
-      `SELECT COUNT(*) AS c FROM dropped_headlines WHERE dropped_at >= ?`,
-    )
-    .get(ts);
+export async function countDroppedSince(ts: number): Promise<number> {
+  const r = await get<{ c: number }>(
+    `SELECT COUNT(*) AS c FROM dropped_headlines WHERE dropped_at >= ?`,
+    [ts],
+  );
   return r?.c ?? 0;
 }
 

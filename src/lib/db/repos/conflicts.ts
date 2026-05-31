@@ -1,19 +1,9 @@
 /**
- * Repos for emission-time conflict + supersession audit (Phase D/E).
- *
- *   - suppressed_signals (I-42): the loser of a strict-conflict comparison
- *     at emission. Either the new signal (it never inserts into `signals`)
- *     or an existing pending signal (its status flips to 'suppressed').
- *   - signal_supersessions (I-43): explicit retirement when the new
- *     signal's significance is ≥ 1.5× the standing signal's significance.
+ * Repos for emission-time conflict + supersession audit. Wave 2: async.
  */
 
 import { randomUUID } from "node:crypto";
-import { db } from "../client";
-
-// ─────────────────────────────────────────────────────────────────────────
-// suppressed_signals
-// ─────────────────────────────────────────────────────────────────────────
+import { all, get, run } from "../client";
 
 export interface SuppressedSignalRow {
   id: string;
@@ -25,47 +15,41 @@ export interface SuppressedSignalRow {
   suppressed_at: number;
 }
 
-export function insertSuppressedSignal(input: {
+export async function insertSuppressedSignal(input: {
   suppressed_signal_data: unknown;
   reason: string;
   conflicting_signal_id: string;
   significance_loser: number;
   significance_winner: number;
-}): string {
+}): Promise<string> {
   const id = randomUUID();
-  db()
-    .prepare(
-      `INSERT INTO suppressed_signals
-         (id, suppressed_signal_data, reason, conflicting_signal_id,
-          significance_loser, significance_winner)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
+  await run(
+    `INSERT INTO suppressed_signals
+       (id, suppressed_signal_data, reason, conflicting_signal_id,
+        significance_loser, significance_winner)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [
       id,
       JSON.stringify(input.suppressed_signal_data),
       input.reason,
       input.conflicting_signal_id,
       input.significance_loser,
       input.significance_winner,
-    );
+    ],
+  );
   return id;
 }
 
-export function listSuppressionsForConflict(
+export async function listSuppressionsForConflict(
   signalId: string,
-): SuppressedSignalRow[] {
-  return db()
-    .prepare<[string], SuppressedSignalRow>(
-      `SELECT * FROM suppressed_signals
-       WHERE conflicting_signal_id = ?
-       ORDER BY suppressed_at DESC`,
-    )
-    .all(signalId);
+): Promise<SuppressedSignalRow[]> {
+  return all<SuppressedSignalRow>(
+    `SELECT * FROM suppressed_signals
+     WHERE conflicting_signal_id = ?
+     ORDER BY suppressed_at DESC`,
+    [signalId],
+  );
 }
-
-// ─────────────────────────────────────────────────────────────────────────
-// signal_supersessions
-// ─────────────────────────────────────────────────────────────────────────
 
 export interface SignalSupersessionRow {
   id: string;
@@ -76,48 +60,45 @@ export interface SignalSupersessionRow {
   superseded_at: number;
 }
 
-export function insertSupersession(input: {
+export async function insertSupersession(input: {
   superseded_signal_id: string;
   superseding_signal_id: string;
   significance_ratio: number;
   reason: string;
-}): string {
+}): Promise<string> {
   const id = randomUUID();
-  db()
-    .prepare(
-      `INSERT INTO signal_supersessions
-         (id, superseded_signal_id, superseding_signal_id,
-          significance_ratio, reason)
-       VALUES (?, ?, ?, ?, ?)`,
-    )
-    .run(
+  await run(
+    `INSERT INTO signal_supersessions
+       (id, superseded_signal_id, superseding_signal_id,
+        significance_ratio, reason)
+     VALUES (?, ?, ?, ?, ?)`,
+    [
       id,
       input.superseded_signal_id,
       input.superseding_signal_id,
       input.significance_ratio,
       input.reason,
-    );
+    ],
+  );
   return id;
 }
 
-export function getSupersessionForOld(
+export async function getSupersessionForOld(
   supersededId: string,
-): SignalSupersessionRow | undefined {
-  return db()
-    .prepare<[string], SignalSupersessionRow>(
-      `SELECT * FROM signal_supersessions WHERE superseded_signal_id = ?`,
-    )
-    .get(supersededId);
+): Promise<SignalSupersessionRow | undefined> {
+  return get<SignalSupersessionRow>(
+    `SELECT * FROM signal_supersessions WHERE superseded_signal_id = ?`,
+    [supersededId],
+  );
 }
 
-export function listSupersessionsByNew(
+export async function listSupersessionsByNew(
   supersedingId: string,
-): SignalSupersessionRow[] {
-  return db()
-    .prepare<[string], SignalSupersessionRow>(
-      `SELECT * FROM signal_supersessions
-       WHERE superseding_signal_id = ?
-       ORDER BY superseded_at DESC`,
-    )
-    .all(supersedingId);
+): Promise<SignalSupersessionRow[]> {
+  return all<SignalSupersessionRow>(
+    `SELECT * FROM signal_supersessions
+     WHERE superseding_signal_id = ?
+     ORDER BY superseded_at DESC`,
+    [supersedingId],
+  );
 }

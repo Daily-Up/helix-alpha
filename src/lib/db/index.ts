@@ -7,10 +7,15 @@
 
 export {
   db,
+  getClient,
   closeDb,
   transaction,
+  batch,
   bootstrapSchema,
-  _setDatabaseForTests,
+  all,
+  get,
+  run,
+  _setClientForTests,
 } from "./client";
 
 export * as Assets from "./repos/assets";

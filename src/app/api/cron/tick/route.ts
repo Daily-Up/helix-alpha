@@ -104,11 +104,11 @@ async function handle(req: Request): Promise<NextResponse> {
   //       when the signal itself fired (catches "purge+regen revives
   //       dead alpha" pattern — MSTR/UBS bug)
   try {
-    const expiredBySignal = Signals.expirePendingOlderThan(
+    const expiredBySignal = await Signals.expirePendingOlderThan(
       SIGNAL_EXPIRE_HOURS * 60 * 60 * 1000,
     );
     const MAX_NEWS_AGE_HOURS = 24;
-    const expiredByNews = Signals.expirePendingByNewsAge(
+    const expiredByNews = await Signals.expirePendingByNewsAge(
       MAX_NEWS_AGE_HOURS * 60 * 60 * 1000,
     );
     summary.expired = {
@@ -123,7 +123,7 @@ async function handle(req: Request): Promise<NextResponse> {
   // every tick — once per day-ish — but let it skip in v1 since cost is
   // low ($0.05/rebalance with Claude review).
   try {
-    const settings = Settings.getSettings();
+    const settings = await Settings.getSettings();
     if (settings.index_auto_rebalance) {
       const rb = await rebalanceIndex("alphacore", {
         triggered_by: "scheduled",
@@ -148,7 +148,7 @@ async function handle(req: Request): Promise<NextResponse> {
     const { data: resolution } = await Cron.recordRun(
       "resolve_outcomes",
       async () => {
-        const r = runResolutionJob();
+        const r = await runResolutionJob();
         return {
           summary: `pending=${r.pending_before} target_hit=${r.resolved_target_hit} stop_hit=${r.resolved_stop_hit} flat=${r.resolved_flat} still_pending=${r.still_pending}`,
           data: r,

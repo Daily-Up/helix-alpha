@@ -1,437 +1,207 @@
 /**
- * Database connection — synchronous SQLite via better-sqlite3.
+ * Database connection — async libSQL/Turso client.
  *
- * better-sqlite3 is process-local and synchronous: perfect for Next.js API
- * routes (one DB call ≈ 1-3ms) and CLI scripts. For Vercel deployment we'll
- * swap this for libSQL/Turso behind the same query API; the call sites
- * never see the underlying driver.
+ * Wave 1 ran on better-sqlite3 + a /tmp snapshot on Vercel. That worked
+ * for the demo but the data was ephemeral: every cold start wiped
+ * recently-ingested events. Wave 2 swaps the driver for `@libsql/client`,
+ * which talks to a hosted libSQL database (Turso). Writes persist across
+ * deploys; reads survive cold starts; localhost and production can point
+ * at the same DB (or separate ones — see env).
+ *
+ * The migration is mechanical at the call sites: every repo function
+ * becomes async, and the SQL goes through `execute()` instead of
+ * `.prepare().run()`. The helpers below (`all`, `get`, `run`, `batch`)
+ * keep repo files concise.
  *
  * Connection lifecycle:
- *   • Lazy: created on first call to `db()`
- *   • Process-singleton: re-used across all requests in the same Node process
- *   • WAL mode: better concurrency for the cron + UI reads
- *   • foreign_keys: ON (FK constraints don't fire by default in SQLite!)
+ *   • Lazy: client created on first call to `getClient()`
+ *   • Process-singleton: one client per Node process; libSQL pools internally
+ *   • Schema bootstrap: runs schema.sql once per process startup
  */
 
-import Database from "better-sqlite3";
-import { mkdirSync, existsSync, readFileSync, copyFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { env } from "@/lib/env";
+import {
+  createClient,
+  type Client,
+  type InArgs,
+  type InStatement,
+  type ResultSet,
+} from "@libsql/client";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
-let _db: Database.Database | null = null;
-let _hydrated = false;
-
-function ensureDir(filePath: string) {
-  const dir = dirname(filePath);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-}
+let _client: Client | null = null;
+let _schemaBootstrapped = false;
 
 /**
- * Vercel-compatibility shim.
- *
- * Vercel's serverless filesystem is read-only except for `/tmp`. On cold
- * start we copy the bundled production snapshot (`data/sosoalpha.db`,
- * checked in for the buildathon demo) to the writable `/tmp` location
- * pointed at by `DATABASE_PATH`. Writes during the function's lifetime
- * persist there; they reset on the next cold start. Live ingest still
- * fires inside the instance, judges interact with a feels-live dashboard,
- * but the state is per-instance.
- *
- * Local dev path is untouched — `DATABASE_PATH=./data/sosoalpha.db`
- * keeps everything in-tree as before.
- *
- * Migration to a hosted DB (Turso / Vercel Postgres) is the follow-up
- * after the buildathon; this lets us ship now without an async rewrite.
+ * Get the singleton libSQL client. Reads connection details from env on
+ * first invocation. Throws if TURSO_DATABASE_URL is missing — we never
+ * want to silently fall back to a local file in production.
  */
-function hydrateFromSnapshotIfNeeded(targetPath: string): void {
-  if (_hydrated) return;
-  _hydrated = true;
-  // Only fire when DATABASE_PATH lives under /tmp — that's the Vercel
-  // production setting. Local dev (./data/sosoalpha.db) skips this.
-  const isTmpTarget =
-    targetPath.startsWith("/tmp/") || targetPath.startsWith("\\tmp\\");
-  if (!isTmpTarget) return;
-  // If the /tmp copy already exists (warm instance), nothing to do.
-  if (existsSync(targetPath)) return;
-  // Find the bundled snapshot. The deployment ships `data/sosoalpha.db`
-  // alongside the source.
-  const snapshot = resolve(process.cwd(), "data/sosoalpha.db");
-  if (!existsSync(snapshot)) {
-    console.warn(
-      `[db] no snapshot at ${snapshot} — production DB will be empty`,
+export function getClient(): Client {
+  if (_client) return _client;
+  const url = process.env.TURSO_DATABASE_URL;
+  if (!url) {
+    throw new Error(
+      "TURSO_DATABASE_URL is not set. Configure Turso credentials in .env.local " +
+        "(dev) or Vercel project env (production).",
     );
-    return;
   }
-  ensureDir(targetPath);
-  copyFileSync(snapshot, targetPath);
-  console.log(`[db] hydrated ${targetPath} from snapshot (${snapshot})`);
+  _client = createClient({
+    url,
+    // Auth token is optional for local `file:` URLs but required for the
+    // remote libsql:// scheme. The libSQL client tolerates undefined.
+    authToken: process.env.TURSO_AUTH_TOKEN,
+  });
+  return _client;
 }
 
 /**
- * Run schema.sql against the provided connection. Used by `db()` on the
- * production path and by integration tests to bootstrap an in-memory
- * `:memory:` connection without going through the env-loader / file-
- * path code path.
- *
- * Pure: takes the conn in, no module-level state, no env access.
- * Idempotent: every CREATE in schema.sql uses IF NOT EXISTS.
- *
- * For a fresh in-memory DB this is sufficient. The tiny migrations in
- * `db()` only kick in for existing dev databases that pre-date a schema
- * change; a from-scratch :memory: DB doesn't need them.
+ * Inject a pre-built client as the singleton. Test-only seam: lets
+ * integration tests build an in-memory client with `createClient({ url:
+ * "file::memory:" })`, bootstrap the schema on it, then make
+ * `getClient()` return that instance.
  */
-export function bootstrapSchema(conn: Database.Database): void {
-  const schemaPath = resolve(__dirname, "schema.sql");
-  const schemaSrc = existsSync(schemaPath)
-    ? readFileSync(schemaPath, "utf8")
-    : readFileSync(
-        resolve(process.cwd(), "src/lib/db/schema.sql"),
-        "utf8",
-      );
-  conn.exec(schemaSrc);
-}
-
-/**
- * Inject a pre-built connection as the singleton. Test-only seam: lets
- * integration tests build an in-memory `new Database(':memory:')`, run
- * `bootstrapSchema` on it, then make `db()` return that instance.
- *
- * Closes any existing singleton first so callers don't leak handles
- * across test cases. NOT meant for production use.
- */
-export function _setDatabaseForTests(conn: Database.Database | null): void {
-  if (_db && _db !== conn) _db.close();
-  _db = conn;
-}
-
-/** Get the singleton DB connection. Creates + bootstraps schema on first call. */
-export function db(): Database.Database {
-  if (_db) return _db;
-
-  const path = resolve(process.cwd(), env.DATABASE_PATH);
-  // Vercel cold start: copy the bundled snapshot to /tmp first time.
-  hydrateFromSnapshotIfNeeded(path);
-  ensureDir(path);
-
-  const conn = new Database(path);
-  // WAL journal needs persistent storage; Vercel's /tmp survives within
-  // a single invocation but the journal-vs-main split can corrupt on
-  // suspend. Use the simpler DELETE journal in tmp deployments.
-  const isTmpTarget =
-    path.startsWith("/tmp/") || path.startsWith("\\tmp\\");
-  conn.pragma(isTmpTarget ? "journal_mode = DELETE" : "journal_mode = WAL");
-  conn.pragma("foreign_keys = ON");
-  conn.pragma("synchronous = NORMAL");
-
-  // Bootstrap schema. Idempotent — every CREATE uses IF NOT EXISTS.
-  const schemaPath = resolve(__dirname, "schema.sql");
-  // In bundled Next.js builds __dirname might not resolve to the source —
-  // fall back to project-relative path.
-  const schemaSrc = existsSync(schemaPath)
-    ? readFileSync(schemaPath, "utf8")
-    : readFileSync(
-        resolve(process.cwd(), "src/lib/db/schema.sql"),
-        "utf8",
-      );
-
-  // Tiny migration #1: if `impact_metrics` has the old (1h/4h/24h) schema,
-  // drop it so schema.sql recreates with the new (1d/3d/7d) columns.
-  try {
-    type ColRow = { name: string };
-    const cols = conn
-      .prepare<[], ColRow>("PRAGMA table_info(impact_metrics)")
-      .all();
-    const hasNew = cols.some((c) => c.name === "impact_pct_1d");
-    if (cols.length > 0 && !hasNew) {
-      conn.exec("DROP TABLE impact_metrics");
+export function _setClientForTests(client: Client | null): void {
+  if (_client && _client !== client) {
+    try {
+      _client.close();
+    } catch {
+      /* ignore */
     }
-  } catch {
-    /* table missing — fine */
   }
-
-  // Tiny migration #2: add `tradable` column to assets if missing.
-  try {
-    type ColRow = { name: string };
-    const cols = conn
-      .prepare<[], ColRow>("PRAGMA table_info(assets)")
-      .all();
-    const hasTradable = cols.some((c) => c.name === "tradable");
-    if (cols.length > 0 && !hasTradable) {
-      conn.exec("ALTER TABLE assets ADD COLUMN tradable TEXT");
-    }
-  } catch {
-    /* table missing — fine, schema.sql will create it */
-  }
-
-  // Tiny migration #3: drop old signals/paper_trades if they lack the new
-  // tier-based columns. Both are empty in dev, so safe to recreate.
-  try {
-    type ColRow = { name: string };
-    const sigCols = conn
-      .prepare<[], ColRow>("PRAGMA table_info(signals)")
-      .all();
-    if (sigCols.length > 0 && !sigCols.some((c) => c.name === "tier")) {
-      conn.exec("DROP TABLE signals");
-    }
-    const ptCols = conn
-      .prepare<[], ColRow>("PRAGMA table_info(paper_trades)")
-      .all();
-    if (
-      ptCols.length > 0 &&
-      !ptCols.some((c) => c.name === "sodex_symbol")
-    ) {
-      conn.exec("DROP TABLE paper_trades");
-    }
-  } catch {
-    /* missing tables — schema.sql will create them */
-  }
-
-  // Tiny migration #8: add secondary_asset_ids to signals so we can
-  // record "also affected" assets for UI display while still firing
-  // only ONE signal per event (the primary asset).
-  try {
-    type ColRow = { name: string };
-    const cols = conn
-      .prepare<[], ColRow>("PRAGMA table_info(signals)")
-      .all();
-    if (cols.length > 0 && !cols.some((c) => c.name === "secondary_asset_ids")) {
-      conn.exec("ALTER TABLE signals ADD COLUMN secondary_asset_ids TEXT");
-    }
-  } catch {
-    /* table missing — schema.sql will create it with the column */
-  }
-
-  // Tiny migration #9: add pipeline-metadata columns to signals so that
-  // src/lib/pipeline/* modules can persist their derived fields. All
-  // nullable so legacy rows pre-pipeline-wiring keep working.
-  try {
-    type ColRow = { name: string };
-    const cols = conn
-      .prepare<[], ColRow>("PRAGMA table_info(signals)")
-      .all();
-    if (cols.length > 0) {
-      const has = (n: string) => cols.some((c) => c.name === n);
-      if (!has("catalyst_subtype"))
-        conn.exec("ALTER TABLE signals ADD COLUMN catalyst_subtype TEXT");
-      if (!has("expires_at"))
-        conn.exec("ALTER TABLE signals ADD COLUMN expires_at INTEGER");
-      if (!has("corroboration_deadline"))
-        conn.exec("ALTER TABLE signals ADD COLUMN corroboration_deadline INTEGER");
-      if (!has("event_chain_id"))
-        conn.exec("ALTER TABLE signals ADD COLUMN event_chain_id TEXT");
-      if (!has("asset_relevance"))
-        conn.exec("ALTER TABLE signals ADD COLUMN asset_relevance REAL");
-      if (!has("promotional_score"))
-        conn.exec("ALTER TABLE signals ADD COLUMN promotional_score REAL");
-      if (!has("source_tier"))
-        conn.exec("ALTER TABLE signals ADD COLUMN source_tier INTEGER");
-      if (!has("dismiss_reason"))
-        conn.exec("ALTER TABLE signals ADD COLUMN dismiss_reason TEXT");
-      // Phase C/D/E columns.
-      if (!has("significance_score"))
-        conn.exec("ALTER TABLE signals ADD COLUMN significance_score REAL");
-      if (!has("superseded_by_signal_id"))
-        conn.exec(
-          "ALTER TABLE signals ADD COLUMN superseded_by_signal_id TEXT",
-        );
-      if (!has("effective_end_at"))
-        conn.exec("ALTER TABLE signals ADD COLUMN effective_end_at INTEGER");
-      conn.exec(
-        "CREATE INDEX IF NOT EXISTS idx_signals_expires_at ON signals(expires_at) WHERE expires_at IS NOT NULL",
-      );
-      conn.exec(
-        "CREATE INDEX IF NOT EXISTS idx_signals_event_chain ON signals(event_chain_id) WHERE event_chain_id IS NOT NULL",
-      );
-    }
-  } catch {
-    /* table missing — schema.sql will create it correctly */
-  }
-
-  // Tiny migration #v2: add framework_version to index_rebalances so v2
-  // rebalances can be distinguished from v1. Existing rows default to 'v1'.
-  try {
-    type ColRow = { name: string };
-    const cols = conn
-      .prepare<[], ColRow>("PRAGMA table_info(index_rebalances)")
-      .all();
-    if (cols.length > 0 && !cols.some((c) => c.name === "framework_version")) {
-      conn.exec(
-        "ALTER TABLE index_rebalances ADD COLUMN framework_version TEXT NOT NULL DEFAULT 'v1'",
-      );
-    }
-  } catch {
-    /* table missing — schema.sql will create it with the column */
-  }
-
-  // Tiny migration #v2-attribution: add framework_version to
-  // signal_outcomes so calibration queries can split outcomes by
-  // framework. Existing rows are tagged 'v1' (the framework active
-  // before v2.1 graduated).
-  try {
-    type ColRow = { name: string };
-    const cols = conn
-      .prepare<[], ColRow>("PRAGMA table_info(signal_outcomes)")
-      .all();
-    if (cols.length > 0 && !cols.some((c) => c.name === "framework_version")) {
-      conn.exec(
-        "ALTER TABLE signal_outcomes ADD COLUMN framework_version TEXT NOT NULL DEFAULT 'v1'",
-      );
-      conn.exec(
-        "CREATE INDEX IF NOT EXISTS idx_outcomes_framework ON signal_outcomes(framework_version, generated_at DESC)",
-      );
-    }
-  } catch {
-    /* table missing — schema.sql creates it with the column */
-  }
-
-  // Tiny migration #7: extend macro_history with raw + unit + surprise
-  // columns so we can store the API's string-with-unit form alongside
-  // parsed numbers. The original schema had only REAL columns which
-  // silently lost units like "%".
-  try {
-    type ColRow = { name: string };
-    const cols = conn
-      .prepare<[], ColRow>("PRAGMA table_info(macro_history)")
-      .all();
-    if (cols.length > 0) {
-      const has = (n: string) => cols.some((c) => c.name === n);
-      if (!has("actual_raw"))
-        conn.exec("ALTER TABLE macro_history ADD COLUMN actual_raw TEXT");
-      if (!has("forecast_raw"))
-        conn.exec("ALTER TABLE macro_history ADD COLUMN forecast_raw TEXT");
-      if (!has("previous_raw"))
-        conn.exec("ALTER TABLE macro_history ADD COLUMN previous_raw TEXT");
-      if (!has("unit"))
-        conn.exec("ALTER TABLE macro_history ADD COLUMN unit TEXT");
-      if (!has("surprise"))
-        conn.exec("ALTER TABLE macro_history ADD COLUMN surprise REAL");
-      // Indexes are CREATE IF NOT EXISTS so safe to run repeatedly.
-      conn.exec(
-        "CREATE INDEX IF NOT EXISTS idx_macro_history_date ON macro_history(date DESC)",
-      );
-      conn.exec(
-        "CREATE INDEX IF NOT EXISTS idx_macro_history_event_date ON macro_history(event, date DESC)",
-      );
-    }
-  } catch {
-    /* table missing — schema.sql will create it correctly */
-  }
-
-  // Tiny migration #6: add duplicate_of column to news_events for content-
-  // level dedup of news from multiple outlets covering the same story.
-  try {
-    type ColRow = { name: string };
-    const cols = conn
-      .prepare<[], ColRow>("PRAGMA table_info(news_events)")
-      .all();
-    if (cols.length > 0 && !cols.some((c) => c.name === "duplicate_of")) {
-      conn.exec("ALTER TABLE news_events ADD COLUMN duplicate_of TEXT");
-      conn.exec(
-        "CREATE INDEX IF NOT EXISTS idx_news_dup_of ON news_events(duplicate_of)",
-      );
-    }
-  } catch {
-    /* table missing — schema.sql will create it with the column */
-  }
-
-  // Tiny migration #5: add rationale column to index_positions if missing.
-  // Existing rows keep NULL until next rebalance writes their reasoning.
-  try {
-    type ColRow = { name: string };
-    const cols = conn
-      .prepare<[], ColRow>("PRAGMA table_info(index_positions)")
-      .all();
-    if (cols.length > 0 && !cols.some((c) => c.name === "rationale")) {
-      conn.exec("ALTER TABLE index_positions ADD COLUMN rationale TEXT");
-    }
-  } catch {
-    /* table missing — schema.sql will create it with the column */
-  }
-
-  // Tiny migration #4: add actionable + event_recency to classifications
-  // if missing. Existing rows keep NULL until re-classified.
-  try {
-    type ColRow = { name: string };
-    const cols = conn
-      .prepare<[], ColRow>("PRAGMA table_info(classifications)")
-      .all();
-    if (cols.length > 0) {
-      if (!cols.some((c) => c.name === "actionable")) {
-        conn.exec("ALTER TABLE classifications ADD COLUMN actionable INTEGER");
-      }
-      if (!cols.some((c) => c.name === "event_recency")) {
-        conn.exec(
-          "ALTER TABLE classifications ADD COLUMN event_recency TEXT",
-        );
-      }
-    }
-  } catch {
-    /* table missing — schema.sql creates it with these columns */
-  }
-
-  // Tiny migration #11: Part 1 tables (signal_outcomes, system_alerts).
-  // schema.exec below runs the CREATE TABLE IF NOT EXISTS for new tables;
-  // we don't need ALTERs here because the table didn't exist before.
-  // Documented for future devs who grep the migrations list.
-
-  // Tiny migration #10: Dimensions 1/3 columns on classifications.
-  // - embedding: JSON-serialized number[] for semantic freshness check
-  // - coverage_continuation_of: link to prior event when 0.42 ≤ sim < 0.55
-  // - mechanism_length / mechanism_reasoning: D3 reasoning chain length
-  // - counterfactual_strength / counterfactual_reasoning: D3 counterargument
-  try {
-    type ColRow = { name: string };
-    const cols = conn
-      .prepare<[], ColRow>("PRAGMA table_info(classifications)")
-      .all();
-    if (cols.length > 0) {
-      const has = (n: string) => cols.some((c) => c.name === n);
-      if (!has("embedding"))
-        conn.exec("ALTER TABLE classifications ADD COLUMN embedding TEXT");
-      if (!has("coverage_continuation_of"))
-        conn.exec(
-          "ALTER TABLE classifications ADD COLUMN coverage_continuation_of TEXT",
-        );
-      if (!has("mechanism_length"))
-        conn.exec(
-          "ALTER TABLE classifications ADD COLUMN mechanism_length INTEGER",
-        );
-      if (!has("mechanism_reasoning"))
-        conn.exec(
-          "ALTER TABLE classifications ADD COLUMN mechanism_reasoning TEXT",
-        );
-      if (!has("counterfactual_strength"))
-        conn.exec(
-          "ALTER TABLE classifications ADD COLUMN counterfactual_strength TEXT",
-        );
-      if (!has("counterfactual_reasoning"))
-        conn.exec(
-          "ALTER TABLE classifications ADD COLUMN counterfactual_reasoning TEXT",
-        );
-    }
-  } catch {
-    /* table missing — schema.sql creates it with these columns */
-  }
-
-  conn.exec(schemaSrc);
-
-  _db = conn;
-  return _db;
+  _client = client;
+  _schemaBootstrapped = false;
 }
 
 /** Close the connection (mainly for tests). */
 export function closeDb(): void {
-  if (_db) {
-    _db.close();
-    _db = null;
+  if (_client) {
+    try {
+      _client.close();
+    } catch {
+      /* ignore */
+    }
+    _client = null;
   }
+  _schemaBootstrapped = false;
 }
 
 /**
- * Run a function inside a transaction. Returns whatever the function returns.
- * Throws → rollback. Useful for ingest pipelines that touch multiple tables.
+ * Apply schema.sql against the given client. Idempotent — every CREATE
+ * uses IF NOT EXISTS, every ALTER is wrapped in a try/catch by the
+ * caller. Used by tests building an in-memory client; production runs
+ * the schema once via `ensureSchema()` below on first DB call.
  */
-export function transaction<T>(fn: (db: Database.Database) => T): T {
-  const conn = db();
-  return conn.transaction(fn)(conn);
+export async function bootstrapSchema(client: Client): Promise<void> {
+  const schemaPath = resolve(process.cwd(), "src/lib/db/schema.sql");
+  if (!existsSync(schemaPath)) {
+    throw new Error(`schema.sql not found at ${schemaPath}`);
+  }
+  const schemaSrc = readFileSync(schemaPath, "utf8");
+  // libSQL's executeMultiple runs an arbitrary script (CREATE statements
+  // separated by semicolons). Perfect fit for schema.sql.
+  await client.executeMultiple(schemaSrc);
+}
+
+/**
+ * Lazily ensure the schema is in place. Called from helpers below before
+ * the first query of a process. In production this is a no-op after the
+ * first run — Turso retains the schema across deploys.
+ */
+async function ensureSchema(): Promise<void> {
+  if (_schemaBootstrapped) return;
+  _schemaBootstrapped = true;
+  if (process.env.SKIP_SCHEMA_BOOTSTRAP === "1") return;
+  try {
+    await bootstrapSchema(getClient());
+  } catch (err) {
+    // Don't crash callers on schema bootstrap errors — Turso may already
+    // have a stricter schema than our IF NOT EXISTS allows. Log and move
+    // on; explicit migration files are the right fix.
+    console.warn(
+      `[db] schema bootstrap warning: ${(err as Error).message}`,
+    );
+  }
+}
+
+// ─── Async query helpers ─────────────────────────────────────────────
+//
+// Repos use these instead of raw `client.execute()` calls. Keeps the
+// per-repo code at roughly the same line count as before.
+
+/** Run a SQL statement that returns rows. */
+export async function all<T = Record<string, unknown>>(
+  sql: string,
+  args?: InArgs,
+): Promise<T[]> {
+  await ensureSchema();
+  const res = await getClient().execute({ sql, args: args ?? [] });
+  return res.rows as unknown as T[];
+}
+
+/** Run a SQL statement that returns at most one row. */
+export async function get<T = Record<string, unknown>>(
+  sql: string,
+  args?: InArgs,
+): Promise<T | undefined> {
+  await ensureSchema();
+  const res = await getClient().execute({ sql, args: args ?? [] });
+  return (res.rows[0] as unknown as T) ?? undefined;
+}
+
+/** Run a SQL statement that writes; returns the ResultSet for affected-row counts. */
+export async function run(sql: string, args?: InArgs): Promise<ResultSet> {
+  await ensureSchema();
+  return getClient().execute({ sql, args: args ?? [] });
+}
+
+/**
+ * Run a sequence of statements atomically. Either all commit or none do.
+ * Use for ingest pipelines that touch multiple tables.
+ *
+ * Each statement can be a string (no args) or `{sql, args}`.
+ */
+export async function batch(statements: InStatement[]): Promise<ResultSet[]> {
+  await ensureSchema();
+  return getClient().batch(statements);
+}
+
+/**
+ * Run a function inside an interactive transaction.
+ * Returns whatever the function returns. Throws → rollback.
+ *
+ * Use for tx logic that needs to read between writes (e.g. upsert that
+ * inspects an existing row first). For pure write sequences, prefer
+ * `batch()` which is cheaper.
+ */
+export async function transaction<T>(
+  fn: (tx: Awaited<ReturnType<Client["transaction"]>>) => Promise<T>,
+  mode: "write" | "read" | "deferred" = "write",
+): Promise<T> {
+  await ensureSchema();
+  const tx = await getClient().transaction(mode);
+  try {
+    const result = await fn(tx);
+    await tx.commit();
+    return result;
+  } catch (err) {
+    try {
+      await tx.rollback();
+    } catch {
+      /* ignore rollback errors */
+    }
+    throw err;
+  }
+}
+
+// ─── Back-compat shim ─────────────────────────────────────────────────
+//
+// Some files still import `db` from "../client" (Wave 1 sync style).
+// During the async migration we expose `db()` returning the libSQL
+// client itself; callers that used `.prepare().run()` will fail loudly
+// rather than silently swallow data. The helpers above are the new path.
+
+/** @deprecated — use `getClient()` or the async helpers (all/get/run/batch). */
+export function db(): Client {
+  return getClient();
 }

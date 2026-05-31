@@ -1,13 +1,8 @@
 /**
- * Repository — `framework_switches` (Part 3 of v2.1 attribution).
- *
- * Auditable journal of every framework selection event. Every row
- * captures both frameworks' trailing 30d return at switch time so we
- * can later ask "did the user switch right after a bad month?"
- * (I-38).
+ * Repository — `framework_switches`. Wave 2: async.
  */
 
-import { db } from "../client";
+import { all, run } from "../client";
 
 export interface FrameworkSwitchRow {
   id: string;
@@ -22,7 +17,7 @@ export interface FrameworkSwitchRow {
   notes: string | null;
 }
 
-export function recordSwitch(input: {
+export async function recordSwitch(input: {
   id: string;
   from_version: string;
   to_version: string;
@@ -32,34 +27,31 @@ export function recordSwitch(input: {
   v1_30d_return: number | null;
   v2_30d_return: number | null;
   notes?: string | null;
-}): void {
-  db()
-    .prepare(
-      `INSERT INTO framework_switches
-         (id, switched_at, from_version, to_version,
-          user_confirmed_understanding,
-          live_nav_at_switch, shadow_nav_at_switch,
-          v1_30d_return, v2_30d_return, notes)
-       VALUES
-         (@id, datetime('now'), @from_version, @to_version,
-          @user_confirmed_understanding,
-          @live_nav_at_switch, @shadow_nav_at_switch,
-          @v1_30d_return, @v2_30d_return, @notes)`,
-    )
-    .run({
-      id: input.id,
-      from_version: input.from_version,
-      to_version: input.to_version,
-      user_confirmed_understanding: input.user_confirmed_understanding ? 1 : 0,
-      live_nav_at_switch: input.live_nav_at_switch,
-      shadow_nav_at_switch: input.shadow_nav_at_switch,
-      v1_30d_return: input.v1_30d_return,
-      v2_30d_return: input.v2_30d_return,
-      notes: input.notes ?? null,
-    });
+}): Promise<void> {
+  await run(
+    `INSERT INTO framework_switches
+       (id, switched_at, from_version, to_version,
+        user_confirmed_understanding,
+        live_nav_at_switch, shadow_nav_at_switch,
+        v1_30d_return, v2_30d_return, notes)
+     VALUES (?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      input.id,
+      input.from_version,
+      input.to_version,
+      input.user_confirmed_understanding ? 1 : 0,
+      input.live_nav_at_switch,
+      input.shadow_nav_at_switch,
+      input.v1_30d_return,
+      input.v2_30d_return,
+      input.notes ?? null,
+    ],
+  );
 }
 
-export function listSwitches(limit = 10): FrameworkSwitchRow[] {
+export async function listSwitches(
+  limit = 10,
+): Promise<FrameworkSwitchRow[]> {
   interface Raw {
     id: string;
     switched_at: string;
@@ -72,13 +64,12 @@ export function listSwitches(limit = 10): FrameworkSwitchRow[] {
     v2_30d_return: number | null;
     notes: string | null;
   }
-  const rows = db()
-    .prepare<[number], Raw>(
-      `SELECT * FROM framework_switches
-       ORDER BY switched_at DESC
-       LIMIT ?`,
-    )
-    .all(limit);
+  const rows = await all<Raw>(
+    `SELECT * FROM framework_switches
+     ORDER BY switched_at DESC
+     LIMIT ?`,
+    [limit],
+  );
   return rows.map((r) => ({
     ...r,
     user_confirmed_understanding: r.user_confirmed_understanding === 1,

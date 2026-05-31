@@ -1,38 +1,27 @@
 /**
  * Repository — `user_settings` (single-row KV store for now).
- *
- * Build-a-thon scope: one user, one config. Easy to expand later by adding
- * a `user_id` column.
+ * Wave 2: async (libSQL/Turso).
  */
 
-import { db } from "../client";
+import { all, run, batch } from "../client";
 
 export interface SettingsSnapshot {
   auto_trade_enabled: boolean;
-  auto_trade_min_confidence: number; // 0..1
+  auto_trade_min_confidence: number;
   review_min_confidence: number;
   info_min_confidence: number;
   default_position_size_usd: number;
   max_concurrent_positions: number;
   max_daily_trades: number;
-  default_stop_loss_pct: number; // e.g. 8 = 8%
+  default_stop_loss_pct: number;
   default_take_profit_pct: number;
   paper_starting_balance_usd: number;
-  // ── AlphaIndex ──
-  /** When true, scheduled rebalances actually execute trades. */
   index_auto_rebalance: boolean;
-  /** Drop assets below this weight (in %). */
   index_min_position_pct: number;
-  /** Cap any single asset at this weight (in %). */
   index_max_position_pct: number;
-  /** Always hold this much in USDC for liquidity (in %). */
   index_cash_reserve_pct: number;
-  /** Skip rebalance trades smaller than this weight delta (in %). */
   index_rebalance_threshold_pct: number;
-  /** Whether to send candidate weights to Claude for review. */
   index_review_with_claude: boolean;
-  /** Allocation framework selector. v1 = legacy anchor+momentum;
-   *  v2 = drawdown-controlled (graduated, see FRAMEWORK_NOTES.md). */
   index_framework_version: "v1" | "v2";
 }
 
@@ -56,8 +45,6 @@ const SETTING_KEYS: ReadonlyArray<keyof SettingsSnapshot> = [
   "index_framework_version",
 ];
 
-/** Settings whose value is a boolean. All others are numbers (default)
- *  unless listed in STRING_KEYS. */
 const BOOLEAN_KEYS = new Set<keyof SettingsSnapshot>([
   "auto_trade_enabled",
   "index_auto_rebalance",
@@ -102,11 +89,8 @@ const DEFAULTS: SettingsSnapshot = {
 };
 
 /** Read all settings as a typed snapshot, falling back to defaults. */
-export function getSettings(): SettingsSnapshot {
-  const rows = db()
-    .prepare<[], RawRow>("SELECT key, value FROM user_settings")
-    .all();
-  // Build an indexable bag, then cast back to the typed snapshot.
+export async function getSettings(): Promise<SettingsSnapshot> {
+  const rows = await all<RawRow>("SELECT key, value FROM user_settings");
   const out: { [key: string]: unknown } = { ...DEFAULTS };
   for (const r of rows) {
     if (SETTING_KEYS.includes(r.key as keyof SettingsSnapshot)) {
@@ -117,11 +101,10 @@ export function getSettings(): SettingsSnapshot {
   return out as unknown as SettingsSnapshot;
 }
 
-/** Set a single setting. */
-export function setSetting<K extends keyof SettingsSnapshot>(
+function settingArgs<K extends keyof SettingsSnapshot>(
   key: K,
   value: SettingsSnapshot[K],
-): void {
+): [string, string] {
   const raw =
     typeof value === "boolean"
       ? value
@@ -130,24 +113,34 @@ export function setSetting<K extends keyof SettingsSnapshot>(
       : typeof value === "string"
         ? value
         : String(value);
-  db()
-    .prepare(
-      `INSERT INTO user_settings (key, value, updated_at)
-       VALUES (?, ?, unixepoch() * 1000)
-       ON CONFLICT(key) DO UPDATE SET
-         value = excluded.value,
-         updated_at = excluded.updated_at`,
-    )
-    .run(key, raw);
+  return [key, raw];
+}
+
+const UPSERT_SQL = `INSERT INTO user_settings (key, value, updated_at)
+ VALUES (?, ?, unixepoch() * 1000)
+ ON CONFLICT(key) DO UPDATE SET
+   value = excluded.value,
+   updated_at = excluded.updated_at`;
+
+/** Set a single setting. */
+export async function setSetting<K extends keyof SettingsSnapshot>(
+  key: K,
+  value: SettingsSnapshot[K],
+): Promise<void> {
+  await run(UPSERT_SQL, settingArgs(key, value));
 }
 
 /** Bulk update — handy for the settings form. */
-export function setSettings(patch: Partial<SettingsSnapshot>): void {
-  const tx = db().transaction((p: Partial<SettingsSnapshot>) => {
-    for (const [k, v] of Object.entries(p)) {
-      if (v === undefined) continue;
-      setSetting(k as keyof SettingsSnapshot, v as never);
-    }
-  });
-  tx(patch);
+export async function setSettings(
+  patch: Partial<SettingsSnapshot>,
+): Promise<void> {
+  const stmts: Array<{ sql: string; args: (string | number)[] }> = [];
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === undefined) continue;
+    stmts.push({
+      sql: UPSERT_SQL,
+      args: settingArgs(k as keyof SettingsSnapshot, v as never),
+    });
+  }
+  if (stmts.length > 0) await batch(stmts);
 }

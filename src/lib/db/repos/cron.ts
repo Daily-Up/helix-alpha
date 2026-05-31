@@ -3,9 +3,11 @@
  *
  * Every cron endpoint wraps its work in `recordRun(...)` so the dashboard
  * can show "last news ingest: 4 min ago, fetched 87 events".
+ *
+ * Wave 2: async (libSQL/Turso).
  */
 
-import { db } from "../client";
+import { all, get, run, getClient } from "../client";
 
 export type JobName =
   | "ingest_news"
@@ -19,9 +21,7 @@ export type JobName =
   | "compute_patterns"
   | "generate_briefing"
   | "ingest_btc_treasuries"
-  // Part 1: outcome resolution job (every cron tick).
   | "resolve_outcomes"
-  // Part 3: nightly DB backup.
   | "backup_db";
 
 export interface CronRunRow {
@@ -40,44 +40,44 @@ export async function recordRun<T>(
   fn: () => Promise<{ summary: string; data?: T }>,
 ): Promise<{ id: number; summary: string; data?: T }> {
   const start = Date.now();
-  const insert = db()
-    .prepare(
-      `INSERT INTO cron_runs (job, started_at, status) VALUES (?, ?, 'running')`,
-    )
-    .run(job, start);
+  const insert = await run(
+    `INSERT INTO cron_runs (job, started_at, status) VALUES (?, ?, 'running')`,
+    [job, start],
+  );
   const id = Number(insert.lastInsertRowid);
 
   try {
     const { summary, data } = await fn();
-    db()
-      .prepare(
-        `UPDATE cron_runs SET finished_at = ?, status = 'ok', summary = ? WHERE id = ?`,
-      )
-      .run(Date.now(), summary, id);
+    await run(
+      `UPDATE cron_runs SET finished_at = ?, status = 'ok', summary = ? WHERE id = ?`,
+      [Date.now(), summary, id],
+    );
     return { id, summary, data };
   } catch (err) {
     const msg = (err as Error).message ?? String(err);
-    db()
-      .prepare(
-        `UPDATE cron_runs SET finished_at = ?, status = 'error', error = ? WHERE id = ?`,
-      )
-      .run(Date.now(), msg.slice(0, 1000), id);
+    await run(
+      `UPDATE cron_runs SET finished_at = ?, status = 'error', error = ? WHERE id = ?`,
+      [Date.now(), msg.slice(0, 1000), id],
+    );
     throw err;
   }
 }
 
-export function lastRun(job: JobName): CronRunRow | undefined {
-  return db()
-    .prepare<[JobName], CronRunRow>(
-      `SELECT * FROM cron_runs WHERE job = ? ORDER BY started_at DESC LIMIT 1`,
-    )
-    .get(job);
+export async function lastRun(
+  job: JobName,
+): Promise<CronRunRow | undefined> {
+  return get<CronRunRow>(
+    `SELECT * FROM cron_runs WHERE job = ? ORDER BY started_at DESC LIMIT 1`,
+    [job],
+  );
 }
 
-export function recentRuns(limit = 50): CronRunRow[] {
-  return db()
-    .prepare<[number], CronRunRow>(
-      `SELECT * FROM cron_runs ORDER BY started_at DESC LIMIT ?`,
-    )
-    .all(limit);
+export async function recentRuns(limit = 50): Promise<CronRunRow[]> {
+  return all<CronRunRow>(
+    `SELECT * FROM cron_runs ORDER BY started_at DESC LIMIT ?`,
+    [limit],
+  );
 }
+
+// Silence unused-import warning — getClient kept for any future direct use.
+void getClient;

@@ -1,12 +1,8 @@
 /**
- * Repo for `skipped_pre_classify` (invariant I-46).
- *
- * Headlines that fail the corpus-similarity gate land here instead of in
- * `classifications`. Used by audit pages + drop-rate stats on
- * /system-health.
+ * Repo for `skipped_pre_classify`. Wave 2: async.
  */
 
-import { db } from "../client";
+import { all, get, run } from "../client";
 
 export interface SkippedPreClassifyRow {
   id: string;
@@ -32,7 +28,7 @@ interface RawRow {
   skipped_at: number;
 }
 
-export function insertSkipped(input: {
+export async function insertSkipped(input: {
   id: string;
   headline_text: string;
   corpus_score: number;
@@ -41,15 +37,13 @@ export function insertSkipped(input: {
   asset_classes_detected: string[];
   asset_class_in_corpus: boolean;
   reasoning: string;
-}): void {
-  db()
-    .prepare(
-      `INSERT OR REPLACE INTO skipped_pre_classify
-         (id, headline_text, corpus_score, max_cosine, top_match_event_id,
-          asset_classes_detected, asset_class_in_corpus, reasoning)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
+}): Promise<void> {
+  await run(
+    `INSERT OR REPLACE INTO skipped_pre_classify
+       (id, headline_text, corpus_score, max_cosine, top_match_event_id,
+        asset_classes_detected, asset_class_in_corpus, reasoning)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
       input.id,
       input.headline_text,
       input.corpus_score,
@@ -58,24 +52,25 @@ export function insertSkipped(input: {
       JSON.stringify(input.asset_classes_detected),
       input.asset_class_in_corpus ? 1 : 0,
       input.reasoning,
-    );
+    ],
+  );
 }
 
-export function listRecentSkipped(limit = 50): SkippedPreClassifyRow[] {
-  const rows = db()
-    .prepare<[number], RawRow>(
-      `SELECT * FROM skipped_pre_classify ORDER BY skipped_at DESC LIMIT ?`,
-    )
-    .all(limit);
+export async function listRecentSkipped(
+  limit = 50,
+): Promise<SkippedPreClassifyRow[]> {
+  const rows = await all<RawRow>(
+    `SELECT * FROM skipped_pre_classify ORDER BY skipped_at DESC LIMIT ?`,
+    [limit],
+  );
   return rows.map(toRow);
 }
 
-export function countSkippedSince(ts: number): number {
-  const r = db()
-    .prepare<[number], { c: number }>(
-      `SELECT COUNT(*) AS c FROM skipped_pre_classify WHERE skipped_at >= ?`,
-    )
-    .get(ts);
+export async function countSkippedSince(ts: number): Promise<number> {
+  const r = await get<{ c: number }>(
+    `SELECT COUNT(*) AS c FROM skipped_pre_classify WHERE skipped_at >= ?`,
+    [ts],
+  );
   return r?.c ?? 0;
 }
 

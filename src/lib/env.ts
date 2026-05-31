@@ -40,7 +40,14 @@ const EnvSchema = z.object({
   ANTHROPIC_API_KEY: z.string().min(1, "ANTHROPIC_API_KEY is required"),
   ANTHROPIC_MODEL: z.string().default("claude-sonnet-4-5"),
 
-  // Database
+  // Database — Wave 2 onwards: Turso (hosted libSQL). Both URL and token
+  // are required at runtime; left optional in the schema so `next build`
+  // (which doesn't have prod env) still passes. The client throws if URL
+  // is missing when actually queried.
+  TURSO_DATABASE_URL: z.string().optional(),
+  TURSO_AUTH_TOKEN: z.string().optional(),
+  // Legacy — only used by one-off migration scripts that read the local
+  // SQLite snapshot. Production code no longer touches this.
   DATABASE_PATH: z.string().default("./data/sosoalpha.db"),
 
   // Cron auth — required in prod, optional in dev (allows unauthenticated curl)

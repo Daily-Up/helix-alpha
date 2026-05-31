@@ -1,13 +1,8 @@
 /**
- * Repository — `etf_flows_daily` and `etf_aggregate_daily`.
- *
- * Per-fund flows come from /etfs/{ticker}/history; aggregate flows from
- * /etfs/summary-history. We store both because they answer different
- * questions (BlackRock vs Fidelity competition  vs  total institutional
- * appetite).
+ * Repository — `etf_flows_daily` and `etf_aggregate_daily`. Wave 2: async.
  */
 
-import { db } from "../client";
+import { all, batch } from "../client";
 import type {
   ETFHistoryRow,
   ETFSummaryHistoryRow,
@@ -20,27 +15,24 @@ function asNumber(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** Upsert per-fund daily flows. */
-export function upsertFundFlows(rows: ETFHistoryRow[]): number {
+export async function upsertFundFlows(rows: ETFHistoryRow[]): Promise<number> {
   if (rows.length === 0) return 0;
-  const stmt = db().prepare(
-    `INSERT INTO etf_flows_daily (
-       ticker, date, net_inflow, cum_inflow, net_assets,
-       currency_share, prem_dsc, value_traded, volume
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(ticker, date) DO UPDATE SET
-       net_inflow     = excluded.net_inflow,
-       cum_inflow     = excluded.cum_inflow,
-       net_assets     = excluded.net_assets,
-       currency_share = excluded.currency_share,
-       prem_dsc       = excluded.prem_dsc,
-       value_traded   = excluded.value_traded,
-       volume         = excluded.volume`,
-  );
-  const tx = db().transaction((items: ETFHistoryRow[]) => {
-    let n = 0;
-    for (const r of items) {
-      stmt.run(
+  const sql = `INSERT INTO etf_flows_daily (
+     ticker, date, net_inflow, cum_inflow, net_assets,
+     currency_share, prem_dsc, value_traded, volume
+   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+   ON CONFLICT(ticker, date) DO UPDATE SET
+     net_inflow     = excluded.net_inflow,
+     cum_inflow     = excluded.cum_inflow,
+     net_assets     = excluded.net_assets,
+     currency_share = excluded.currency_share,
+     prem_dsc       = excluded.prem_dsc,
+     value_traded   = excluded.value_traded,
+     volume         = excluded.volume`;
+  await batch(
+    rows.map((r) => ({
+      sql,
+      args: [
         r.ticker,
         r.date,
         asNumber(r.net_inflow),
@@ -50,36 +42,31 @@ export function upsertFundFlows(rows: ETFHistoryRow[]): number {
         asNumber(r.prem_dsc),
         asNumber(r.value_traded),
         asNumber(r.volume),
-      );
-      n++;
-    }
-    return n;
-  });
-  return tx(rows);
+      ],
+    })),
+  );
+  return rows.length;
 }
 
-/** Upsert aggregate flows for (symbol, country_code). */
-export function upsertAggregateFlows(
+export async function upsertAggregateFlows(
   symbol: string,
   countryCode: string,
   rows: ETFSummaryHistoryRow[],
-): number {
+): Promise<number> {
   if (rows.length === 0) return 0;
-  const stmt = db().prepare(
-    `INSERT INTO etf_aggregate_daily (
-       symbol, country_code, date,
-       total_net_inflow, cum_net_inflow, total_net_assets, total_value_traded
-     ) VALUES (?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(symbol, country_code, date) DO UPDATE SET
-       total_net_inflow   = excluded.total_net_inflow,
-       cum_net_inflow     = excluded.cum_net_inflow,
-       total_net_assets   = excluded.total_net_assets,
-       total_value_traded = excluded.total_value_traded`,
-  );
-  const tx = db().transaction((items: ETFSummaryHistoryRow[]) => {
-    let n = 0;
-    for (const r of items) {
-      stmt.run(
+  const sql = `INSERT INTO etf_aggregate_daily (
+     symbol, country_code, date,
+     total_net_inflow, cum_net_inflow, total_net_assets, total_value_traded
+   ) VALUES (?, ?, ?, ?, ?, ?, ?)
+   ON CONFLICT(symbol, country_code, date) DO UPDATE SET
+     total_net_inflow   = excluded.total_net_inflow,
+     cum_net_inflow     = excluded.cum_net_inflow,
+     total_net_assets   = excluded.total_net_assets,
+     total_value_traded = excluded.total_value_traded`;
+  await batch(
+    rows.map((r) => ({
+      sql,
+      args: [
         symbol,
         countryCode,
         r.date,
@@ -87,15 +74,12 @@ export function upsertAggregateFlows(
         asNumber(r.cum_net_inflow),
         asNumber(r.total_net_assets),
         asNumber(r.total_value_traded),
-      );
-      n++;
-    }
-    return n;
-  });
-  return tx(rows);
+      ],
+    })),
+  );
+  return rows.length;
 }
 
-/** Read per-fund history for charts. */
 export interface FundFlowRow {
   ticker: string;
   date: string;
@@ -108,15 +92,17 @@ export interface FundFlowRow {
   volume: number | null;
 }
 
-export function getFundHistory(ticker: string, limit = 60): FundFlowRow[] {
-  return db()
-    .prepare<[string, number], FundFlowRow>(
-      `SELECT * FROM etf_flows_daily
-       WHERE ticker = ?
-       ORDER BY date DESC
-       LIMIT ?`,
-    )
-    .all(ticker, limit);
+export async function getFundHistory(
+  ticker: string,
+  limit = 60,
+): Promise<FundFlowRow[]> {
+  return all<FundFlowRow>(
+    `SELECT * FROM etf_flows_daily
+     WHERE ticker = ?
+     ORDER BY date DESC
+     LIMIT ?`,
+    [ticker, limit],
+  );
 }
 
 export interface AggregateFlowRow {
@@ -129,17 +115,16 @@ export interface AggregateFlowRow {
   total_value_traded: number | null;
 }
 
-export function getAggregateHistory(
+export async function getAggregateHistory(
   symbol: string,
   countryCode: string,
   limit = 60,
-): AggregateFlowRow[] {
-  return db()
-    .prepare<[string, string, number], AggregateFlowRow>(
-      `SELECT * FROM etf_aggregate_daily
-       WHERE symbol = ? AND country_code = ?
-       ORDER BY date DESC
-       LIMIT ?`,
-    )
-    .all(symbol, countryCode, limit);
+): Promise<AggregateFlowRow[]> {
+  return all<AggregateFlowRow>(
+    `SELECT * FROM etf_aggregate_daily
+     WHERE symbol = ? AND country_code = ?
+     ORDER BY date DESC
+     LIMIT ?`,
+    [symbol, countryCode, limit],
+  );
 }
