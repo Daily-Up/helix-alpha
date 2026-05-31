@@ -151,17 +151,18 @@ export async function runDebateAgent(input: {
 }): Promise<DebateResult> {
   const totals = { input: 0, output: 0, cached: 0 };
 
-  // Run bull and bear sequentially. Could parallelise but sequential
-  // keeps the budget predictable and the traces deterministically ordered.
-  const bull = await runSide("bull", input);
-  totals.input += bull.tokens.input;
-  totals.output += bull.tokens.output;
-  totals.cached += bull.tokens.cached;
-
-  const bear = await runSide("bear", input);
-  totals.input += bear.tokens.input;
-  totals.output += bear.tokens.output;
-  totals.cached += bear.tokens.cached;
+  // Run bull and bear IN PARALLEL — they don't see each other's work,
+  // so concurrent execution is correct and roughly halves wall-clock
+  // (matters because the 3-agent run has to fit in a 60s Vercel function).
+  const [bull, bear] = await Promise.all([
+    runSide("bull", input),
+    runSide("bear", input),
+  ]);
+  for (const side of [bull, bear]) {
+    totals.input += side.tokens.input;
+    totals.output += side.tokens.output;
+    totals.cached += side.tokens.cached;
+  }
 
   const synth = await runSynthesizer({
     signal: input.signal,

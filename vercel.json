@@ -17,6 +17,10 @@
     },
     "src/app/api/data/**/route.ts": {
       "maxDuration": 15
+    },
+    "src/app/api/agent/**/route.ts": {
+      "maxDuration": 60,
+      "memory": 1024
     }
   },
   "crons": [
