@@ -221,13 +221,12 @@ export async function signAddAPIKeyAction(opts: {
     );
   }
 
-  // The 0x01 prefix IS required for X-API-Sign (per docs + the
-  // "X-API-Sign is invalid" gateway error without it). But before
-  // prefixing, normalize the v byte: some wallets (Rabby/MetaMask
-  // in some configs) return v ∈ {0, 1} (EIP-1559 compact form),
-  // SoDEX's ecrecover wants the legacy v ∈ {27, 28}. That mismatch
-  // was the "bad recovery id" we saw earlier.
-  const apiSign = ("0x01" + normalizeVByte(signature).slice(2)) as Hex;
+  // For the universal /exchange endpoint (where addAPIKey goes), the
+  // signature is submitted INSIDE the JSON body — no X-API-Sign
+  // header, and the 0x01 prefix is NOT used. We still normalize the
+  // v byte: some wallets return v ∈ {0, 1} (EIP-1559 compact form),
+  // SoDEX's ecrecover wants the legacy v ∈ {27, 28}.
+  const apiSign = normalizeVByte(signature);
   return { apiSign, nonce, walletChainId };
 }
 

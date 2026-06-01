@@ -203,7 +203,10 @@ export async function addApiKey(opts: {
   const expiresAt =
     opts.expiresAt ?? Date.now() + 7 * 24 * 60 * 60 * 1000;
 
-  const { apiSign, nonce } = await signAddAPIKeyAction({
+  // signAddAPIKeyAction returns the raw 65-byte signature (no 0x01
+  // prefix) AND the wallet's current chainId — which we need to
+  // include in the universal-action body as `signatureChainID`.
+  const { apiSign, nonce, walletChainId } = await signAddAPIKeyAction({
     provider,
     account,
     sodexChainId: chainId,
@@ -214,22 +217,33 @@ export async function addApiKey(opts: {
     expiresAt,
   });
 
-  const params: SodexAddApiKeyParams = {
-    accountID,
-    type: SodexApiKeyType.EVM,
-    name,
-    publicKey,
-    expiresAt,
+  // SoDEX's addAPIKey goes through the "universal" exchange endpoint,
+  // NOT the /accounts/api-keys X-API-Sign path. The body holds the
+  // full action envelope including the signature + the wallet's
+  // chainId — no auth headers are sent.
+  //
+  //   POST /api/v1/spot/exchange
+  //   body: { type, params, nonce, signature, signatureChainID }
+  //
+  // Reverse-engineered from testnet.sodex.com bundle.
+  const body = {
+    type: "addAPIKey",
+    params: {
+      accountID,
+      type: SodexApiKeyType.EVM,
+      name,
+      publicKey,
+      expiresAt,
+    },
+    nonce: Number(nonce),
+    signature: apiSign,
+    signatureChainID: walletChainId,
   };
 
-  const res = await fetch(`${spotEndpoint}/accounts/api-keys`, {
+  const res = await fetch(`${spotEndpoint}/exchange`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-API-Sign": apiSign,
-      "X-API-Nonce": nonce.toString(),
-    },
-    body: JSON.stringify(params),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
   await handle<unknown>(res);
   return { name };
