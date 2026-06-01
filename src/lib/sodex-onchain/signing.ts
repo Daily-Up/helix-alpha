@@ -117,8 +117,13 @@ export async function signWithMasterWallet(opts: {
   const win = (typeof window !== "undefined"
     ? (window as unknown as { ethereum?: WindowEthereum })
     : undefined);
+  // Prefer window.ethereum (raw injected provider) over a wagmi-
+  // supplied provider, because wagmi 2's connector.getProvider() may
+  // return a viem-wrapped provider that still runs the chainId
+  // validator middleware. window.ethereum is the unwrapped object
+  // the extension injects.
   const provider: Eip1193Provider | undefined =
-    opts.provider ?? win?.ethereum;
+    win?.ethereum ?? opts.provider;
   if (!provider) {
     throw new Error(
       "No wallet provider available (window.ethereum missing). Install MetaMask or Rabby.",
