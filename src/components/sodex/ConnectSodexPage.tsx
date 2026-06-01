@@ -454,7 +454,22 @@ function MainnetMasterKeyFlow({ network }: { network: SodexNetwork }) {
   }, [network, remoteKeys]);
 
   const onGenerateKey = useCallback(async () => {
-    if (!isConnected || !address || !provider || !accountState) return;
+    if (!isConnected || !address) {
+      setError("Wallet not connected — click Connect Wallet first.");
+      return;
+    }
+    if (!accountState) {
+      setError(
+        "SoDEX account state not loaded yet. Hit Refresh and try again.",
+      );
+      return;
+    }
+    if (!provider) {
+      setError(
+        "Couldn't get a wallet provider from the connector. Try disconnecting + reconnecting your wallet.",
+      );
+      return;
+    }
     setBusy("generate");
     setError(null);
     setActionMsg(null);
