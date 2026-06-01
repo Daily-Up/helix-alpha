@@ -1,20 +1,26 @@
 "use client";
 
 /**
- * The full "Connect SoDEX" wizard component.
+ * /settings/connect-sodex.
  *
- * Renders a wallet-connect button (via RainbowKit), then once the
- * wallet is connected, walks the user through:
+ * Two-track UX:
  *
- *   1. Picking the SoDEX network (testnet by default)
- *   2. Loading the account state (account ID + balances)
- *   3. Listing API keys already registered on SoDEX for this wallet
- *   4. Generating a fresh Helix-scoped API key (master-wallet signed)
- *   5. Revoking any key (master-wallet signed)
- *   6. Editing safety limits stored in localStorage
+ *   • Testnet  — burner-wallet flow. Click "Generate burner" →
+ *     browser mints a fresh keypair → user funds it from the SoDEX
+ *     faucet. The wallet IS the trading identity. No MetaMask, no
+ *     addAPIKey. This matches how SoDEX testnet actually works.
  *
- * Helix's server is never touched by this page — every byte goes
- * directly to mainnet-gw / testnet-gw, signed in-browser.
+ *   • Mainnet  — master + API-key flow. Connect MetaMask → mint a
+ *     new keypair locally → sign `addAPIKey` so SoDEX registers the
+ *     public address → store the private key in the browser. Orders
+ *     are signed with the API key (revocable any time from this
+ *     page or from sodex.com). Master wallet stays cold; only used
+ *     for setup + revocation.
+ *
+ * In both flows the private key lives ONLY in browser localStorage.
+ * Helix's server never sees it and is not in the critical path of a
+ * trade — orders go straight from the browser to mainnet-gw /
+ * testnet-gw via CORS-open direct fetches.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -44,6 +50,8 @@ import {
 } from "@/lib/sodex-onchain/client";
 import {
   clearLocalKey,
+  isBurner,
+  mintBurnerWallet,
   mintNewApiKey,
   readLocalKey,
   readSafetyLimits,
@@ -59,14 +67,8 @@ import type {
 } from "@/lib/sodex-onchain/types";
 
 export function ConnectSodexPage() {
-  const { address, isConnected } = useAccount();
-  const chainId = useChainId();
-  const { switchChain } = useSwitchChain();
-  const { data: walletClient } = useWalletClient();
-
   // ── Network state ──────────────────────────────────────────────
   const [network, setNetwork] = useState<SodexNetwork>(DEFAULT_NETWORK);
-  // Restore network preference on mount.
   useEffect(() => {
     if (typeof window === "undefined") return;
     const stored = window.localStorage.getItem(NETWORK_STORAGE_KEY);
@@ -79,16 +81,281 @@ export function ConnectSodexPage() {
     }
   }, []);
 
+  return (
+    <div className="flex flex-col gap-5">
+      <header className="flex flex-col gap-1">
+        <h1 className="text-xl font-semibold text-fg">Connect SoDEX</h1>
+        <p className="text-sm text-fg-muted">
+          Trade live on SoDEX with your own wallet and your own funds.
+          Helix never sees a private key — every secret lives only in
+          your browser. Orders go from your browser straight to SoDEX.
+        </p>
+      </header>
+
+      <NetworkPicker network={network} onChange={setNetworkAndStore} />
+
+      {network === "testnet" ? (
+        <TestnetBurnerFlow network={network} />
+      ) : (
+        <MainnetMasterKeyFlow network={network} />
+      )}
+    </div>
+  );
+}
+
+// ─── Shared network picker ──────────────────────────────────────────
+
+function NetworkPicker({
+  network,
+  onChange,
+}: {
+  network: SodexNetwork;
+  onChange: (n: SodexNetwork) => void;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>1. Network</CardTitle>
+        <span className="text-[11px] text-fg-dim">
+          Testnet uses faucet tokens — recommended for trying it out.
+        </span>
+      </CardHeader>
+      <CardBody>
+        <div className="flex gap-2">
+          {(["testnet", "mainnet"] as SodexNetwork[]).map((n) => (
+            <button
+              key={n}
+              onClick={() => onChange(n)}
+              className={cn(
+                "rounded border px-3 py-1.5 text-xs font-medium transition-colors",
+                network === n
+                  ? "border-accent/40 bg-accent/15 text-accent-2"
+                  : "border-line bg-surface text-fg-muted hover:border-line-2 hover:text-fg",
+              )}
+            >
+              {SODEX_NETWORKS[n].label}
+              {n === "testnet" ? " · safe" : " · real funds"}
+            </button>
+          ))}
+          <span className="ml-auto self-center text-[11px] text-fg-dim">
+            chainId {SODEX_NETWORKS[network].chainId}
+          </span>
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
+// ─── Testnet: burner-wallet flow ────────────────────────────────────
+
+function TestnetBurnerFlow({ network }: { network: SodexNetwork }) {
+  const [identity, setIdentity] = useState<StoredApiKey | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
+  const [accountState, setAccountState] = useState<SodexAccountState | null>(
+    null,
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  // Read identity from localStorage when the page mounts / network
+  // changes / we regenerate.
+  useEffect(() => {
+    setIdentity(readLocalKey(network));
+  }, [network, reloadTick]);
+
+  // Pull SoDEX account state for the burner so the user sees their
+  // testnet balance + accountID.
+  useEffect(() => {
+    if (!identity) {
+      setAccountState(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const s = await getAccountState(network, identity.address);
+        if (!cancelled) setAccountState(s);
+      } catch (err) {
+        if (!cancelled) setError((err as Error).message);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [identity, network, reloadTick]);
+
+  const onGenerate = useCallback(() => {
+    setBusy("generate");
+    setActionMsg(null);
+    setError(null);
+    try {
+      const next = mintBurnerWallet();
+      writeLocalKey(network, next);
+      setActionMsg(
+        `✓ Generated burner wallet ${next.address.slice(0, 6)}…${next.address.slice(-4)} — saved in this browser only`,
+      );
+      setReloadTick((t) => t + 1);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }, [network]);
+
+  const onWipe = useCallback(() => {
+    if (
+      !confirm(
+        "Delete this burner wallet from your browser? Any funds left in it are unrecoverable without the private key.",
+      )
+    ) {
+      return;
+    }
+    clearLocalKey(network);
+    setActionMsg("✓ Burner wiped from this browser.");
+    setReloadTick((t) => t + 1);
+  }, [network]);
+
+  const balanceLine = useMemo(() => {
+    if (!accountState?.B || accountState.B.length === 0) return "0";
+    return accountState.B.map((b) => `${b.t} ${b.a}`).join(" · ");
+  }, [accountState]);
+
+  return (
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle>2. Burner wallet (testnet)</CardTitle>
+          <span className="text-[11px] text-fg-dim">
+            Generated in your browser. SoDEX testnet doesn&apos;t use API
+            keys — the wallet itself signs orders.
+          </span>
+        </CardHeader>
+        <CardBody>
+          {!identity ? (
+            <div className="flex flex-col gap-3">
+              <p className="text-xs text-fg-muted">
+                Click below to mint a fresh keypair locally. Helix never
+                sees the private key — it lives only in this browser&apos;s
+                localStorage. If you wipe your browser data, the
+                wallet is unrecoverable, so don&apos;t fund it with
+                anything you can&apos;t afford to lose (testnet tokens are
+                free).
+              </p>
+              <div>
+                <button
+                  onClick={onGenerate}
+                  disabled={busy === "generate"}
+                  className={cn(
+                    "rounded border px-3 py-1.5 text-xs font-medium transition-colors",
+                    busy === "generate"
+                      ? "cursor-wait border-line bg-surface-2 text-fg-dim"
+                      : "border-accent/40 bg-accent/15 text-accent-2 hover:bg-accent/25",
+                  )}
+                >
+                  {busy === "generate"
+                    ? "Generating…"
+                    : "+ Generate burner wallet"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3 text-sm">
+              <div className="grid grid-cols-[120px_1fr] gap-x-3 gap-y-1 font-mono text-xs">
+                <span className="text-fg-dim">Address</span>
+                <span className="break-all text-fg">{identity.address}</span>
+                <span className="text-fg-dim">Account ID</span>
+                <span className="text-fg">
+                  {accountState?.aid ?? "fetching…"}
+                </span>
+                <span className="text-fg-dim">Balance</span>
+                <span className="text-fg">{balanceLine}</span>
+              </div>
+
+              {(!accountState || accountState.B.length === 0) ? (
+                <div className="rounded border border-warning/30 bg-warning/5 p-2 text-xs text-warning">
+                  No balance yet. Fund this wallet from the SoDEX
+                  testnet faucet — paste the address above.
+                </div>
+              ) : null}
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(identity.address);
+                    setActionMsg("✓ Address copied");
+                  }}
+                  className="rounded border border-line bg-surface px-2.5 py-1 text-xs text-fg-muted hover:border-accent/40 hover:text-accent-2"
+                >
+                  Copy address
+                </button>
+                <a
+                  href="https://faucet.sodex.dev"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded border border-line bg-surface px-2.5 py-1 text-xs text-fg-muted hover:border-accent/40 hover:text-accent-2"
+                >
+                  Open testnet faucet →
+                </a>
+                <button
+                  onClick={() => setReloadTick((t) => t + 1)}
+                  className="rounded border border-line bg-surface px-2.5 py-1 text-xs text-fg-muted hover:border-line-2 hover:text-fg"
+                >
+                  ↻ Refresh balance
+                </button>
+                <button
+                  onClick={onWipe}
+                  className="ml-auto rounded border border-line bg-surface px-2.5 py-1 text-xs text-fg-muted hover:border-negative/40 hover:text-negative"
+                >
+                  Wipe burner
+                </button>
+              </div>
+            </div>
+          )}
+          {error ? (
+            <div className="mt-3 rounded border border-negative/30 bg-negative/10 p-2 text-xs text-negative">
+              {error}
+            </div>
+          ) : null}
+        </CardBody>
+      </Card>
+
+      <SafetyLimitsCard network={network} />
+
+      {actionMsg ? (
+        <div className="rounded border border-positive/30 bg-positive/5 px-3 py-2 text-xs text-positive">
+          {actionMsg}
+        </div>
+      ) : null}
+
+      {identity ? <MyTradesPanel wallet={identity.address} /> : null}
+
+      {identity ? (
+        <ReadyBanner identity={identity} network={network} />
+      ) : null}
+    </>
+  );
+}
+
+// ─── Mainnet: master wallet + API key flow ──────────────────────────
+
+function MainnetMasterKeyFlow({ network }: { network: SodexNetwork }) {
+  const { address, isConnected } = useAccount();
+  const chainId = useChainId();
+  const { switchChain } = useSwitchChain();
+  const { data: walletClient } = useWalletClient();
+
   const requiredChainId = SODEX_NETWORKS[network].chainId;
   const onWrongChain = isConnected && chainId !== requiredChainId;
 
-  // ── Data fetches (account state + listed API keys) ─────────────
   const [accountState, setAccountState] = useState<SodexAccountState | null>(
     null,
   );
   const [remoteKeys, setRemoteKeys] = useState<SodexApiKeyRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [actionMsg, setActionMsg] = useState<string | null>(null);
 
   const refreshAccount = useCallback(async () => {
     if (!isConnected || !address) {
@@ -116,33 +383,10 @@ export function ConnectSodexPage() {
     refreshAccount();
   }, [refreshAccount]);
 
-  // ── Local key + safety limits ──────────────────────────────────
-  const localKey: StoredApiKey | null = useMemo(() => {
-    if (!address) return null;
-    return readLocalKey(network, address);
-  }, [address, network, remoteKeys]); // re-read after a refresh
-
-  const [limits, setLimits] = useState<SafetyLimits>({
-    maxPositionUsd: 10,
-    maxDailyTrades: 3,
-    acceptedDisclaimer: false,
-  });
+  const [localKey, setLocalKey] = useState<StoredApiKey | null>(null);
   useEffect(() => {
-    if (!address) return;
-    setLimits(readSafetyLimits(address));
-  }, [address]);
-  const saveLimits = useCallback(
-    (next: SafetyLimits) => {
-      if (!address) return;
-      writeSafetyLimits(address, next);
-      setLimits(next);
-    },
-    [address],
-  );
-
-  // ── Actions ────────────────────────────────────────────────────
-  const [busy, setBusy] = useState<string | null>(null);
-  const [actionMsg, setActionMsg] = useState<string | null>(null);
+    setLocalKey(readLocalKey(network));
+  }, [network, remoteKeys]);
 
   const onGenerateKey = useCallback(async () => {
     if (!isConnected || !address || !walletClient || !accountState) return;
@@ -163,8 +407,11 @@ export function ConnectSodexPage() {
         name: next.name,
         publicKey: next.address,
       });
-      writeLocalKey(network, address, next);
-      setActionMsg(`✓ Created API key "${next.name}" — saved in this browser only`);
+      writeLocalKey(network, next);
+      setLocalKey(next);
+      setActionMsg(
+        `✓ Created API key "${next.name}" — secret saved in this browser only`,
+      );
       await refreshAccount();
     } catch (err) {
       setError(`Failed to add API key: ${(err as Error).message}`);
@@ -185,10 +432,16 @@ export function ConnectSodexPage() {
     async (name: string) => {
       if (!isConnected || !address || !walletClient || !accountState) return;
       if (onWrongChain) {
-        setError(`Switch your wallet to ${SODEX_NETWORKS[network].label} first.`);
+        setError(
+          `Switch your wallet to ${SODEX_NETWORKS[network].label} first.`,
+        );
         return;
       }
-      if (!confirm(`Revoke API key "${name}"? This will disconnect Helix from your account.`))
+      if (
+        !confirm(
+          `Revoke API key "${name}"? Helix will lose the ability to trade on your account.`,
+        )
+      )
         return;
       setBusy(`revoke:${name}`);
       setError(null);
@@ -201,8 +454,7 @@ export function ConnectSodexPage() {
           accountID: accountState.aid,
           name,
         });
-        // If we held the matching local private key, drop it.
-        if (localKey?.name === name) clearLocalKey(network, address);
+        if (localKey?.name === name) clearLocalKey(network);
         setActionMsg(`✓ Revoked "${name}"`);
         await refreshAccount();
       } catch (err) {
@@ -229,60 +481,16 @@ export function ConnectSodexPage() {
   }, [accountState]);
 
   return (
-    <div className="flex flex-col gap-5">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-xl font-semibold text-fg">Connect SoDEX</h1>
-        <p className="text-sm text-fg-muted">
-          Trade live on SoDEX with your own wallet and your own funds.
-          Helix never sees your master wallet&apos;s private key — it
-          stays in your wallet (MetaMask, Phantom-EVM, etc.). API keys
-          are generated locally in your browser and only their public
-          address is registered with SoDEX.
-        </p>
-      </header>
-
-      {/* Network picker */}
-      <Card>
-        <CardHeader>
-          <CardTitle>1. Choose network</CardTitle>
-          <span className="text-[11px] text-fg-dim">
-            Testnet uses fake funds — recommended for trying it out.
-          </span>
-        </CardHeader>
-        <CardBody>
-          <div className="flex gap-2">
-            {(["testnet", "mainnet"] as SodexNetwork[]).map((n) => (
-              <button
-                key={n}
-                onClick={() => setNetworkAndStore(n)}
-                className={cn(
-                  "rounded border px-3 py-1.5 text-xs font-medium transition-colors",
-                  network === n
-                    ? "border-accent/40 bg-accent/15 text-accent-2"
-                    : "border-line bg-surface text-fg-muted hover:border-line-2 hover:text-fg",
-                )}
-              >
-                {SODEX_NETWORKS[n].label}
-                {n === "testnet" ? " · safe" : ""}
-              </button>
-            ))}
-            <span className="ml-auto self-center text-[11px] text-fg-dim">
-              chainId {SODEX_NETWORKS[network].chainId}
-            </span>
-          </div>
-        </CardBody>
-      </Card>
-
-      {/* Step 2 — wallet connect */}
+    <>
       <Card>
         <CardHeader>
           <CardTitle>2. Connect your wallet</CardTitle>
           <span className="text-[11px] text-fg-dim">
-            We never see your private key.
+            Master wallet stays cold — only signs setup actions.
           </span>
         </CardHeader>
         <CardBody>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <ConnectButton
               accountStatus="address"
               chainStatus="icon"
@@ -301,7 +509,9 @@ export function ConnectSodexPage() {
                 onClick={() =>
                   switchChain({
                     chainId:
-                      network === "mainnet" ? sodexMainnet.id : sodexTestnet.id,
+                      network === "mainnet"
+                        ? sodexMainnet.id
+                        : sodexTestnet.id,
                   })
                 }
                 className="rounded border border-warning/40 bg-warning/15 px-2.5 py-1 text-xs text-warning hover:bg-warning/25"
@@ -313,7 +523,6 @@ export function ConnectSodexPage() {
         </CardBody>
       </Card>
 
-      {/* Step 3 — account + keys */}
       {isConnected ? (
         <Card>
           <CardHeader>
@@ -326,29 +535,17 @@ export function ConnectSodexPage() {
             {loading ? (
               <div className="text-sm text-fg-muted">Loading…</div>
             ) : accountState ? (
-              <div className="flex flex-col gap-2 text-sm">
-                <div className="grid grid-cols-[100px_1fr] gap-x-3 gap-y-1 font-mono text-xs">
-                  <span className="text-fg-dim">Account ID</span>
-                  <span className="text-fg">{accountState.aid}</span>
-                  <span className="text-fg-dim">Wallet</span>
-                  <span className="text-fg">{accountState.user}</span>
-                  <span className="text-fg-dim">Balances</span>
-                  <span className="text-fg">{balanceLine}</span>
-                </div>
-                {accountState.B.length === 0 ? (
-                  <div className="mt-2 rounded border border-warning/30 bg-warning/5 p-2 text-xs text-warning">
-                    Your SoDEX account has no balance.{" "}
-                    {network === "testnet" ? (
-                      <>Grab testnet tokens from the SoDEX faucet to try execution.</>
-                    ) : (
-                      <>Deposit funds at sodex.com before placing live trades.</>
-                    )}
-                  </div>
-                ) : null}
+              <div className="grid grid-cols-[100px_1fr] gap-x-3 gap-y-1 font-mono text-xs">
+                <span className="text-fg-dim">Account ID</span>
+                <span className="text-fg">{accountState.aid}</span>
+                <span className="text-fg-dim">Wallet</span>
+                <span className="break-all text-fg">{accountState.user}</span>
+                <span className="text-fg-dim">Balances</span>
+                <span className="text-fg">{balanceLine}</span>
               </div>
             ) : (
               <div className="text-sm text-fg-muted">
-                No account state — try refreshing.
+                Account state not loaded.
               </div>
             )}
             {error ? (
@@ -360,7 +557,6 @@ export function ConnectSodexPage() {
         </Card>
       ) : null}
 
-      {/* Step 4 — Helix API keys */}
       {isConnected && accountState ? (
         <Card>
           <CardHeader>
@@ -372,7 +568,8 @@ export function ConnectSodexPage() {
           <CardBody className="!p-0">
             {remoteKeys.length === 0 ? (
               <div className="p-4 text-sm text-fg-muted">
-                No API keys registered yet — generate one to enable live execution.
+                No API keys registered yet — generate one to enable live
+                execution.
               </div>
             ) : (
               <ul className="divide-y divide-line">
@@ -432,8 +629,8 @@ export function ConnectSodexPage() {
 
             <div className="flex items-center justify-between gap-3 border-t border-line p-3">
               <span className="text-[11px] text-fg-dim">
-                Generating a new key opens MetaMask once to sign the
-                addAPIKey action.
+                MetaMask opens once to sign addAPIKey. The new private
+                key stays in your browser only.
               </span>
               <button
                 onClick={onGenerateKey}
@@ -452,93 +649,119 @@ export function ConnectSodexPage() {
         </Card>
       ) : null}
 
-      {/* Step 5 — Safety limits */}
-      {isConnected && localKey ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>5. Safety limits</CardTitle>
-            <span className="text-[11px] text-fg-dim">
-              Stored locally — Helix enforces these before submitting any
-              order from this browser.
-            </span>
-          </CardHeader>
-          <CardBody>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-              <label className="flex flex-col gap-1 text-xs">
-                <span className="text-fg-dim">Max position (USD)</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={10000}
-                  value={limits.maxPositionUsd}
-                  onChange={(e) =>
-                    saveLimits({
-                      ...limits,
-                      maxPositionUsd: Number(e.target.value) || 0,
-                    })
-                  }
-                  className="rounded border border-line bg-surface px-2 py-1 font-mono text-fg"
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-xs">
-                <span className="text-fg-dim">Max daily trades</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={1000}
-                  value={limits.maxDailyTrades}
-                  onChange={(e) =>
-                    saveLimits({
-                      ...limits,
-                      maxDailyTrades: Number(e.target.value) || 0,
-                    })
-                  }
-                  className="rounded border border-line bg-surface px-2 py-1 font-mono text-fg"
-                />
-              </label>
-              <label className="flex items-center gap-2 text-xs">
-                <input
-                  type="checkbox"
-                  checked={limits.acceptedDisclaimer}
-                  onChange={(e) =>
-                    saveLimits({
-                      ...limits,
-                      acceptedDisclaimer: e.target.checked,
-                    })
-                  }
-                />
-                <span className="text-fg-muted">
-                  I understand Helix will execute trades on my SoDEX
-                  account and I may lose money.
-                </span>
-              </label>
-            </div>
-          </CardBody>
-        </Card>
-      ) : null}
+      <SafetyLimitsCard network={network} />
 
-      {/* Connected status banner */}
       {actionMsg ? (
         <div className="rounded border border-positive/30 bg-positive/5 px-3 py-2 text-xs text-positive">
           {actionMsg}
         </div>
       ) : null}
 
-      {/* Live trade history */}
       {isConnected && address ? <MyTradesPanel wallet={address} /> : null}
 
-      {/* Final summary */}
-      {isConnected && localKey && limits.acceptedDisclaimer ? (
-        <div className="rounded border border-accent/30 bg-accent/5 px-3 py-2 text-xs text-accent">
-          ✓ Ready to execute live trades on {SODEX_NETWORKS[network].label}.
-          Live-execute buttons will appear on signal cards.
-        </div>
+      {isConnected && localKey ? (
+        <ReadyBanner identity={localKey} network={network} />
       ) : null}
-    </div>
+    </>
   );
 }
 
-// ─── Live trade history panel ──────────────────────────────────────
+// ─── Shared cards ───────────────────────────────────────────────────
+
+function SafetyLimitsCard({ network }: { network: SodexNetwork }) {
+  const [limits, setLimits] = useState<SafetyLimits>({
+    maxPositionUsd: 10,
+    maxDailyTrades: 3,
+    acceptedDisclaimer: false,
+  });
+  useEffect(() => {
+    setLimits(readSafetyLimits(network));
+  }, [network]);
+  const save = useCallback(
+    (next: SafetyLimits) => {
+      writeSafetyLimits(network, next);
+      setLimits(next);
+    },
+    [network],
+  );
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Safety limits</CardTitle>
+        <span className="text-[11px] text-fg-dim">
+          Stored in this browser. Helix enforces them before signing.
+        </span>
+      </CardHeader>
+      <CardBody>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <label className="flex flex-col gap-1 text-xs">
+            <span className="text-fg-dim">Max position (USD)</span>
+            <input
+              type="number"
+              min={1}
+              max={10000}
+              value={limits.maxPositionUsd}
+              onChange={(e) =>
+                save({
+                  ...limits,
+                  maxPositionUsd: Number(e.target.value) || 0,
+                })
+              }
+              className="rounded border border-line bg-surface px-2 py-1 font-mono text-fg"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs">
+            <span className="text-fg-dim">Max daily trades</span>
+            <input
+              type="number"
+              min={1}
+              max={1000}
+              value={limits.maxDailyTrades}
+              onChange={(e) =>
+                save({
+                  ...limits,
+                  maxDailyTrades: Number(e.target.value) || 0,
+                })
+              }
+              className="rounded border border-line bg-surface px-2 py-1 font-mono text-fg"
+            />
+          </label>
+          <label className="flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={limits.acceptedDisclaimer}
+              onChange={(e) =>
+                save({ ...limits, acceptedDisclaimer: e.target.checked })
+              }
+            />
+            <span className="text-fg-muted">
+              I understand Helix will execute trades on my SoDEX account
+              and I may lose money.
+            </span>
+          </label>
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
+function ReadyBanner({
+  identity,
+  network,
+}: {
+  identity: StoredApiKey;
+  network: SodexNetwork;
+}) {
+  const limits = readSafetyLimits(network);
+  if (!limits.acceptedDisclaimer) return null;
+  const tag = isBurner(identity) ? "burner" : `key ${identity.name}`;
+  return (
+    <div className="rounded border border-accent/30 bg-accent/5 px-3 py-2 text-xs text-accent">
+      ✓ Ready to execute live on {SODEX_NETWORKS[network].label} as {tag}.
+      Live-execute buttons will appear on signal cards.
+    </div>
+  );
+}
 
 interface ExecutedTradeView {
   id: string;
@@ -589,9 +812,9 @@ function MyTradesPanel({ wallet }: { wallet: `0x${string}` }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>6. Your live trades</CardTitle>
+        <CardTitle>Your live trades</CardTitle>
         <span className="text-[11px] text-fg-dim">
-          Every order this wallet has executed via Helix, on-chain audit only.
+          Every order this wallet has executed via Helix.
         </span>
       </CardHeader>
       <CardBody className="!p-0">
@@ -601,15 +824,15 @@ function MyTradesPanel({ wallet }: { wallet: `0x${string}` }) {
           <div className="p-3 text-xs text-fg-muted">Loading…</div>
         ) : trades.length === 0 ? (
           <div className="p-3 text-xs text-fg-muted">
-            No live trades yet. Generate an API key, set safety limits,
-            then click <strong>▶ Execute live</strong> on any signal.
+            No live trades yet. Set limits, accept the disclaimer, then
+            click <strong>▶ Execute live</strong> on any signal.
           </div>
         ) : (
           <ul className="divide-y divide-line">
             {trades.map((t) => (
               <li
                 key={t.id}
-                className="grid grid-cols-[80px_120px_1fr_60px_80px_100px] items-center gap-3 px-3 py-1.5 text-xs"
+                className="grid grid-cols-[80px_120px_60px_80px_80px_100px] items-center gap-3 px-3 py-1.5 text-xs"
               >
                 <Badge
                   tone={
@@ -625,9 +848,7 @@ function MyTradesPanel({ wallet }: { wallet: `0x${string}` }) {
                 <span className="font-mono text-fg">{t.symbol}</span>
                 <span
                   className="font-mono text-[10px]"
-                  style={{
-                    color: t.side === "buy" ? "#5cc97a" : "#e06c66",
-                  }}
+                  style={{ color: t.side === "buy" ? "#5cc97a" : "#e06c66" }}
                 >
                   {t.side.toUpperCase()}
                 </span>

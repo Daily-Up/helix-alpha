@@ -189,18 +189,28 @@ export async function revokeApiKey(opts: {
 }
 
 /**
- * POST /trade/orders/batch — signed by an API key.
+ * POST /trade/orders/batch.
  *
- * Returns the SoDEX-side response data for the batch (typically the
- * exchange-assigned order IDs and any rejections).
+ * Two signing modes:
+ *
+ *   1. Burner-wallet mode (testnet, no addAPIKey required) — pass
+ *      only `privateKey`; the wallet IS the trading identity, so we
+ *      sign with that key and OMIT the X-API-Key header. This is the
+ *      Hyperliquid-style flow SoDEX uses on testnet.
+ *
+ *   2. Master-wallet + API-key mode (mainnet, fully revocable) —
+ *      pass both `apiKeyName` AND `privateKey`. The signature is
+ *      with the API key's private key; we include X-API-Key so the
+ *      gateway knows which named key it belongs to.
  */
 export async function placeOrderBatch(opts: {
   network: SodexNetwork;
-  apiKeyName: string;
-  apiKeyPrivateKey: Hex;
+  /** Omit for burner mode — present only for master+API-key mode. */
+  apiKeyName?: string;
+  privateKey: Hex;
   batch: SodexNewOrderBatch;
 }): Promise<unknown> {
-  const { network, apiKeyName, apiKeyPrivateKey, batch } = opts;
+  const { network, apiKeyName, privateKey, batch } = opts;
   const { chainId, spotEndpoint } = SODEX_NETWORKS[network];
 
   const action: SodexAction<SodexNewOrderBatch> = {
@@ -209,20 +219,22 @@ export async function placeOrderBatch(opts: {
   };
 
   const { apiSign, nonce } = await signWithApiKey({
-    privateKey: apiKeyPrivateKey,
+    privateKey,
     domainName: "spot",
     chainId,
     action,
   });
 
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "X-API-Sign": apiSign,
+    "X-API-Nonce": nonce.toString(),
+  };
+  if (apiKeyName) headers["X-API-Key"] = apiKeyName;
+
   const res = await fetch(`${spotEndpoint}/trade/orders/batch`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-API-Key": apiKeyName,
-      "X-API-Sign": apiSign,
-      "X-API-Nonce": nonce.toString(),
-    },
+    headers,
     body: JSON.stringify(batch),
   });
   return handle<unknown>(res);

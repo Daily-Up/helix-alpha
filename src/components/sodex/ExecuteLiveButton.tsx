@@ -4,21 +4,20 @@
  * Single-click live-execution button for a signal.
  *
  * Renders ONLY when the user has:
- *   1. Connected a wallet (via wagmi)
- *   2. Generated a Helix API key for the active network
- *   3. Accepted the safety-limits disclaimer
+ *   1. A trading identity for the active network (either a burner
+ *      wallet on testnet, or a Helix API key on mainnet — both stored
+ *      in browser localStorage at helix.sodex.identity.<network>).
+ *   2. Accepted the safety-limits disclaimer.
  *
  * Click flow:
- *   browser → builds order params → signs with API key → POSTs to
- *   SoDEX gateway DIRECTLY → on response, posts the public outcome
- *   to /api/sodex/record-trade for the audit log.
+ *   browser → builds order params → signs with the local private key
+ *   → POSTs to SoDEX gateway DIRECTLY → on response, posts the public
+ *   outcome to /api/sodex/record-trade for the audit log.
  *
- * Helix's server is NEVER on the critical path of the trade — only
- * the after-the-fact audit log.
+ * Helix's server is NEVER on the critical path of the trade.
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { useAccount } from "wagmi";
 import {
   DEFAULT_NETWORK,
   NETWORK_STORAGE_KEY,
@@ -60,7 +59,8 @@ interface Props {
 }
 
 export function ExecuteLiveButton({ signal }: Props) {
-  const { address, isConnected } = useAccount();
+  // ── Network selection (from localStorage, controlled by the
+  // connect-sodex page) ──
   const [network, setNetwork] = useState<SodexNetwork>(DEFAULT_NETWORK);
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -68,29 +68,32 @@ export function ExecuteLiveButton({ signal }: Props) {
     if (stored === "mainnet" || stored === "testnet") setNetwork(stored);
   }, []);
 
+  // ── Readiness ──
   const [ready, setReady] = useState(false);
+  const [identityAddress, setIdentityAddress] = useState<
+    `0x${string}` | null
+  >(null);
   useEffect(() => {
-    if (!isConnected || !address) {
-      setReady(false);
-      return;
-    }
-    const key = readLocalKey(network, address);
-    const limits = readSafetyLimits(address);
+    const key = readLocalKey(network);
+    const limits = readSafetyLimits(network);
     setReady(!!key && limits.acceptedDisclaimer);
-  }, [isConnected, address, network]);
+    setIdentityAddress(key?.address ?? null);
+  }, [network]);
 
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
   const onClick = useCallback(async () => {
-    if (!address) return;
-    const key = readLocalKey(network, address);
+    const key = readLocalKey(network);
     if (!key) {
-      setMsg("Generate an API key on /settings/connect-sodex first.");
+      setMsg("Set up a trading identity on /settings/connect-sodex first.");
       return;
     }
-    const limits = readSafetyLimits(address);
-    const sizeUsd = Math.min(signal.suggested_size_usd, limits.maxPositionUsd);
+    const limits = readSafetyLimits(network);
+    const sizeUsd = Math.min(
+      signal.suggested_size_usd,
+      limits.maxPositionUsd,
+    );
     if (sizeUsd <= 0) {
       setMsg("Position size cap is 0 — edit your safety limits.");
       return;
@@ -98,7 +101,7 @@ export function ExecuteLiveButton({ signal }: Props) {
     setBusy(true);
     setMsg(null);
     try {
-      const state = await getAccountState(network, address);
+      const state = await getAccountState(network, key.address);
       let symbolId = signal.symbol_id;
       if (symbolId == null) {
         symbolId = await getSymbolId(network, signal.symbol);
@@ -109,12 +112,9 @@ export function ExecuteLiveButton({ signal }: Props) {
         );
       }
       const clOrdID = `helix-${signal.signal_id}-${Date.now()}`;
-      // For market BUYs, SoDEX accepts `funds` (USD-equivalent spend)
-      // so we don't have to know the exact fill price up-front. For
-      // SELLs, we need a base-asset `quantity` — derive from the
-      // signal's reference price when available, else fall back to a
-      // tiny no-op size that lets the user verify the wiring without
-      // an unintended fill.
+      // Market BUY → use SoDEX `funds` (USD spend). Market SELL needs
+      // a base-asset `quantity`; derive from the signal's reference
+      // price when present.
       const isBuy = signal.side === "buy";
       const referencePrice = signal.price_usd > 0 ? signal.price_usd : 0;
       const order: SodexNewOrderEntry = isBuy
@@ -124,7 +124,7 @@ export function ExecuteLiveButton({ signal }: Props) {
             side: SodexSide.BUY,
             type: SodexOrderType.MARKET,
             timeInForce: SodexTimeInForce.IOC,
-            quantity: "0", // unused when `funds` is set on market buys
+            quantity: "0",
             funds: sizeUsd.toString(),
           }
         : {
@@ -141,17 +141,15 @@ export function ExecuteLiveButton({ signal }: Props) {
 
       const sodexResp = await placeOrderBatch({
         network,
-        apiKeyName: key.name,
-        apiKeyPrivateKey: key.privateKey,
+        // Empty name == burner mode (no X-API-Key header).
+        apiKeyName: key.name || undefined,
+        privateKey: key.privateKey,
         batch: {
           accountID: state.aid,
           orders: [order],
         },
       });
 
-      // Best-effort extract a SoDEX order id from the response for the
-      // audit log. Shape isn't fully documented; we fall back to the
-      // clOrdID if we can't find it.
       const sodexOrderId =
         (sodexResp as { orderID?: string })?.orderID ?? clOrdID;
 
@@ -159,7 +157,7 @@ export function ExecuteLiveButton({ signal }: Props) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_wallet: address,
+          user_wallet: key.address,
           signal_id: signal.signal_id,
           network,
           symbol: signal.symbol,
@@ -177,36 +175,37 @@ export function ExecuteLiveButton({ signal }: Props) {
     } catch (err) {
       const errMsg = (err as Error).message;
       setMsg(`✗ ${errMsg}`);
-      // Log the rejection too — failed attempts are still data.
       try {
-        await fetch("/api/sodex/record-trade", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            user_wallet: address,
-            signal_id: signal.signal_id,
-            network,
-            symbol: signal.symbol,
-            side: signal.side,
-            size_usd: 0,
-            status: "rejected",
-            error: errMsg.slice(0, 500),
-          }),
-        });
+        if (identityAddress) {
+          await fetch("/api/sodex/record-trade", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              user_wallet: identityAddress,
+              signal_id: signal.signal_id,
+              network,
+              symbol: signal.symbol,
+              side: signal.side,
+              size_usd: 0,
+              status: "rejected",
+              error: errMsg.slice(0, 500),
+            }),
+          });
+        }
       } catch {
         /* ignore audit-log failures */
       }
     } finally {
       setBusy(false);
     }
-  }, [address, network, signal]);
+  }, [network, signal, identityAddress]);
 
-  if (!isConnected || !ready) {
+  if (!ready) {
     return (
       <a
         href="/settings/connect-sodex"
         className="inline-flex items-center gap-2 rounded border border-line bg-surface px-2.5 py-1 text-xs text-fg-muted transition-colors hover:border-accent/40 hover:text-accent-2"
-        title="Connect a wallet + generate an API key to enable live execution."
+        title="Set up a burner wallet (testnet) or connect a master wallet (mainnet) to enable live execution."
       >
         Connect SoDEX to execute live →
       </a>

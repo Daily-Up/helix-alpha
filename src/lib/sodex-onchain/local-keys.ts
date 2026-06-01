@@ -1,45 +1,54 @@
 /**
- * Local API-key storage.
+ * Local trading-identity storage.
  *
- * Browser localStorage is the ONLY home for the API key's private key.
- * It never crosses to Helix's server. Each user/wallet/network gets
- * its own key under a distinct storage slot.
+ * For each SoDEX network the user has ONE active trading identity,
+ * stored only in their browser:
  *
- * Layout:
- *   helix.sodex.keys.<network>.<wallet> -> { name, privateKey, address, createdAt }
+ *   helix.sodex.identity.<network>  →  StoredApiKey { name, privateKey,
+ *                                                    address, createdAt }
  *
- * We deliberately don't sync these across devices or back them up.
- * If the user wipes their browser data, they can re-issue a new key
- * (max 5 per account) without any loss of funds.
+ * Two ways to populate this slot:
+ *
+ *   - "Burner" — generate keypair locally, no master wallet, no
+ *     SoDEX-side addAPIKey registration. `name` is the empty string.
+ *     The wallet IS the trading identity (Hyperliquid-style flow,
+ *     and what SoDEX uses on testnet).
+ *
+ *   - "Master + API key" — connect a master wallet via wagmi,
+ *     generate a fresh keypair, sign `addAPIKey` to register the
+ *     public address with SoDEX, store the private key + the
+ *     registered `name`. Order signing then includes the X-API-Key
+ *     header. This is the recommended mainnet flow.
+ *
+ * Safety limits also live per-network so a judge can flip between
+ * testnet and mainnet without losing their limits.
  */
 
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import type { Hex } from "viem";
 import type { SodexNetwork } from "./chains";
 
-const KEY_PREFIX = "helix.sodex.keys";
+const IDENTITY_PREFIX = "helix.sodex.identity";
+const LIMITS_PREFIX = "helix.sodex.limits";
 
 export interface StoredApiKey {
-  /** Human-readable name registered on SoDEX (max 36 chars, /^[0-9a-zA-Z_-]+$/) */
+  /** SoDEX-registered API-key name, or "" for a burner wallet. */
   name: string;
-  /** secp256k1 private key — secret, never sent over the wire. */
+  /** secp256k1 private key. Secret — never sent to Helix's server. */
   privateKey: Hex;
-  /** Public address derived from the private key (sent during addAPIKey). */
+  /** Public address derived from the private key. */
   address: `0x${string}`;
   /** Local timestamp of creation. */
   createdAt: number;
 }
 
-function storageKey(network: SodexNetwork, wallet: `0x${string}`): string {
-  return `${KEY_PREFIX}.${network}.${wallet.toLowerCase()}`;
+function identityKey(network: SodexNetwork): string {
+  return `${IDENTITY_PREFIX}.${network}`;
 }
 
-export function readLocalKey(
-  network: SodexNetwork,
-  wallet: `0x${string}`,
-): StoredApiKey | null {
+export function readLocalKey(network: SodexNetwork): StoredApiKey | null {
   if (typeof window === "undefined") return null;
-  const raw = window.localStorage.getItem(storageKey(network, wallet));
+  const raw = window.localStorage.getItem(identityKey(network));
   if (!raw) return null;
   try {
     return JSON.parse(raw) as StoredApiKey;
@@ -50,26 +59,37 @@ export function readLocalKey(
 
 export function writeLocalKey(
   network: SodexNetwork,
-  wallet: `0x${string}`,
   key: StoredApiKey,
 ): void {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(storageKey(network, wallet), JSON.stringify(key));
+  window.localStorage.setItem(identityKey(network), JSON.stringify(key));
 }
 
-export function clearLocalKey(
-  network: SodexNetwork,
-  wallet: `0x${string}`,
-): void {
+export function clearLocalKey(network: SodexNetwork): void {
   if (typeof window === "undefined") return;
-  window.localStorage.removeItem(storageKey(network, wallet));
+  window.localStorage.removeItem(identityKey(network));
 }
 
 /**
- * Mint a brand-new API keypair locally. The private key never leaves
- * this function's return value — the page component is responsible
- * for shipping ONLY the public address to SoDEX via addAPIKey, and
- * then persisting the StoredApiKey via writeLocalKey.
+ * Mint a new keypair locally without registering it with SoDEX (the
+ * "burner" flow used for testnet). The caller is expected to
+ * `writeLocalKey` immediately so subsequent reads return it.
+ */
+export function mintBurnerWallet(): StoredApiKey {
+  const privateKey = generatePrivateKey();
+  const account = privateKeyToAccount(privateKey);
+  return {
+    name: "", // empty signals burner mode at the call site
+    privateKey,
+    address: account.address,
+    createdAt: Date.now(),
+  };
+}
+
+/**
+ * Mint a fresh keypair for a master+API-key flow. The caller is
+ * expected to call `addAPIKey` on SoDEX with the returned `.address`,
+ * THEN persist via `writeLocalKey`.
  */
 export function mintNewApiKey(name: string): StoredApiKey {
   const privateKey = generatePrivateKey();
@@ -88,9 +108,12 @@ export function suggestKeyName(prefix = "helix"): string {
   return `${prefix}-${suffix}`;
 }
 
-// ─── Safety limits ─────────────────────────────────────────────────
+/** True when this stored key is a burner (no SoDEX API-key name). */
+export function isBurner(key: StoredApiKey | null): boolean {
+  return !!key && key.name === "";
+}
 
-const LIMITS_PREFIX = "helix.sodex.limits";
+// ─── Safety limits (per-network) ────────────────────────────────────
 
 export interface SafetyLimits {
   maxPositionUsd: number;
@@ -104,13 +127,13 @@ const DEFAULT_LIMITS: SafetyLimits = {
   acceptedDisclaimer: false,
 };
 
-function limitsKey(wallet: `0x${string}`): string {
-  return `${LIMITS_PREFIX}.${wallet.toLowerCase()}`;
+function limitsKey(network: SodexNetwork): string {
+  return `${LIMITS_PREFIX}.${network}`;
 }
 
-export function readSafetyLimits(wallet: `0x${string}`): SafetyLimits {
+export function readSafetyLimits(network: SodexNetwork): SafetyLimits {
   if (typeof window === "undefined") return DEFAULT_LIMITS;
-  const raw = window.localStorage.getItem(limitsKey(wallet));
+  const raw = window.localStorage.getItem(limitsKey(network));
   if (!raw) return DEFAULT_LIMITS;
   try {
     return { ...DEFAULT_LIMITS, ...(JSON.parse(raw) as Partial<SafetyLimits>) };
@@ -120,9 +143,9 @@ export function readSafetyLimits(wallet: `0x${string}`): SafetyLimits {
 }
 
 export function writeSafetyLimits(
-  wallet: `0x${string}`,
+  network: SodexNetwork,
   limits: SafetyLimits,
 ): void {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(limitsKey(wallet), JSON.stringify(limits));
+  window.localStorage.setItem(limitsKey(network), JSON.stringify(limits));
 }
