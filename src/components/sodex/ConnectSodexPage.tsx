@@ -92,9 +92,93 @@ export function ConnectSodexPage() {
       {network === "testnet" ? (
         <TestnetBurnerFlow network={network} />
       ) : (
-        <MainnetMasterKeyFlow network={network} />
+        <MainnetModePicker network={network} />
       )}
     </div>
+  );
+}
+
+// ─── Mainnet — choose between burner or master+API-key ──────────────
+
+function MainnetModePicker({ network }: { network: SodexNetwork }) {
+  // Persist the choice per browser so the user doesn't re-pick on
+  // every visit.
+  const [mode, setMode] = useState<"burner" | "master">("burner");
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = window.localStorage.getItem("helix.sodex.mainnetMode");
+    if (stored === "burner" || stored === "master") setMode(stored);
+  }, []);
+  const choose = useCallback((m: "burner" | "master") => {
+    setMode(m);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("helix.sodex.mainnetMode", m);
+    }
+  }, []);
+
+  return (
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle>2. How do you want to trade?</CardTitle>
+          <span className="text-[11px] text-fg-dim">
+            Both modes use real funds. Pick one.
+          </span>
+        </CardHeader>
+        <CardBody>
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+            <button
+              onClick={() => choose("burner")}
+              className={cn(
+                "flex flex-col gap-1 rounded border p-3 text-left transition-colors",
+                mode === "burner"
+                  ? "border-accent/40 bg-accent/10"
+                  : "border-line bg-surface hover:border-line-2",
+              )}
+            >
+              <span className="font-mono text-xs font-medium text-fg">
+                Burner wallet
+              </span>
+              <span className="text-[11px] text-fg-muted">
+                Generated in your browser. Fund it from your main wallet,
+                trade. No MetaMask popup per signal — fastest UX.
+              </span>
+              <span className="text-[10px] text-fg-dim">
+                Trade-off: funds in the burner are unrecoverable if you
+                wipe your browser. Don&apos;t over-fund.
+              </span>
+            </button>
+            <button
+              onClick={() => choose("master")}
+              className={cn(
+                "flex flex-col gap-1 rounded border p-3 text-left transition-colors",
+                mode === "master"
+                  ? "border-accent/40 bg-accent/10"
+                  : "border-line bg-surface hover:border-line-2",
+              )}
+            >
+              <span className="font-mono text-xs font-medium text-fg">
+                Master wallet + API key
+              </span>
+              <span className="text-[11px] text-fg-muted">
+                Connect MetaMask → sign addAPIKey once. API key stored in
+                browser, master wallet stays cold. Revoke any time.
+              </span>
+              <span className="text-[10px] text-fg-dim">
+                Requires MetaMask. Rabby/Phantom currently reject
+                cross-chain typed-data signatures, so addAPIKey fails.
+              </span>
+            </button>
+          </div>
+        </CardBody>
+      </Card>
+
+      {mode === "burner" ? (
+        <TestnetBurnerFlow network={network} />
+      ) : (
+        <MainnetMasterKeyFlow network={network} />
+      )}
+    </>
   );
 }
 
@@ -187,27 +271,32 @@ function TestnetBurnerFlow({ network }: { network: SodexNetwork }) {
     try {
       const next = mintBurnerWallet();
       writeLocalKey(network, next);
-      setActionMsg(
-        `✓ Generated burner wallet ${next.address.slice(0, 6)}…${next.address.slice(-4)} — auto-claiming faucet…`,
-      );
-      setReloadTick((t) => t + 1);
-      // Auto-drip 100 vUSDC from the SoDEX testnet faucet so the
-      // burner can actually trade immediately. Open CORS — straight
-      // from the browser. If the faucet trips a captcha or rate
-      // limit, we surface the message verbatim so the user can
-      // claim manually via the button.
-      const drip = await claimTestnetFaucet(next.address);
-      if (drip.ok) {
-        setActionMsg(
-          `✓ Burner ready: ${next.address.slice(0, 6)}…${next.address.slice(-4)} · faucet ${drip.message}`,
-        );
+      const shortAddr = `${next.address.slice(0, 6)}…${next.address.slice(-4)}`;
+      if (network === "testnet") {
+        setActionMsg(`✓ Generated burner ${shortAddr} — auto-claiming faucet…`);
+        setReloadTick((t) => t + 1);
+        // Auto-drip 100 vUSDC from the SoDEX testnet faucet so the
+        // burner can trade immediately. Open CORS — direct from the
+        // browser.
+        const drip = await claimTestnetFaucet(next.address);
+        if (drip.ok) {
+          setActionMsg(
+            `✓ Burner ready: ${shortAddr} · faucet ${drip.message}`,
+          );
+        } else {
+          setActionMsg(
+            `✓ Burner generated. Auto-faucet failed (${drip.message}) — use the "Claim 100 vUSDC" button below.`,
+          );
+        }
+        setTimeout(() => setReloadTick((t) => t + 1), 1500);
       } else {
+        // Mainnet — no faucet. Just create the wallet and tell the
+        // user how to fund it.
         setActionMsg(
-          `✓ Burner generated. Auto-faucet failed (${drip.message}) — use the "Claim 100 vUSDC" button below.`,
+          `✓ Generated burner ${shortAddr}. Send USDC/USDT to this address from any wallet to fund it.`,
         );
+        setReloadTick((t) => t + 1);
       }
-      // Refresh again after a brief delay so the balance shows up.
-      setTimeout(() => setReloadTick((t) => t + 1), 1500);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -252,10 +341,14 @@ function TestnetBurnerFlow({ network }: { network: SodexNetwork }) {
     <>
       <Card>
         <CardHeader>
-          <CardTitle>2. Burner wallet (testnet)</CardTitle>
+          <CardTitle>
+            {network === "testnet"
+              ? "2. Burner wallet (testnet)"
+              : "3. Burner wallet (mainnet)"}
+          </CardTitle>
           <span className="text-[11px] text-fg-dim">
-            Generated in your browser. SoDEX testnet doesn&apos;t use API
-            keys — the wallet itself signs orders.
+            Generated in your browser. The wallet itself signs orders —
+            no master wallet or addAPIKey involved.
           </span>
         </CardHeader>
         <CardBody>
@@ -301,28 +394,41 @@ function TestnetBurnerFlow({ network }: { network: SodexNetwork }) {
 
               {(!accountState || accountState.B.length === 0) ? (
                 <div className="rounded border border-warning/30 bg-warning/5 p-2 text-xs text-warning">
-                  No balance yet — the faucet usually takes ~10s to
-                  reflect. Hit ↻ Refresh in a moment, or click
-                  &quot;Claim 100 vUSDC&quot; if the first auto-claim
-                  was rate-limited.
+                  {network === "testnet" ? (
+                    <>
+                      No balance yet — the faucet usually takes ~10s
+                      to reflect. Hit ↻ Refresh in a moment, or click
+                      &quot;Claim 100 vUSDC&quot; if the first
+                      auto-claim was rate-limited.
+                    </>
+                  ) : (
+                    <>
+                      No balance yet. Deposit USDC/USDT to{" "}
+                      <span className="font-mono">{identity.address}</span>{" "}
+                      from any wallet — that address becomes your SoDEX
+                      mainnet account once funds land.
+                    </>
+                  )}
                 </div>
               ) : null}
 
               <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={onClaim}
-                  disabled={busy === "claim"}
-                  className={cn(
-                    "rounded border px-2.5 py-1 text-xs font-medium transition-colors",
-                    busy === "claim"
-                      ? "cursor-wait border-line bg-surface-2 text-fg-dim"
-                      : "border-accent/40 bg-accent/15 text-accent-2 hover:bg-accent/25",
-                  )}
-                >
-                  {busy === "claim"
-                    ? "Claiming…"
-                    : "+ Claim 100 vUSDC from faucet"}
-                </button>
+                {network === "testnet" ? (
+                  <button
+                    onClick={onClaim}
+                    disabled={busy === "claim"}
+                    className={cn(
+                      "rounded border px-2.5 py-1 text-xs font-medium transition-colors",
+                      busy === "claim"
+                        ? "cursor-wait border-line bg-surface-2 text-fg-dim"
+                        : "border-accent/40 bg-accent/15 text-accent-2 hover:bg-accent/25",
+                    )}
+                  >
+                    {busy === "claim"
+                      ? "Claiming…"
+                      : "+ Claim 100 vUSDC from faucet"}
+                  </button>
+                ) : null}
                 <button
                   onClick={() => {
                     navigator.clipboard.writeText(identity.address);
@@ -338,15 +444,26 @@ function TestnetBurnerFlow({ network }: { network: SodexNetwork }) {
                 >
                   ↻ Refresh balance
                 </button>
-                <a
-                  href="https://testnet.sodex.com/faucet"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="rounded border border-line bg-surface px-2.5 py-1 text-xs text-fg-muted hover:border-accent/40 hover:text-accent-2"
-                  title="If the in-app claim is rate-limited, the official faucet page may show a captcha you can complete."
-                >
-                  Open faucet page →
-                </a>
+                {network === "testnet" ? (
+                  <a
+                    href="https://testnet.sodex.com/faucet"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="rounded border border-line bg-surface px-2.5 py-1 text-xs text-fg-muted hover:border-accent/40 hover:text-accent-2"
+                    title="If the in-app claim is rate-limited, the official faucet page may show a captcha you can complete."
+                  >
+                    Open faucet page →
+                  </a>
+                ) : (
+                  <a
+                    href="https://sodex.com/trade/spot/BTC_USDC"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="rounded border border-line bg-surface px-2.5 py-1 text-xs text-fg-muted hover:border-accent/40 hover:text-accent-2"
+                  >
+                    Open SoDEX →
+                  </a>
+                )}
                 <button
                   onClick={onWipe}
                   className="ml-auto rounded border border-line bg-surface px-2.5 py-1 text-xs text-fg-muted hover:border-negative/40 hover:text-negative"
