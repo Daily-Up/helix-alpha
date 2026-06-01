@@ -94,7 +94,7 @@ export function hashAction(action: SodexAction): Hex {
  * user's wallet was on at signing time.
  */
 export async function signWithMasterWallet(opts: {
-  provider: Eip1193Provider;
+  provider?: Eip1193Provider;
   account: `0x${string}`;
   domainName: SodexDomainName;
   chainId: number;
@@ -104,9 +104,27 @@ export async function signWithMasterWallet(opts: {
   const nonce = opts.nonce ?? BigInt(Date.now());
   const payloadHash = hashAction(opts.action);
 
-  // The EIP-1193 method takes a JSON-stringified typed-data envelope.
-  // Include EIP712Domain in `types` (signTypedData_v4 requires it
-  // even though viem usually injects it for you).
+  // Resolve the lowest-level provider available. Priority:
+  //   1. Caller-supplied provider (from wagmi connector.getProvider())
+  //   2. window.ethereum (the wallet extension's own injected provider)
+  // We deliberately go around viem's WalletClient AND wagmi's
+  // wrappers — both add a chainId-match validator that doesn't apply
+  // to plain message signing.
+  type WindowEthereum = Eip1193Provider & {
+    isMetaMask?: boolean;
+    isRabby?: boolean;
+  };
+  const win = (typeof window !== "undefined"
+    ? (window as unknown as { ethereum?: WindowEthereum })
+    : undefined);
+  const provider: Eip1193Provider | undefined =
+    opts.provider ?? win?.ethereum;
+  if (!provider) {
+    throw new Error(
+      "No wallet provider available (window.ethereum missing). Install MetaMask or Rabby.",
+    );
+  }
+
   const typedData = {
     domain: buildExchangeDomain(opts.domainName, opts.chainId),
     types: {
@@ -129,10 +147,20 @@ export async function signWithMasterWallet(opts: {
     },
   };
 
-  const signature = (await opts.provider.request({
-    method: "eth_signTypedData_v4",
-    params: [opts.account, JSON.stringify(typedData)],
-  })) as Hex;
+  // SIGNING_PATH_RAW_PROVIDER_2026_06_02 — marker so we can see in
+  // chunk diffs whether this exact code reached production.
+  let signature: Hex;
+  try {
+    signature = (await provider.request({
+      method: "eth_signTypedData_v4",
+      params: [opts.account, JSON.stringify(typedData)],
+    })) as Hex;
+  } catch (err) {
+    const m = (err as Error).message ?? String(err);
+    throw new Error(
+      `[raw-provider] eth_signTypedData_v4 failed: ${m.slice(0, 300)}`,
+    );
+  }
 
   const apiSign = ("0x01" + signature.slice(2)) as Hex;
   return { apiSign, nonce };
