@@ -25,12 +25,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
-import {
-  useAccount,
-  useChainId,
-  useSwitchChain,
-  useWalletClient,
-} from "wagmi";
+import { useAccount, useWalletClient } from "wagmi";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { cn } from "@/components/ui/cn";
@@ -38,8 +33,6 @@ import {
   DEFAULT_NETWORK,
   NETWORK_STORAGE_KEY,
   SODEX_NETWORKS,
-  sodexMainnet,
-  sodexTestnet,
   type SodexNetwork,
 } from "@/lib/sodex-onchain/chains";
 import {
@@ -341,12 +334,13 @@ function TestnetBurnerFlow({ network }: { network: SodexNetwork }) {
 
 function MainnetMasterKeyFlow({ network }: { network: SodexNetwork }) {
   const { address, isConnected } = useAccount();
-  const chainId = useChainId();
-  const { switchChain } = useSwitchChain();
   const { data: walletClient } = useWalletClient();
 
-  const requiredChainId = SODEX_NETWORKS[network].chainId;
-  const onWrongChain = isConnected && chainId !== requiredChainId;
+  // NOTE: the wallet's currently-connected chain is intentionally
+  // ignored. EIP-712 typed-data signing produces the SoDEX
+  // signature regardless of which network the wallet is on — the
+  // SoDEX chainId is INSIDE the signed payload, not a wallet
+  // requirement.
 
   const [accountState, setAccountState] = useState<SodexAccountState | null>(
     null,
@@ -390,10 +384,6 @@ function MainnetMasterKeyFlow({ network }: { network: SodexNetwork }) {
 
   const onGenerateKey = useCallback(async () => {
     if (!isConnected || !address || !walletClient || !accountState) return;
-    if (onWrongChain) {
-      setError(`Switch your wallet to ${SODEX_NETWORKS[network].label} first.`);
-      return;
-    }
     setBusy("generate");
     setError(null);
     setActionMsg(null);
@@ -423,7 +413,6 @@ function MainnetMasterKeyFlow({ network }: { network: SodexNetwork }) {
     address,
     walletClient,
     accountState,
-    onWrongChain,
     network,
     refreshAccount,
   ]);
@@ -431,12 +420,6 @@ function MainnetMasterKeyFlow({ network }: { network: SodexNetwork }) {
   const onRevokeKey = useCallback(
     async (name: string) => {
       if (!isConnected || !address || !walletClient || !accountState) return;
-      if (onWrongChain) {
-        setError(
-          `Switch your wallet to ${SODEX_NETWORKS[network].label} first.`,
-        );
-        return;
-      }
       if (
         !confirm(
           `Revoke API key "${name}"? Helix will lose the ability to trade on your account.`,
@@ -468,7 +451,6 @@ function MainnetMasterKeyFlow({ network }: { network: SodexNetwork }) {
       address,
       walletClient,
       accountState,
-      onWrongChain,
       network,
       localKey?.name,
       refreshAccount,
@@ -486,14 +468,16 @@ function MainnetMasterKeyFlow({ network }: { network: SodexNetwork }) {
         <CardHeader>
           <CardTitle>2. Connect your wallet</CardTitle>
           <span className="text-[11px] text-fg-dim">
-            Master wallet stays cold — only signs setup actions.
+            Master wallet stays cold — only signs setup actions. The
+            wallet&apos;s current chain doesn&apos;t matter; SoDEX
+            verifies the signature, not the network.
           </span>
         </CardHeader>
         <CardBody>
           <div className="flex items-center gap-3 flex-wrap">
             <ConnectButton
               accountStatus="address"
-              chainStatus="icon"
+              chainStatus="none"
               showBalance={false}
             />
             {isConnected ? (
@@ -503,21 +487,6 @@ function MainnetMasterKeyFlow({ network }: { network: SodexNetwork }) {
                   {address?.slice(0, 6)}…{address?.slice(-4)}
                 </span>
               </span>
-            ) : null}
-            {onWrongChain ? (
-              <button
-                onClick={() =>
-                  switchChain({
-                    chainId:
-                      network === "mainnet"
-                        ? sodexMainnet.id
-                        : sodexTestnet.id,
-                  })
-                }
-                className="rounded border border-warning/40 bg-warning/15 px-2.5 py-1 text-xs text-warning hover:bg-warning/25"
-              >
-                Switch wallet to {SODEX_NETWORKS[network].label}
-              </button>
             ) : null}
           </div>
         </CardBody>
@@ -634,7 +603,7 @@ function MainnetMasterKeyFlow({ network }: { network: SodexNetwork }) {
               </span>
               <button
                 onClick={onGenerateKey}
-                disabled={!!busy || remoteKeys.length >= 5 || onWrongChain}
+                disabled={!!busy || remoteKeys.length >= 5}
                 className={cn(
                   "rounded border px-3 py-1.5 text-xs font-medium transition-colors",
                   busy === "generate"

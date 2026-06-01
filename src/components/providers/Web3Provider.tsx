@@ -13,7 +13,8 @@
  */
 
 import { useState } from "react";
-import { WagmiProvider, createConfig, http } from "wagmi";
+import { WagmiProvider, http } from "wagmi";
+import { mainnet } from "wagmi/chains";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   RainbowKitProvider,
@@ -22,37 +23,37 @@ import {
 } from "@rainbow-me/rainbowkit";
 import "@rainbow-me/rainbowkit/styles.css";
 
-import { sodexMainnet, sodexTestnet } from "@/lib/sodex-onchain/chains";
+/**
+ * Wagmi + RainbowKit provider.
+ *
+ * IMPORTANT: SoDEX is NOT registered as a wagmi chain here.
+ * Registering it would force RainbowKit to prompt the user's
+ * wallet (MetaMask, Rabby, …) to "Add Custom Network" with the
+ * SoDEX RPC URL — which is wrong, because:
+ *
+ *   1. SoDEX trades are NOT on-chain transactions sent through an
+ *      EVM RPC. They are REST POSTs to mainnet-gw / testnet-gw,
+ *      authenticated by EIP-712 signatures.
+ *   2. EIP-712 typed-data signing works regardless of which chain
+ *      the wallet is currently connected to — the SoDEX chainId
+ *      lives inside the signed payload, not the wallet network.
+ *
+ * So we register only Ethereum mainnet (any well-known chain works)
+ * to keep wagmi happy. The wallet never has to switch.
+ */
 
-// A throwaway WalletConnect project ID. For a buildathon demo we
-// don't need a real one — wagmi will use injected connectors
-// (MetaMask, Phantom-EVM, etc.) which don't require a project ID.
-// If you want WalletConnect-style mobile pairing, swap this for your
-// own project ID from https://cloud.walletconnect.com.
 const WALLETCONNECT_PROJECT_ID =
   process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ?? "helix-buildathon-demo";
 
-// Use RainbowKit's `getDefaultConfig` so we pick up the standard
-// connector list (MetaMask, Coinbase, Rainbow, WalletConnect,
-// injected fallback) without manually wiring each one.
 const wagmiConfig = getDefaultConfig({
   appName: "Helix",
   projectId: WALLETCONNECT_PROJECT_ID,
-  chains: [sodexTestnet, sodexMainnet],
-  transports: {
-    [sodexTestnet.id]: http(),
-    [sodexMainnet.id]: http(),
-  },
-  // SSR for App Router.
+  chains: [mainnet],
+  transports: { [mainnet.id]: http() },
   ssr: true,
 });
 
-// Silence the "createConfig is unused" lint warning — keep import in
-// case we need to compose a manual config later.
-void createConfig;
-
 export function Web3Provider({ children }: { children: React.ReactNode }) {
-  // Construct the query client once, not per render.
   const [queryClient] = useState(() => new QueryClient());
 
   return (
@@ -66,7 +67,6 @@ export function Web3Provider({ children }: { children: React.ReactNode }) {
             fontStack: "system",
           })}
           modalSize="compact"
-          initialChain={sodexTestnet.id}
         >
           {children}
         </RainbowKitProvider>
