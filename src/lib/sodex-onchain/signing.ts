@@ -93,6 +93,142 @@ export function hashAction(action: SodexAction): Hex {
  * inside the payload, completely independent of which network the
  * user's wallet was on at signing time.
  */
+/**
+ * Resolve the rawest possible EIP-1193 provider — prefer
+ * window.ethereum because wagmi's connector may return a viem-
+ * wrapped provider whose `.request` still goes through chainId
+ * validation middleware.
+ */
+function resolveProvider(opts: {
+  provider?: Eip1193Provider;
+}): Eip1193Provider {
+  type WindowEthereum = Eip1193Provider & { isMetaMask?: boolean };
+  const win =
+    typeof window !== "undefined"
+      ? (window as unknown as { ethereum?: WindowEthereum })
+      : undefined;
+  const provider = win?.ethereum ?? opts.provider;
+  if (!provider) {
+    throw new Error(
+      "No wallet provider available (window.ethereum missing). Install MetaMask, Rabby, or another EIP-1193 wallet.",
+    );
+  }
+  return provider;
+}
+
+/**
+ * Sign a SoDEX `addAPIKey` request.
+ *
+ * IMPORTANT — this is a different scheme than the order/cancel
+ * signing path (`signMasterExchangeAction` below). SoDEX models
+ * `addAPIKey` as a "UserSignedAddAPIKeyAction" inside the
+ * `universal` EIP-712 domain (what their docs call EIP712_UNIVERSAL).
+ *
+ * Critically: the domain chainId is the WALLET'S currently-connected
+ * chain, NOT SoDEX's chainId. The SoDEX chainID lives as a separate
+ * field inside the signed message. This is the trick that lets
+ * Rabby/Phantom/etc. sign without a "chainId mismatch" refusal —
+ * the typed data's domain matches the wallet exactly.
+ *
+ * Schema reverse-engineered from testnet.sodex.com's bundle:
+ *   primaryType: "UserSignedAddAPIKeyAction"
+ *   types.UserSignedAddAPIKeyAction = [
+ *     {name:"chainID",   type:"uint64"},
+ *     {name:"nonce",     type:"uint64"},
+ *     {name:"accountID", type:"uint64"},
+ *     {name:"name",      type:"string"},
+ *     {name:"keyType",   type:"uint8"},
+ *     {name:"publicKey", type:"bytes"},
+ *     {name:"expiresAt", type:"uint64"},
+ *   ]
+ *   domain.name = "universal"
+ *   domain.chainId = wallet's current chainId
+ */
+export async function signAddAPIKeyAction(opts: {
+  provider?: Eip1193Provider;
+  account: `0x${string}`;
+  /** SoDEX chain ID this key will be valid on (286623 / 138565). */
+  sodexChainId: number;
+  accountID: number;
+  name: string;
+  /** 1 for EVM. */
+  keyType: number;
+  /** API key's public address (it's signed as `bytes`). */
+  publicKey: `0x${string}`;
+  /** Unix-millis expiry; 0 means never. */
+  expiresAt: number;
+  nonce?: bigint;
+}): Promise<{ apiSign: Hex; nonce: bigint; walletChainId: number }> {
+  const provider = resolveProvider({ provider: opts.provider });
+  const nonce = opts.nonce ?? BigInt(Date.now());
+
+  // Use the wallet's CURRENT chain in the typed-data domain. Required
+  // so the wallet doesn't reject with "chainId mismatch".
+  const walletChainHex = (await provider.request({
+    method: "eth_chainId",
+    params: [],
+  })) as string;
+  const walletChainId = parseInt(walletChainHex, 16);
+
+  const message = {
+    chainID: opts.sodexChainId.toString(),
+    nonce: nonce.toString(),
+    accountID: opts.accountID.toString(),
+    name: opts.name,
+    keyType: opts.keyType,
+    publicKey: opts.publicKey,
+    expiresAt: opts.expiresAt.toString(),
+  };
+
+  const typedData = {
+    domain: {
+      name: "universal",
+      version: "1",
+      chainId: walletChainId,
+      verifyingContract: "0x0000000000000000000000000000000000000000",
+    },
+    types: {
+      EIP712Domain: [
+        { name: "name", type: "string" },
+        { name: "version", type: "string" },
+        { name: "chainId", type: "uint256" },
+        { name: "verifyingContract", type: "address" },
+      ],
+      UserSignedAddAPIKeyAction: [
+        { name: "chainID", type: "uint64" },
+        { name: "nonce", type: "uint64" },
+        { name: "accountID", type: "uint64" },
+        { name: "name", type: "string" },
+        { name: "keyType", type: "uint8" },
+        { name: "publicKey", type: "bytes" },
+        { name: "expiresAt", type: "uint64" },
+      ],
+    },
+    primaryType: "UserSignedAddAPIKeyAction",
+    message,
+  };
+
+  let signature: Hex;
+  try {
+    signature = (await provider.request({
+      method: "eth_signTypedData_v4",
+      params: [opts.account, JSON.stringify(typedData)],
+    })) as Hex;
+  } catch (err) {
+    const m = (err as Error).message ?? String(err);
+    throw new Error(
+      `[universal] eth_signTypedData_v4 failed: ${m.slice(0, 300)}`,
+    );
+  }
+
+  const apiSign = ("0x01" + signature.slice(2)) as Hex;
+  return { apiSign, nonce, walletChainId };
+}
+
+/**
+ * (Retained for reference) — the ExchangeAction signing path used by
+ * trade orders / cancels. Not called by addAPIKey anymore.
+ */
 export async function signWithMasterWallet(opts: {
   provider?: Eip1193Provider;
   account: `0x${string}`;
@@ -101,34 +237,9 @@ export async function signWithMasterWallet(opts: {
   action: SodexAction;
   nonce?: bigint;
 }): Promise<{ apiSign: Hex; nonce: bigint }> {
+  const provider = resolveProvider({ provider: opts.provider });
   const nonce = opts.nonce ?? BigInt(Date.now());
   const payloadHash = hashAction(opts.action);
-
-  // Resolve the lowest-level provider available. Priority:
-  //   1. Caller-supplied provider (from wagmi connector.getProvider())
-  //   2. window.ethereum (the wallet extension's own injected provider)
-  // We deliberately go around viem's WalletClient AND wagmi's
-  // wrappers — both add a chainId-match validator that doesn't apply
-  // to plain message signing.
-  type WindowEthereum = Eip1193Provider & {
-    isMetaMask?: boolean;
-    isRabby?: boolean;
-  };
-  const win = (typeof window !== "undefined"
-    ? (window as unknown as { ethereum?: WindowEthereum })
-    : undefined);
-  // Prefer window.ethereum (raw injected provider) over a wagmi-
-  // supplied provider, because wagmi 2's connector.getProvider() may
-  // return a viem-wrapped provider that still runs the chainId
-  // validator middleware. window.ethereum is the unwrapped object
-  // the extension injects.
-  const provider: Eip1193Provider | undefined =
-    win?.ethereum ?? opts.provider;
-  if (!provider) {
-    throw new Error(
-      "No wallet provider available (window.ethereum missing). Install MetaMask or Rabby.",
-    );
-  }
 
   const typedData = {
     domain: buildExchangeDomain(opts.domainName, opts.chainId),
@@ -145,27 +256,13 @@ export async function signWithMasterWallet(opts: {
       ],
     },
     primaryType: "ExchangeAction",
-    message: {
-      payloadHash,
-      // uint64 over JSON-RPC takes a string — bigints aren't JSON.
-      nonce: nonce.toString(),
-    },
+    message: { payloadHash, nonce: nonce.toString() },
   };
 
-  // SIGNING_PATH_RAW_PROVIDER_2026_06_02 — marker so we can see in
-  // chunk diffs whether this exact code reached production.
-  let signature: Hex;
-  try {
-    signature = (await provider.request({
-      method: "eth_signTypedData_v4",
-      params: [opts.account, JSON.stringify(typedData)],
-    })) as Hex;
-  } catch (err) {
-    const m = (err as Error).message ?? String(err);
-    throw new Error(
-      `[raw-provider] eth_signTypedData_v4 failed: ${m.slice(0, 300)}`,
-    );
-  }
+  const signature = (await provider.request({
+    method: "eth_signTypedData_v4",
+    params: [opts.account, JSON.stringify(typedData)],
+  })) as Hex;
 
   const apiSign = ("0x01" + signature.slice(2)) as Hex;
   return { apiSign, nonce };

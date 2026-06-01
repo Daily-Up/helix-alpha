@@ -14,6 +14,7 @@
 import type { Hex } from "viem";
 import { SODEX_NETWORKS, type SodexNetwork } from "./chains";
 import {
+  signAddAPIKeyAction,
   signWithApiKey,
   signWithMasterWallet,
   type Eip1193Provider,
@@ -191,30 +192,35 @@ export async function addApiKey(opts: {
   accountID: number;
   name: string;
   publicKey: `0x${string}`;
+  /** Unix-millis. 0 means no expiry; SoDEX caps at 7 days from now. */
   expiresAt?: number;
 }): Promise<{ name: string }> {
   const { network, provider, account, accountID, name, publicKey } = opts;
   const { chainId, spotEndpoint } = SODEX_NETWORKS[network];
+
+  // Default: 7-day expiry (the SoDEX UI's default behavior — see
+  // EXPIRED_DAYS=7 in their bundle).
+  const expiresAt =
+    opts.expiresAt ?? Date.now() + 7 * 24 * 60 * 60 * 1000;
+
+  const { apiSign, nonce } = await signAddAPIKeyAction({
+    provider,
+    account,
+    sodexChainId: chainId,
+    accountID,
+    name,
+    keyType: SodexApiKeyType.EVM,
+    publicKey,
+    expiresAt,
+  });
 
   const params: SodexAddApiKeyParams = {
     accountID,
     type: SodexApiKeyType.EVM,
     name,
     publicKey,
-    expiresAt: opts.expiresAt ?? 0,
+    expiresAt,
   };
-  const action: SodexAction<SodexAddApiKeyParams> = {
-    type: "addAPIKey",
-    params,
-  };
-
-  const { apiSign, nonce } = await signWithMasterWallet({
-    provider,
-    account,
-    domainName: "spot",
-    chainId,
-    action,
-  });
 
   const res = await fetch(`${spotEndpoint}/accounts/api-keys`, {
     method: "POST",
