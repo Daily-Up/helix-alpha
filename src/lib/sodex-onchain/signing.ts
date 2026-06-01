@@ -61,11 +61,18 @@ export function hashAction(action: SodexAction): Hex {
 }
 
 /**
- * Sign a SoDEX action via the master wallet (MetaMask / wagmi). Used
- * for addAPIKey and revokeAPIKey.
+ * Sign a SoDEX action via the master wallet (MetaMask / Rabby / etc).
+ * Used for addAPIKey and revokeAPIKey.
  *
- * Returns the X-API-Sign value (already 0x01-prefixed) plus the
- * nonce used.
+ * IMPORTANT: we deliberately bypass viem's `signTypedData` and call
+ * the EIP-1193 `eth_signTypedData_v4` method directly through the
+ * underlying provider. Reason: viem refuses to sign when the typed-
+ * data domain's chainId doesn't match the wallet's currently-
+ * connected chain — but EIP-712 doesn't actually require this match,
+ * and SoDEX's chainId lives inside the signed payload, not at the
+ * transport level. Going around viem lets the user keep their
+ * wallet on whatever chain they had (Ethereum mainnet, etc.) while
+ * still producing a valid SoDEX signature.
  */
 export async function signWithMasterWallet(opts: {
   walletClient: WalletClient;
@@ -78,20 +85,41 @@ export async function signWithMasterWallet(opts: {
   const nonce = opts.nonce ?? BigInt(Date.now());
   const payloadHash = hashAction(opts.action);
 
-  const signature = await opts.walletClient.signTypedData({
-    account: opts.account,
+  const fromAddress =
+    typeof opts.account === "string"
+      ? opts.account
+      : opts.account.address;
+
+  // Build the typed-data envelope MetaMask expects (includes the
+  // EIP712Domain types since the JSON-RPC method is dumb about it).
+  const typedData = {
     domain: buildExchangeDomain(opts.domainName, opts.chainId),
     types: {
+      EIP712Domain: [
+        { name: "name", type: "string" },
+        { name: "version", type: "string" },
+        { name: "chainId", type: "uint256" },
+        { name: "verifyingContract", type: "address" },
+      ],
       ExchangeAction: [
         { name: "payloadHash", type: "bytes32" },
         { name: "nonce", type: "uint64" },
       ],
     },
     primaryType: "ExchangeAction",
-    message: { payloadHash, nonce },
-  });
+    message: {
+      payloadHash,
+      // The EIP-712 message must be JSON-serializable, so stringify
+      // bigints. eth_signTypedData_v4 parses uint64 from a string.
+      nonce: nonce.toString(),
+    },
+  };
 
-  // X-API-Sign = 0x01 || rawSig
+  const signature = (await opts.walletClient.request({
+    method: "eth_signTypedData_v4",
+    params: [fromAddress, JSON.stringify(typedData)],
+  } as Parameters<WalletClient["request"]>[0])) as Hex;
+
   const apiSign = ("0x01" + signature.slice(2)) as Hex;
   return { apiSign, nonce };
 }
