@@ -221,8 +221,13 @@ export async function signAddAPIKeyAction(opts: {
     );
   }
 
-  const apiSign = ("0x01" + signature.slice(2)) as Hex;
-  return { apiSign, nonce, walletChainId };
+  // NOTE: NO 0x01 prefix for addAPIKey. The SoDEX docs describe the
+  // 0x01 prefix for the ExchangeAction (trade) path, but their own UI
+  // bundle's `signAddAPIKeyRequest` writes the signature as raw
+  // `toHex(rawSig)` with no prefix. Prefixing here was causing
+  // "Failed to recover signer: bad recovery id" because SoDEX read
+  // the v byte from the wrong offset.
+  return { apiSign: signature, nonce, walletChainId };
 }
 
 /**
