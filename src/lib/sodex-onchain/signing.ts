@@ -221,13 +221,33 @@ export async function signAddAPIKeyAction(opts: {
     );
   }
 
-  // NOTE: NO 0x01 prefix for addAPIKey. The SoDEX docs describe the
-  // 0x01 prefix for the ExchangeAction (trade) path, but their own UI
-  // bundle's `signAddAPIKeyRequest` writes the signature as raw
-  // `toHex(rawSig)` with no prefix. Prefixing here was causing
-  // "Failed to recover signer: bad recovery id" because SoDEX read
-  // the v byte from the wrong offset.
-  return { apiSign: signature, nonce, walletChainId };
+  // The 0x01 prefix IS required for X-API-Sign (per docs + the
+  // "X-API-Sign is invalid" gateway error without it). But before
+  // prefixing, normalize the v byte: some wallets (Rabby/MetaMask
+  // in some configs) return v ∈ {0, 1} (EIP-1559 compact form),
+  // SoDEX's ecrecover wants the legacy v ∈ {27, 28}. That mismatch
+  // was the "bad recovery id" we saw earlier.
+  const apiSign = ("0x01" + normalizeVByte(signature).slice(2)) as Hex;
+  return { apiSign, nonce, walletChainId };
+}
+
+/**
+ * Normalize the v (recovery id) byte at the end of an ECDSA
+ * signature. If the wallet returned v ∈ {0, 1}, add 27 to convert
+ * to the legacy {27, 28} form some chains/services require.
+ *
+ * Input:  0x{r:64hex}{s:64hex}{v:2hex}   (130 hex chars after 0x)
+ * Output: same length, only v adjusted.
+ */
+function normalizeVByte(sig: Hex): Hex {
+  if (sig.length !== 132) return sig; // not a 65-byte sig — leave alone
+  const vHex = sig.slice(130);
+  const v = parseInt(vHex, 16);
+  if (v === 0 || v === 1) {
+    const normalized = (v + 27).toString(16).padStart(2, "0");
+    return (sig.slice(0, 130) + normalized) as Hex;
+  }
+  return sig;
 }
 
 /**
