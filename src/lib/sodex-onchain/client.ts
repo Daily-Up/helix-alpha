@@ -11,9 +11,13 @@
  * notification posted by the client once a trade fills.
  */
 
-import type { WalletClient, Hex, Account } from "viem";
+import type { Hex } from "viem";
 import { SODEX_NETWORKS, type SodexNetwork } from "./chains";
-import { signWithApiKey, signWithMasterWallet } from "./signing";
+import {
+  signWithApiKey,
+  signWithMasterWallet,
+  type Eip1193Provider,
+} from "./signing";
 import type {
   SodexAccountState,
   SodexAction,
@@ -182,14 +186,14 @@ export async function listApiKeys(
  */
 export async function addApiKey(opts: {
   network: SodexNetwork;
-  walletClient: WalletClient;
-  account: Account | `0x${string}`;
+  provider: Eip1193Provider;
+  account: `0x${string}`;
   accountID: number;
   name: string;
   publicKey: `0x${string}`;
   expiresAt?: number;
 }): Promise<{ name: string }> {
-  const { network, walletClient, account, accountID, name, publicKey } = opts;
+  const { network, provider, account, accountID, name, publicKey } = opts;
   const { chainId, spotEndpoint } = SODEX_NETWORKS[network];
 
   const params: SodexAddApiKeyParams = {
@@ -205,7 +209,7 @@ export async function addApiKey(opts: {
   };
 
   const { apiSign, nonce } = await signWithMasterWallet({
-    walletClient,
+    provider,
     account,
     domainName: "spot",
     chainId,
@@ -228,12 +232,12 @@ export async function addApiKey(opts: {
 /** DELETE /accounts/api-keys — signed by master wallet. */
 export async function revokeApiKey(opts: {
   network: SodexNetwork;
-  walletClient: WalletClient;
-  account: Account | `0x${string}`;
+  provider: Eip1193Provider;
+  account: `0x${string}`;
   accountID: number;
   name: string;
 }): Promise<void> {
-  const { network, walletClient, account, accountID, name } = opts;
+  const { network, provider, account, accountID, name } = opts;
   const { chainId, spotEndpoint } = SODEX_NETWORKS[network];
 
   const params: SodexRevokeApiKeyParams = { accountID, name };
@@ -243,7 +247,7 @@ export async function revokeApiKey(opts: {
   };
 
   const { apiSign, nonce } = await signWithMasterWallet({
-    walletClient,
+    provider,
     account,
     domainName: "spot",
     chainId,

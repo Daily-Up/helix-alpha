@@ -28,12 +28,23 @@ import {
   toBytes,
   toHex,
   type Hex,
-  type WalletClient,
-  type Account,
   type TypedDataDomain,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import type { SodexAction } from "./types";
+
+/**
+ * Minimal EIP-1193 provider surface. We accept anything that
+ * implements `request(...)` so callers can pass `window.ethereum`,
+ * a wagmi connector's provider, or a WalletConnect session — none
+ * of which run viem's chainId-match validation on signing.
+ */
+export interface Eip1193Provider {
+  request(args: {
+    method: string;
+    params?: unknown[] | object;
+  }): Promise<unknown>;
+}
 
 export type SodexDomainName = "spot" | "futures";
 
@@ -64,19 +75,27 @@ export function hashAction(action: SodexAction): Hex {
  * Sign a SoDEX action via the master wallet (MetaMask / Rabby / etc).
  * Used for addAPIKey and revokeAPIKey.
  *
- * IMPORTANT: we deliberately bypass viem's `signTypedData` and call
- * the EIP-1193 `eth_signTypedData_v4` method directly through the
- * underlying provider. Reason: viem refuses to sign when the typed-
- * data domain's chainId doesn't match the wallet's currently-
- * connected chain — but EIP-712 doesn't actually require this match,
- * and SoDEX's chainId lives inside the signed payload, not at the
- * transport level. Going around viem lets the user keep their
- * wallet on whatever chain they had (Ethereum mainnet, etc.) while
- * still producing a valid SoDEX signature.
+ * IMPORTANT: we deliberately bypass viem ENTIRELY and call
+ * `eth_signTypedData_v4` straight on the EIP-1193 provider. Reasons:
+ *
+ *   1. viem's `signTypedData` action refuses if the typed-data
+ *      domain's chainId doesn't match the wallet's connected chain
+ *      ("chainId should be same as current chainId"). EIP-712 has
+ *      no such restriction — the chainId is just a field in the
+ *      signed payload, not a transport-level requirement.
+ *
+ *   2. Even calling `walletClient.request` from viem appears to run
+ *      the same validation on known JSON-RPC methods. The only way
+ *      around is to grab the underlying provider (via the wagmi
+ *      connector's `getProvider()`) and call `.request` on it.
+ *
+ * SoDEX's gateway then verifies the signature against the chainId
+ * inside the payload, completely independent of which network the
+ * user's wallet was on at signing time.
  */
 export async function signWithMasterWallet(opts: {
-  walletClient: WalletClient;
-  account: Account | `0x${string}`;
+  provider: Eip1193Provider;
+  account: `0x${string}`;
   domainName: SodexDomainName;
   chainId: number;
   action: SodexAction;
@@ -85,13 +104,9 @@ export async function signWithMasterWallet(opts: {
   const nonce = opts.nonce ?? BigInt(Date.now());
   const payloadHash = hashAction(opts.action);
 
-  const fromAddress =
-    typeof opts.account === "string"
-      ? opts.account
-      : opts.account.address;
-
-  // Build the typed-data envelope MetaMask expects (includes the
-  // EIP712Domain types since the JSON-RPC method is dumb about it).
+  // The EIP-1193 method takes a JSON-stringified typed-data envelope.
+  // Include EIP712Domain in `types` (signTypedData_v4 requires it
+  // even though viem usually injects it for you).
   const typedData = {
     domain: buildExchangeDomain(opts.domainName, opts.chainId),
     types: {
@@ -109,16 +124,15 @@ export async function signWithMasterWallet(opts: {
     primaryType: "ExchangeAction",
     message: {
       payloadHash,
-      // The EIP-712 message must be JSON-serializable, so stringify
-      // bigints. eth_signTypedData_v4 parses uint64 from a string.
+      // uint64 over JSON-RPC takes a string — bigints aren't JSON.
       nonce: nonce.toString(),
     },
   };
 
-  const signature = (await opts.walletClient.request({
+  const signature = (await opts.provider.request({
     method: "eth_signTypedData_v4",
-    params: [fromAddress, JSON.stringify(typedData)],
-  } as Parameters<WalletClient["request"]>[0])) as Hex;
+    params: [opts.account, JSON.stringify(typedData)],
+  })) as Hex;
 
   const apiSign = ("0x01" + signature.slice(2)) as Hex;
   return { apiSign, nonce };

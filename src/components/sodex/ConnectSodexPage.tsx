@@ -25,7 +25,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
-import { useAccount, useWalletClient } from "wagmi";
+import { useAccount } from "wagmi";
+import type { Eip1193Provider } from "@/lib/sodex-onchain/signing";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { cn } from "@/components/ui/cn";
@@ -383,14 +384,34 @@ function TestnetBurnerFlow({ network }: { network: SodexNetwork }) {
 // ─── Mainnet: master wallet + API key flow ──────────────────────────
 
 function MainnetMasterKeyFlow({ network }: { network: SodexNetwork }) {
-  const { address, isConnected } = useAccount();
-  const { data: walletClient } = useWalletClient();
+  const { address, isConnected, connector } = useAccount();
 
-  // NOTE: the wallet's currently-connected chain is intentionally
-  // ignored. EIP-712 typed-data signing produces the SoDEX
-  // signature regardless of which network the wallet is on — the
-  // SoDEX chainId is INSIDE the signed payload, not a wallet
-  // requirement.
+  // We DELIBERATELY do NOT use wagmi's useWalletClient — viem's
+  // signing actions enforce a chainId match between the typed-data
+  // domain and the wallet's connected chain, which would force the
+  // user to add SoDEX as a network in their wallet. Instead we
+  // grab the raw EIP-1193 provider from the wagmi connector and
+  // call `eth_signTypedData_v4` straight against it. MetaMask /
+  // Rabby will sign without a chain-switch.
+  const [provider, setProvider] = useState<Eip1193Provider | null>(null);
+  useEffect(() => {
+    if (!connector) {
+      setProvider(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const raw = (await connector.getProvider()) as Eip1193Provider;
+        if (!cancelled) setProvider(raw);
+      } catch {
+        if (!cancelled) setProvider(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [connector]);
 
   const [accountState, setAccountState] = useState<SodexAccountState | null>(
     null,
@@ -433,7 +454,7 @@ function MainnetMasterKeyFlow({ network }: { network: SodexNetwork }) {
   }, [network, remoteKeys]);
 
   const onGenerateKey = useCallback(async () => {
-    if (!isConnected || !address || !walletClient || !accountState) return;
+    if (!isConnected || !address || !provider || !accountState) return;
     setBusy("generate");
     setError(null);
     setActionMsg(null);
@@ -441,7 +462,7 @@ function MainnetMasterKeyFlow({ network }: { network: SodexNetwork }) {
       const next = mintNewApiKey(suggestKeyName());
       await sodexAddApiKey({
         network,
-        walletClient,
+        provider,
         account: address,
         accountID: accountState.aid,
         name: next.name,
@@ -461,7 +482,7 @@ function MainnetMasterKeyFlow({ network }: { network: SodexNetwork }) {
   }, [
     isConnected,
     address,
-    walletClient,
+    provider,
     accountState,
     network,
     refreshAccount,
@@ -469,7 +490,7 @@ function MainnetMasterKeyFlow({ network }: { network: SodexNetwork }) {
 
   const onRevokeKey = useCallback(
     async (name: string) => {
-      if (!isConnected || !address || !walletClient || !accountState) return;
+      if (!isConnected || !address || !provider || !accountState) return;
       if (
         !confirm(
           `Revoke API key "${name}"? Helix will lose the ability to trade on your account.`,
@@ -482,7 +503,7 @@ function MainnetMasterKeyFlow({ network }: { network: SodexNetwork }) {
       try {
         await sodexRevokeApiKey({
           network,
-          walletClient,
+          provider,
           account: address,
           accountID: accountState.aid,
           name,
@@ -499,7 +520,7 @@ function MainnetMasterKeyFlow({ network }: { network: SodexNetwork }) {
     [
       isConnected,
       address,
-      walletClient,
+      provider,
       accountState,
       network,
       localKey?.name,
