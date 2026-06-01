@@ -37,6 +37,7 @@ import {
 } from "@/lib/sodex-onchain/chains";
 import {
   addApiKey as sodexAddApiKey,
+  claimTestnetFaucet,
   getAccountState,
   listApiKeys,
   revokeApiKey as sodexRevokeApiKey,
@@ -178,7 +179,7 @@ function TestnetBurnerFlow({ network }: { network: SodexNetwork }) {
     };
   }, [identity, network, reloadTick]);
 
-  const onGenerate = useCallback(() => {
+  const onGenerate = useCallback(async () => {
     setBusy("generate");
     setActionMsg(null);
     setError(null);
@@ -186,15 +187,47 @@ function TestnetBurnerFlow({ network }: { network: SodexNetwork }) {
       const next = mintBurnerWallet();
       writeLocalKey(network, next);
       setActionMsg(
-        `✓ Generated burner wallet ${next.address.slice(0, 6)}…${next.address.slice(-4)} — saved in this browser only`,
+        `✓ Generated burner wallet ${next.address.slice(0, 6)}…${next.address.slice(-4)} — auto-claiming faucet…`,
       );
       setReloadTick((t) => t + 1);
+      // Auto-drip 100 vUSDC from the SoDEX testnet faucet so the
+      // burner can actually trade immediately. Open CORS — straight
+      // from the browser. If the faucet trips a captcha or rate
+      // limit, we surface the message verbatim so the user can
+      // claim manually via the button.
+      const drip = await claimTestnetFaucet(next.address);
+      if (drip.ok) {
+        setActionMsg(
+          `✓ Burner ready: ${next.address.slice(0, 6)}…${next.address.slice(-4)} · faucet ${drip.message}`,
+        );
+      } else {
+        setActionMsg(
+          `✓ Burner generated. Auto-faucet failed (${drip.message}) — use the "Claim 100 vUSDC" button below.`,
+        );
+      }
+      // Refresh again after a brief delay so the balance shows up.
+      setTimeout(() => setReloadTick((t) => t + 1), 1500);
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setBusy(null);
     }
   }, [network]);
+
+  const onClaim = useCallback(async () => {
+    if (!identity) return;
+    setBusy("claim");
+    setActionMsg(null);
+    setError(null);
+    const drip = await claimTestnetFaucet(identity.address);
+    if (drip.ok) {
+      setActionMsg(`✓ Faucet: ${drip.message}`);
+      setTimeout(() => setReloadTick((t) => t + 1), 1500);
+    } else {
+      setError(`Faucet refused: ${drip.message}`);
+    }
+    setBusy(null);
+  }, [identity]);
 
   const onWipe = useCallback(() => {
     if (
@@ -267,12 +300,28 @@ function TestnetBurnerFlow({ network }: { network: SodexNetwork }) {
 
               {(!accountState || accountState.B.length === 0) ? (
                 <div className="rounded border border-warning/30 bg-warning/5 p-2 text-xs text-warning">
-                  No balance yet. Fund this wallet from the SoDEX
-                  testnet faucet — paste the address above.
+                  No balance yet — the faucet usually takes ~10s to
+                  reflect. Hit ↻ Refresh in a moment, or click
+                  &quot;Claim 100 vUSDC&quot; if the first auto-claim
+                  was rate-limited.
                 </div>
               ) : null}
 
               <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={onClaim}
+                  disabled={busy === "claim"}
+                  className={cn(
+                    "rounded border px-2.5 py-1 text-xs font-medium transition-colors",
+                    busy === "claim"
+                      ? "cursor-wait border-line bg-surface-2 text-fg-dim"
+                      : "border-accent/40 bg-accent/15 text-accent-2 hover:bg-accent/25",
+                  )}
+                >
+                  {busy === "claim"
+                    ? "Claiming…"
+                    : "+ Claim 100 vUSDC from faucet"}
+                </button>
                 <button
                   onClick={() => {
                     navigator.clipboard.writeText(identity.address);
@@ -282,20 +331,21 @@ function TestnetBurnerFlow({ network }: { network: SodexNetwork }) {
                 >
                   Copy address
                 </button>
-                <a
-                  href="https://faucet.sodex.dev"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="rounded border border-line bg-surface px-2.5 py-1 text-xs text-fg-muted hover:border-accent/40 hover:text-accent-2"
-                >
-                  Open testnet faucet →
-                </a>
                 <button
                   onClick={() => setReloadTick((t) => t + 1)}
                   className="rounded border border-line bg-surface px-2.5 py-1 text-xs text-fg-muted hover:border-line-2 hover:text-fg"
                 >
                   ↻ Refresh balance
                 </button>
+                <a
+                  href="https://testnet.sodex.com/faucet"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded border border-line bg-surface px-2.5 py-1 text-xs text-fg-muted hover:border-accent/40 hover:text-accent-2"
+                  title="If the in-app claim is rate-limited, the official faucet page may show a captcha you can complete."
+                >
+                  Open faucet page →
+                </a>
                 <button
                   onClick={onWipe}
                   className="ml-auto rounded border border-line bg-surface px-2.5 py-1 text-xs text-fg-muted hover:border-negative/40 hover:text-negative"

@@ -69,6 +69,80 @@ export async function getSymbolId(
   return map.get(norm);
 }
 
+// ── Testnet faucet ─────────────────────────────────────────────────
+
+const TESTNET_FAUCET_BASE = "https://alpha-biz.sodex.dev/faucet/api";
+
+export interface FaucetClaimResult {
+  ok: boolean;
+  /** "claim success" on success; otherwise the gateway-side error. */
+  message: string;
+  /** When this address last drained the faucet, if returned. */
+  lastClaimedAt?: number;
+}
+
+/**
+ * Trigger the SoDEX testnet faucet for the given address. Open CORS,
+ * so we call straight from the browser — Helix's server is not in
+ * the path. The faucet drips 100 vUSDC per address per day; repeated
+ * calls within the same window return a "claim limit" error which
+ * we surface verbatim.
+ */
+export async function claimTestnetFaucet(
+  address: `0x${string}`,
+): Promise<FaucetClaimResult> {
+  try {
+    const res = await fetch(`${TESTNET_FAUCET_BASE}/claim`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ address }),
+    });
+    const json = (await res.json()) as {
+      code: number;
+      msg: string;
+      data?: unknown;
+    };
+    if (json.code === 0) {
+      return { ok: true, message: String(json.data ?? "claim success") };
+    }
+    return { ok: false, message: json.msg || `code ${json.code}` };
+  } catch (err) {
+    return { ok: false, message: (err as Error).message };
+  }
+}
+
+/**
+ * Check whether an address is allowed to claim from the faucet.
+ * Useful for telling the user "you've already claimed today" before
+ * we even attempt the call.
+ */
+export interface FaucetWhitelistStatus {
+  inWhitelist: boolean;
+  inAnotherWhitelist: boolean;
+  claimFlag: boolean;
+  claimStatus: number;
+  claimCount: number;
+}
+export async function checkFaucetWhitelist(
+  address: `0x${string}`,
+): Promise<FaucetWhitelistStatus | null> {
+  try {
+    const res = await fetch(`${TESTNET_FAUCET_BASE}/check-whitelist`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ address }),
+    });
+    const json = (await res.json()) as {
+      code: number;
+      data?: FaucetWhitelistStatus;
+    };
+    if (json.code === 0 && json.data) return json.data;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 async function handle<T>(res: Response): Promise<T> {
   const json = (await res.json()) as SodexResponse<T>;
   if (json.code !== 0) {
