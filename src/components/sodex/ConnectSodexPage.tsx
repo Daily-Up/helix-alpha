@@ -524,6 +524,9 @@ export function ConnectSodexPage() {
         </div>
       ) : null}
 
+      {/* Live trade history */}
+      {isConnected && address ? <MyTradesPanel wallet={address} /> : null}
+
       {/* Final summary */}
       {isConnected && localKey && limits.acceptedDisclaimer ? (
         <div className="rounded border border-accent/30 bg-accent/5 px-3 py-2 text-xs text-accent">
@@ -532,5 +535,114 @@ export function ConnectSodexPage() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+// ─── Live trade history panel ──────────────────────────────────────
+
+interface ExecutedTradeView {
+  id: string;
+  user_wallet: string;
+  signal_id: string | null;
+  network: "mainnet" | "testnet";
+  symbol: string;
+  side: "buy" | "sell";
+  size_usd: number | null;
+  filled_price: number | null;
+  filled_at: number;
+  sodex_order_id: string | null;
+  status: "submitted" | "filled" | "rejected";
+  error: string | null;
+}
+
+function MyTradesPanel({ wallet }: { wallet: `0x${string}` }) {
+  const [trades, setTrades] = useState<ExecutedTradeView[] | null>(null);
+  const [tradesError, setTradesError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `/api/sodex/my-trades?wallet=${wallet}&limit=25`,
+      );
+      const json = (await res.json()) as {
+        ok: boolean;
+        trades?: ExecutedTradeView[];
+        error?: string;
+      };
+      if (!json.ok) {
+        setTradesError(json.error ?? "load failed");
+        return;
+      }
+      setTrades(json.trades ?? []);
+      setTradesError(null);
+    } catch (err) {
+      setTradesError((err as Error).message);
+    }
+  }, [wallet]);
+
+  useEffect(() => {
+    refresh();
+    const t = setInterval(refresh, 15_000);
+    return () => clearInterval(t);
+  }, [refresh]);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>6. Your live trades</CardTitle>
+        <span className="text-[11px] text-fg-dim">
+          Every order this wallet has executed via Helix, on-chain audit only.
+        </span>
+      </CardHeader>
+      <CardBody className="!p-0">
+        {tradesError ? (
+          <div className="p-3 text-xs text-negative">{tradesError}</div>
+        ) : trades == null ? (
+          <div className="p-3 text-xs text-fg-muted">Loading…</div>
+        ) : trades.length === 0 ? (
+          <div className="p-3 text-xs text-fg-muted">
+            No live trades yet. Generate an API key, set safety limits,
+            then click <strong>▶ Execute live</strong> on any signal.
+          </div>
+        ) : (
+          <ul className="divide-y divide-line">
+            {trades.map((t) => (
+              <li
+                key={t.id}
+                className="grid grid-cols-[80px_120px_1fr_60px_80px_100px] items-center gap-3 px-3 py-1.5 text-xs"
+              >
+                <Badge
+                  tone={
+                    t.status === "filled"
+                      ? "positive"
+                      : t.status === "rejected"
+                        ? "negative"
+                        : "neutral"
+                  }
+                >
+                  {t.status}
+                </Badge>
+                <span className="font-mono text-fg">{t.symbol}</span>
+                <span
+                  className="font-mono text-[10px]"
+                  style={{
+                    color: t.side === "buy" ? "#5cc97a" : "#e06c66",
+                  }}
+                >
+                  {t.side.toUpperCase()}
+                </span>
+                <span className="text-right text-fg-muted">
+                  {t.size_usd != null ? `$${t.size_usd.toFixed(0)}` : "—"}
+                </span>
+                <Badge tone="neutral">{t.network}</Badge>
+                <span className="text-right text-[10px] text-fg-dim">
+                  {new Date(t.filled_at).toISOString().slice(11, 19)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardBody>
+    </Card>
   );
 }
