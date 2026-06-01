@@ -40,6 +40,11 @@ export * as ShadowPortfolio from "./repos/shadow-portfolio";
 export * as AgentTraces from "./repos/agent-traces";
 export type { AgentStep, AgentTraceRow } from "./repos/agent-traces";
 export * as FrameworkSwitches from "./repos/framework-switches";
+export * as ExecutedTrades from "./repos/executed-trades";
+export type {
+  ExecutedTradeRow,
+  TradeStatus as ExecutedTradeStatus,
+} from "./repos/executed-trades";
 
 // Re-export commonly-needed enum values + types so call sites don't need a
 // second import.

@@ -11,6 +11,7 @@ import {
 } from "@/lib/format";
 import { stripTechnicalScoring } from "@/lib/format/reasoning";
 import { cn } from "@/components/ui/cn";
+import { ExecuteLiveButton } from "@/components/sodex/ExecuteLiveButton";
 
 const TEXT_BRAND = "#ede4d3";
 const TEXT_MUTED = "#8a857a";
@@ -594,6 +595,20 @@ export function SignalCard({
             >
               No perp market — shorts can&apos;t be filled on spot.
             </span>
+          ) : null}
+          {/* Live execute via the user's own SoDEX wallet. Shows only
+              when they've connected on /settings/connect-sodex and
+              accepted the safety-limits disclaimer. */}
+          {!venueBlocksExecute && sig.suggested_size_usd != null ? (
+            <ExecuteLiveButton
+              signal={{
+                signal_id: sig.id,
+                symbol: sig.sodex_symbol,
+                side: dirIsLong ? "buy" : "sell",
+                suggested_size_usd: sig.suggested_size_usd,
+                price_usd: 0, // resolved at click-time from quotes; 0 means market-order rules
+              }}
+            />
           ) : null}
           <button
             onClick={onDismiss}

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Fraunces, Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import { Web3Provider } from "@/components/providers/Web3Provider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -51,7 +52,9 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} ${fraunces.variable} ${inter.variable} ${jetbrainsMono.variable} h-full antialiased`}
       style={{ colorScheme: "dark" }}
     >
-      <body className="min-h-full">{children}</body>
+      <body className="min-h-full">
+        <Web3Provider>{children}</Web3Provider>
+      </body>
     </html>
   );
 }

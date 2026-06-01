@@ -41,6 +41,12 @@ const NAV: Array<{ section: string; items: NavItem[] }> = [
     items: [{ href: "/agents", label: "Agent Activity", badge: "NEW" }],
   },
   {
+    section: "Live Trading",
+    items: [
+      { href: "/settings/connect-sodex", label: "Connect SoDEX", badge: "BETA" },
+    ],
+  },
+  {
     section: "System",
     items: [
       // Cron & Audit and System Health are internal monitoring surfaces.

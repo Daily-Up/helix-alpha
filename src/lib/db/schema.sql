@@ -788,7 +788,34 @@ CREATE INDEX IF NOT EXISTS idx_agent_traces_event ON agent_traces(event_id);
 CREATE INDEX IF NOT EXISTS idx_agent_traces_signal ON agent_traces(signal_id);
 CREATE INDEX IF NOT EXISTS idx_agent_traces_started ON agent_traces(started_at DESC);
 
--- ── 21. Schema version (manual migrations) ────────────────────────────────
+-- ── 21. Live SoDEX executions (audit log for client-side trades) ────────
+-- Browser-side execution: the user signs the order in-browser, posts
+-- directly to SoDEX, and then POSTs the OUTCOME to Helix so we can
+-- show a "live trades" history. We never see the API key secret —
+-- this table only captures public after-the-fact metadata.
+
+CREATE TABLE IF NOT EXISTS executed_trades (
+  id                TEXT PRIMARY KEY,
+  user_wallet       TEXT NOT NULL,
+  signal_id         TEXT,
+  network           TEXT NOT NULL,
+  symbol            TEXT NOT NULL,
+  side              TEXT NOT NULL,
+  size_usd          REAL,
+  filled_price      REAL,
+  filled_at         INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+  sodex_order_id    TEXT,
+  status            TEXT NOT NULL,
+  error             TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_executed_trades_user
+  ON executed_trades(user_wallet, filled_at DESC);
+CREATE INDEX IF NOT EXISTS idx_executed_trades_signal
+  ON executed_trades(signal_id);
+CREATE INDEX IF NOT EXISTS idx_executed_trades_filled_at
+  ON executed_trades(filled_at DESC);
+
+-- ── 22. Schema version (manual migrations) ────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS schema_version (
   version  INTEGER PRIMARY KEY,
