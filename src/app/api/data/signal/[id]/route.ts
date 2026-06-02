@@ -76,85 +76,106 @@ export async function GET(
     );
   }
 
-  const asset = await Assets.getAssetById(signal.asset_id);
+  // Everything below this point can run in parallel. Each call is one
+  // Turso round-trip (~80-150ms), and there are ~10 of them; running
+  // them sequentially was eating the 15s function budget on cold
+  // starts. With Promise.all the whole blob now finishes in ~300ms.
+  const eventId = signal.triggered_by_event_id;
+  const secondaryIds = signal.secondary_asset_ids
+    ? (JSON.parse(signal.secondary_asset_ids) as string[])
+    : [];
 
-  let event: EventRow | undefined;
-  let classification: ClassRow | undefined;
-  let duplicates: DupRow[] = [];
-  let impact: ImpactRow | undefined;
+  const [
+    asset,
+    event,
+    classification,
+    impact,
+    secondary,
+    supersededByRow,
+    supersededOthers,
+    suppressionsThisWon,
+    signalScopedAll,
+    eventScopedAll,
+  ] = await Promise.all([
+    Assets.getAssetById(signal.asset_id),
+    eventId
+      ? get<EventRow>(
+          `SELECT id, release_time, title, content, author, source_link,
+                  original_link, category, is_blue_verified, duplicate_of
+           FROM news_events WHERE id = ?`,
+          [eventId],
+        )
+      : Promise.resolve(undefined),
+    eventId
+      ? get<ClassRow>(
+          `SELECT event_type, sentiment, severity, confidence, actionable,
+                  event_recency, affected_asset_ids, reasoning, model,
+                  prompt_version, classified_at
+           FROM classifications WHERE event_id = ?`,
+          [eventId],
+        )
+      : Promise.resolve(undefined),
+    eventId
+      ? get<ImpactRow>(
+          `SELECT impact_pct_1d, impact_pct_3d, impact_pct_7d, computed_at
+           FROM impact_metrics
+           WHERE event_id = ? AND asset_id = ?`,
+          [eventId, signal.asset_id],
+        )
+      : Promise.resolve(undefined),
+    Promise.all(
+      secondaryIds.map(async (aid) => {
+        const a = await Assets.getAssetById(aid);
+        return {
+          asset_id: aid,
+          symbol: a?.symbol ?? aid,
+          name: a?.name ?? aid,
+          tradable_symbol: a?.tradable?.symbol ?? null,
+        };
+      }),
+    ),
+    Supersessions.getSupersessionForOld(signal.id),
+    Supersessions.listSupersessionsByNew(signal.id),
+    Conflicts.listSuppressionsForConflict(signal.id),
+    AgentTraces.listRecentTraces(50),
+    eventId
+      ? AgentTraces.listTracesForEvent(eventId)
+      : Promise.resolve([]),
+  ]);
 
-  if (signal.triggered_by_event_id) {
-    event = await get<EventRow>(
-      `SELECT id, release_time, title, content, author, source_link,
-              original_link, category, is_blue_verified, duplicate_of
-       FROM news_events WHERE id = ?`,
-      [signal.triggered_by_event_id],
-    );
-
-    classification = await get<ClassRow>(
-      `SELECT event_type, sentiment, severity, confidence, actionable,
-              event_recency, affected_asset_ids, reasoning, model,
-              prompt_version, classified_at
-       FROM classifications WHERE event_id = ?`,
-      [signal.triggered_by_event_id],
-    );
-
-    const canonicalId = event?.duplicate_of ?? signal.triggered_by_event_id;
-    duplicates = await all<DupRow>(
-      `SELECT id, release_time, title, author, source_link
-       FROM news_events
-       WHERE (id = ? OR duplicate_of = ?)
-         AND id != ?
-       ORDER BY release_time ASC`,
-      [canonicalId, canonicalId, signal.triggered_by_event_id],
-    );
-
-    impact = await get<ImpactRow>(
-      `SELECT impact_pct_1d, impact_pct_3d, impact_pct_7d, computed_at
-       FROM impact_metrics
-       WHERE event_id = ? AND asset_id = ?`,
-      [signal.triggered_by_event_id, signal.asset_id],
-    );
-  }
-
-  // Resolve secondary asset symbols for display.
-  const secondary = signal.secondary_asset_ids
-    ? await Promise.all(
-        (JSON.parse(signal.secondary_asset_ids) as string[]).map(
-          async (aid) => {
-            const a = await Assets.getAssetById(aid);
-            return {
-              asset_id: aid,
-              symbol: a?.symbol ?? aid,
-              name: a?.name ?? aid,
-              tradable_symbol: a?.tradable?.symbol ?? null,
-            };
-          },
-        ),
+  // Duplicates need the canonical event id which depends on the
+  // resolved event row above, so fire it after the parallel block.
+  const canonicalId = event?.duplicate_of ?? eventId;
+  const duplicates: DupRow[] = canonicalId
+    ? await all<DupRow>(
+        `SELECT id, release_time, title, author, source_link
+         FROM news_events
+         WHERE (id = ? OR duplicate_of = ?)
+           AND id != ?
+         ORDER BY release_time ASC`,
+        [canonicalId, canonicalId, eventId ?? ""],
       )
     : [];
 
-  const supersededByRow = await Supersessions.getSupersessionForOld(signal.id);
-  const supersededOthers = await Supersessions.listSupersessionsByNew(signal.id);
-  const suppressionsThisWon = await Conflicts.listSuppressionsForConflict(
-    signal.id,
-  );
-
-  // Wave 2 — agent traces. We surface every trace associated with this
-  // signal: the research-agent trace tagged to the triggering event
-  // (ran at classification time, before signal_id existed), plus any
-  // verification or debate traces tagged directly to the signal id.
-  const signalScoped = (await AgentTraces.listRecentTraces(50)).filter(
-    (r) => r.signal_id === signal.id,
-  );
-  const eventScoped = signal.triggered_by_event_id
-    ? (
-        await AgentTraces.listTracesForEvent(signal.triggered_by_event_id)
-      ).filter((r) => !r.signal_id)
-    : [];
-  const agent_traces = [...eventScoped, ...signalScoped];
-  // Legacy single-trace field for the existing AgentTraceCard. The new
-  // UI will iterate agent_traces.
+  // Dedupe traces server-side so we don't ship a giant JSON blob to
+  // the client. Keep only the latest non-stuck run per agent_name.
+  const STUCK_AFTER_MS = 5 * 60 * 1000;
+  const now = Date.now();
+  const allTraces = [
+    ...eventScopedAll.filter((r) => !r.signal_id),
+    ...signalScopedAll.filter((r) => r.signal_id === signal.id),
+  ];
+  const latestByAgent = new Map<string, (typeof allTraces)[number]>();
+  for (const t of allTraces) {
+    if (t.status === "running" && t.started_at < now - STUCK_AFTER_MS) {
+      continue; // crashed mid-run — skip
+    }
+    const prev = latestByAgent.get(t.agent_name);
+    if (!prev || t.started_at > prev.started_at) {
+      latestByAgent.set(t.agent_name, t);
+    }
+  }
+  const agent_traces = [...latestByAgent.values()];
   const agent_trace = agent_traces[0] ?? null;
 
   return NextResponse.json({
