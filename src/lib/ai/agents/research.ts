@@ -224,8 +224,11 @@ export interface ResearchAgentResult {
 export async function runResearchAgent(input: {
   event: StoredEvent;
   universe: Array<{ id: string; symbol: string; name: string; kind: string }>;
+  /** Pre-assigned trace id, so callers can return it before the agent
+   *  has started running and poll for live progress. */
+  traceId?: string;
 }): Promise<ResearchAgentResult> {
-  const traceId = randomUUID();
+  const traceId = input.traceId ?? randomUUID();
   const model = getModel();
 
   await AgentTraces.startTrace({

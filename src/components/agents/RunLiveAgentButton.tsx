@@ -1,17 +1,19 @@
 "use client";
 
 /**
- * Run-live-agent button.
+ * Run-live-agent button — now with live-typing trace.
  *
- * Hits the public /api/agent/demo endpoint, surfaces a loading state,
- * and reloads the page on success so the new trace cards appear.
- *
- * Disabled when the API returns 429 (rate limit) or 429-with-spend-cap;
- * the user sees the specific reason inline.
+ * Hits POST /api/agent/demo which returns a trace_id immediately and
+ * runs the agent in a Next.js `after()` block. We render a
+ * LiveAgentTrace below the button that polls /api/data/trace?id=...
+ * every 800ms, so each step (thinking, tool call, result, final
+ * classification) shows up the moment it's persisted — no more
+ * "click and wait 30s of silence".
  */
 
 import { useState } from "react";
 import { cn } from "@/components/ui/cn";
+import { LiveAgentTrace } from "./LiveAgentTrace";
 
 interface Props {
   /** Required for mode='research'. */
@@ -42,6 +44,7 @@ export function RunLiveAgentButton({
 }: Props) {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [traceId, setTraceId] = useState<string | null>(null);
 
   const target =
     mode === "research"
@@ -57,19 +60,30 @@ export function RunLiveAgentButton({
   async function go() {
     setRunning(true);
     setError(null);
+    setTraceId(null);
     try {
       const res = await fetch(
         `/api/agent/demo?mode=${mode}&${target}`,
         { method: "POST" },
       );
-      const body = (await res.json()) as { ok: boolean; error?: string };
+      const body = (await res.json()) as {
+        ok: boolean;
+        error?: string;
+        trace_id?: string;
+      };
       if (!res.ok || !body.ok) {
         setError(body.error ?? `request failed (${res.status})`);
         setRunning(false);
         return;
       }
-      // Reload so the new trace card(s) appear.
-      window.location.reload();
+      // Debate mode doesn't return a single trace_id (it spawns three);
+      // for that path we fall back to a page reload after a short
+      // delay so the new traces appear in the main list.
+      if (body.trace_id) {
+        setTraceId(body.trace_id);
+      } else {
+        setTimeout(() => window.location.reload(), 35_000);
+      }
     } catch (err) {
       setError((err as Error).message ?? "request failed");
       setRunning(false);
@@ -77,13 +91,13 @@ export function RunLiveAgentButton({
   }
 
   return (
-    <div className={cn("flex flex-col gap-1", className)}>
+    <div className={cn("flex flex-col gap-3", className)}>
       <button
         type="button"
         onClick={go}
         disabled={running}
         className={cn(
-          "inline-flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-xs font-medium transition-colors",
+          "inline-flex w-fit items-center justify-center gap-2 rounded-md border px-3 py-2 text-xs font-medium transition-colors",
           running
             ? "cursor-wait border-line bg-surface-2 text-fg-dim"
             : "border-accent/40 bg-accent/15 text-accent-2 hover:bg-accent/25",
@@ -91,7 +105,7 @@ export function RunLiveAgentButton({
       >
         {running ? (
           <>
-            <Spinner /> Running… (up to ~30s — page will reload)
+            <Spinner /> Running…
           </>
         ) : (
           <>
@@ -104,6 +118,12 @@ export function RunLiveAgentButton({
       </button>
       {error ? (
         <span className="text-[11px] text-negative">{error}</span>
+      ) : null}
+      {traceId ? (
+        <LiveAgentTrace
+          traceId={traceId}
+          onComplete={() => setRunning(false)}
+        />
       ) : null}
     </div>
   );

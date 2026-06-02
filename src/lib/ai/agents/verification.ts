@@ -178,8 +178,11 @@ export async function runVerificationAgent(input: {
   catalyst_iso: string;
   catalyst_title: string;
   catalyst_author: string | null;
+  /** Pre-assigned trace id, so callers can return it before the
+   *  agent has started running and poll for live progress. */
+  traceId?: string;
 }): Promise<VerificationResult> {
-  const traceId = randomUUID();
+  const traceId = input.traceId ?? randomUUID();
   const model = getModel();
 
   await AgentTraces.startTrace({

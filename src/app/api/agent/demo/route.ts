@@ -17,7 +17,8 @@
  * 'demo-<mode>' prefix so dashboards can distinguish.
  */
 
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
+import { randomUUID } from "node:crypto";
 import { Assets, Events, Signals } from "@/lib/db";
 import { runResearchAgent } from "@/lib/ai/agents/research";
 import { runVerificationAgent } from "@/lib/ai/agents/verification";
@@ -101,16 +102,22 @@ async function handle(req: Request): Promise<NextResponse> {
       name: a.name,
       kind: a.kind,
     }));
-    const r = await runResearchAgent({ event, universe });
-    return NextResponse.json({
-      ok: !r.error,
-      mode,
-      trace_id: r.trace_id,
-      rounds: r.rounds,
-      cost_usd: r.cost_usd,
-      classification: r.classification,
-      error: r.error,
+
+    // Pre-assign the trace ID so we can return it immediately.
+    // The agent runs in next/server's `after()` block — the response
+    // is sent right away, and the agent populates the trace row in
+    // the background. The client polls /api/data/trace?id=... to
+    // render each step as it's persisted.
+    const traceId = randomUUID();
+    after(async () => {
+      try {
+        await runResearchAgent({ event, universe, traceId });
+      } catch (err) {
+        console.error("[demo] research agent failed:", err);
+      }
     });
+
+    return NextResponse.json({ ok: true, mode, trace_id: traceId });
   }
 
   if (mode === "verification" || mode === "debate") {
@@ -133,46 +140,46 @@ async function handle(req: Request): Promise<NextResponse> {
       : undefined;
 
     if (mode === "verification") {
-      const r = await runVerificationAgent({
-        signal,
-        asset_symbol: asset?.symbol ?? signal.asset_id,
-        catalyst_iso: event
-          ? new Date(event.release_time).toISOString()
-          : new Date(signal.fired_at).toISOString(),
-        catalyst_title: event?.title ?? "(no event title)",
-        catalyst_author: event?.author ?? null,
+      const traceId = randomUUID();
+      after(async () => {
+        try {
+          await runVerificationAgent({
+            signal,
+            asset_symbol: asset?.symbol ?? signal.asset_id,
+            catalyst_iso: event
+              ? new Date(event.release_time).toISOString()
+              : new Date(signal.fired_at).toISOString(),
+            catalyst_title: event?.title ?? "(no event title)",
+            catalyst_author: event?.author ?? null,
+            traceId,
+          });
+        } catch (err) {
+          console.error("[demo] verification agent failed:", err);
+        }
       });
-      return NextResponse.json({
-        ok: !r.error,
-        mode,
-        trace_id: r.trace_id,
-        rounds: r.rounds,
-        cost_usd: r.cost_usd,
-        verdict: r.verdict,
-        error: r.error,
-      });
+      return NextResponse.json({ ok: true, mode, trace_id: traceId });
     }
 
-    // mode === "debate"
-    const r = await runDebateAgent({
-      signal,
-      asset_symbol: asset?.symbol ?? signal.asset_id,
-      catalyst_iso: event
-        ? new Date(event.release_time).toISOString()
-        : new Date(signal.fired_at).toISOString(),
-      catalyst_title: event?.title ?? "(no event title)",
-      catalyst_author: event?.author ?? null,
+    // mode === "debate" — debate spawns multiple sub-traces internally
+    // (bull, bear, synthesizer). For the live UI we just kick it off
+    // and let the client refresh the whole trace list when done; the
+    // first trace it sees comes from the synthesizer once complete.
+    after(async () => {
+      try {
+        await runDebateAgent({
+          signal,
+          asset_symbol: asset?.symbol ?? signal.asset_id,
+          catalyst_iso: event
+            ? new Date(event.release_time).toISOString()
+            : new Date(signal.fired_at).toISOString(),
+          catalyst_title: event?.title ?? "(no event title)",
+          catalyst_author: event?.author ?? null,
+        });
+      } catch (err) {
+        console.error("[demo] debate agent failed:", err);
+      }
     });
-    return NextResponse.json({
-      ok: !r.error,
-      mode,
-      bull_trace_id: r.bull_trace_id,
-      bear_trace_id: r.bear_trace_id,
-      synthesizer_trace_id: r.synthesizer_trace_id,
-      synthesis: r.synthesis,
-      cost_usd: r.total_cost_usd,
-      error: r.error,
-    });
+    return NextResponse.json({ ok: true, mode });
   }
 
   return NextResponse.json(
