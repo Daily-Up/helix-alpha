@@ -12,6 +12,7 @@ import {
 import { stripTechnicalScoring } from "@/lib/format/reasoning";
 import { cn } from "@/components/ui/cn";
 import { ExecuteLiveButton } from "@/components/sodex/ExecuteLiveButton";
+import { isPublicMode } from "@/lib/public-mode";
 
 const TEXT_BRAND = "#ede4d3";
 const TEXT_MUTED = "#8a857a";
@@ -548,42 +549,48 @@ export function SignalCard({
       {/* Actions */}
       {isPending && !isInfoOnly && !building ? (
         <div className="mt-4 flex flex-wrap items-center gap-3">
-          <button
-            onClick={() => {
-              setError(null);
-              setBuilding(true);
-            }}
-            disabled={busy !== null || venueBlocksExecute}
-            title={
-              venueBlocksExecute
-                ? "Shorts must be filled on a perp market. This asset has no perp pair listed on SoDEX."
-                : undefined
-            }
-            className="font-[var(--font-jetbrains-mono)] transition-all"
-            style={{
-              fontSize: "10px",
-              fontWeight: 600,
-              letterSpacing: "0.18em",
-              padding: "7px 16px",
-              border: `1px solid ${busy === null && !venueBlocksExecute ? POSITIVE : BORDER_QUIET}`,
-              color:
-                busy === null && !venueBlocksExecute ? POSITIVE : TEXT_DIM,
-              background:
-                busy === null && !venueBlocksExecute
-                  ? "rgba(92, 201, 122, 0.06)"
-                  : "transparent",
-              cursor:
+          {/* Paper-trade button hidden in public mode — it mutates the
+              global signal status (marks it executed for ALL viewers),
+              which would let the first judge to click "win" the signal.
+              Live execute via wallet is per-wallet and stays visible. */}
+          {!isPublicMode() ? (
+            <button
+              onClick={() => {
+                setError(null);
+                setBuilding(true);
+              }}
+              disabled={busy !== null || venueBlocksExecute}
+              title={
                 venueBlocksExecute
-                  ? "not-allowed"
-                  : busy === null
-                    ? "pointer"
-                    : "wait",
-              textTransform: "uppercase",
-              borderRadius: "2px",
-            }}
-          >
-            Execute on SoDEX →
-          </button>
+                  ? "Shorts must be filled on a perp market. This asset has no perp pair listed on SoDEX."
+                  : undefined
+              }
+              className="font-[var(--font-jetbrains-mono)] transition-all"
+              style={{
+                fontSize: "10px",
+                fontWeight: 600,
+                letterSpacing: "0.18em",
+                padding: "7px 16px",
+                border: `1px solid ${busy === null && !venueBlocksExecute ? POSITIVE : BORDER_QUIET}`,
+                color:
+                  busy === null && !venueBlocksExecute ? POSITIVE : TEXT_DIM,
+                background:
+                  busy === null && !venueBlocksExecute
+                    ? "rgba(92, 201, 122, 0.06)"
+                    : "transparent",
+                cursor:
+                  venueBlocksExecute
+                    ? "not-allowed"
+                    : busy === null
+                      ? "pointer"
+                      : "wait",
+                textTransform: "uppercase",
+                borderRadius: "2px",
+              }}
+            >
+              Execute on SoDEX →
+            </button>
+          ) : null}
           {venueBlocksExecute ? (
             <span
               className="font-[var(--font-inter)]"
@@ -610,24 +617,28 @@ export function SignalCard({
               }}
             />
           ) : null}
-          <button
-            onClick={onDismiss}
-            disabled={busy !== null}
-            className="font-[var(--font-jetbrains-mono)] transition-all"
-            style={{
-              fontSize: "10px",
-              fontWeight: 500,
-              letterSpacing: "0.18em",
-              padding: "7px 16px",
-              border: "none",
-              color: TEXT_DIM,
-              background: "transparent",
-              cursor: busy === null ? "pointer" : "wait",
-              textTransform: "uppercase",
-            }}
-          >
-            Dismiss
-          </button>
+          {/* Dismiss also mutates the global signal row — hide in
+              public mode so one judge can't dismiss everyone's view. */}
+          {!isPublicMode() ? (
+            <button
+              onClick={onDismiss}
+              disabled={busy !== null}
+              className="font-[var(--font-jetbrains-mono)] transition-all"
+              style={{
+                fontSize: "10px",
+                fontWeight: 500,
+                letterSpacing: "0.18em",
+                padding: "7px 16px",
+                border: "none",
+                color: TEXT_DIM,
+                background: "transparent",
+                cursor: busy === null ? "pointer" : "wait",
+                textTransform: "uppercase",
+              }}
+            >
+              Dismiss
+            </button>
+          ) : null}
           {error ? (
             <span
               className="font-[var(--font-inter)]"
