@@ -527,16 +527,58 @@ export function SignalAuditPage({ signalId }: { signalId: string }) {
         <RunLiveAgentButton mode="debate" signal_id={s.id} />
       </div>
 
-      {/* Every agent trace associated with this signal */}
-      {data.agent_traces && data.agent_traces.length > 0 ? (
-        <div className="flex flex-col gap-4">
-          {data.agent_traces.map((t) => (
-            <AgentTraceCard key={t.id} trace={t} />
-          ))}
-        </div>
-      ) : data.agent_trace ? (
-        <AgentTraceCard trace={data.agent_trace} />
-      ) : null}
+      {/* Agent traces — show only the LATEST run per agent type.
+          Re-running an agent stacks new traces in the DB; rendering all
+          of them turned the audit page into a 6+ section wall. We pick
+          the most recent OK run per agent (research / verification /
+          debate-synth / etc.) and skip traces that have been stuck
+          "running" for >5 minutes (those are crashed/interrupted). */}
+      {(() => {
+        const traces = data.agent_traces ?? (data.agent_trace ? [data.agent_trace] : []);
+        if (traces.length === 0) return null;
+        const STUCK_AFTER_MS = 5 * 60 * 1000;
+        const now = Date.now();
+        const usable = traces.filter(
+          (t) =>
+            !(
+              t.status === "running" &&
+              t.started_at < now - STUCK_AFTER_MS
+            ),
+        );
+        // Keep the latest per agent_name.
+        const latestByAgent = new Map<string, AgentTraceData>();
+        for (const t of usable) {
+          const prev = latestByAgent.get(t.agent_name);
+          if (!prev || t.started_at > prev.started_at) {
+            latestByAgent.set(t.agent_name, t);
+          }
+        }
+        // Render in a deterministic order: research → verification →
+        // debate-bull → debate-bear → debate-synth → anything else.
+        const order = [
+          "research",
+          "verification",
+          "debate-bull",
+          "debate-bear",
+          "debate-synth",
+        ];
+        const ordered = [
+          ...order
+            .map((n) => latestByAgent.get(n))
+            .filter((x): x is AgentTraceData => !!x),
+          ...[...latestByAgent.entries()]
+            .filter(([n]) => !order.includes(n))
+            .map(([, t]) => t),
+        ];
+        if (ordered.length === 0) return null;
+        return (
+          <div className="flex flex-col gap-4">
+            {ordered.map((t) => (
+              <AgentTraceCard key={t.id} trace={t} />
+            ))}
+          </div>
+        );
+      })()}
 
       {/* Secondary assets */}
       {data.secondary.length > 0 ? (

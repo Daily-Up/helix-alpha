@@ -302,7 +302,22 @@ function Conclusion({ step }: { step: AgentStepFinal }) {
       ? humanizeReasoning(out.reasoning)
       : null;
 
-  if (out.verdict && typeof out.verdict === "string") {
+  const decision =
+    (typeof out.decision === "string" && out.decision) ||
+    (typeof out.verdict === "string" && out.verdict) ||
+    null;
+  if (decision) {
+    const decisionColor =
+      decision === "confirm"
+        ? POSITIVE
+        : decision === "kill"
+          ? NEGATIVE
+          : decision === "downgrade"
+            ? ACCENT
+            : TEXT_BRAND;
+    const redFlags = Array.isArray(out.red_flags)
+      ? out.red_flags.filter((x): x is string => typeof x === "string")
+      : [];
     return (
       <>
         <h2
@@ -312,11 +327,28 @@ function Conclusion({ step }: { step: AgentStepFinal }) {
             fontWeight: 400,
             lineHeight: 1.2,
             letterSpacing: "-0.02em",
-            color: TEXT_BRAND,
+            color: decisionColor,
           }}
         >
-          {titleCase(out.verdict)}
+          {titleCase(decision)}
         </h2>
+        {redFlags.length > 0 ? (
+          <div
+            className="font-[var(--font-jetbrains-mono)] flex flex-wrap items-baseline gap-x-4 gap-y-1"
+            style={{
+              marginTop: "12px",
+              fontSize: "11px",
+              letterSpacing: "0.16em",
+              color: NEGATIVE,
+              textTransform: "uppercase",
+            }}
+          >
+            <span style={{ color: TEXT_DIM }}>Red flags</span>
+            {redFlags.map((f, i) => (
+              <span key={i}>{f.replace(/_/g, " ")}</span>
+            ))}
+          </div>
+        ) : null}
         {reasoning ? (
           <p
             className="font-[var(--font-inter)]"
