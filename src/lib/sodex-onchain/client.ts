@@ -33,6 +33,8 @@ interface SodexResponse<T> {
   code: number;
   timestamp: number;
   data?: T;
+  /** Some endpoints use `msg`, others `error`. We surface either. */
+  msg?: string;
   error?: string;
 }
 
@@ -151,10 +153,16 @@ export async function checkFaucetWhitelist(
 async function handle<T>(res: Response): Promise<T> {
   const json = (await res.json()) as SodexResponse<T>;
   if (json.code !== 0) {
-    throw new Error(json.error ?? `SoDEX error code ${json.code}`);
+    // Surface whichever message field the endpoint used. Helpful
+    // distinguishing "Nonce out of window" vs "invalid signature"
+    // vs "ecrecover address mismatch" etc.
+    const msg = json.msg ?? json.error ?? `code ${json.code}`;
+    throw new Error(msg);
   }
   if (json.data === undefined) {
-    throw new Error("SoDEX response missing data");
+    // /exchange endpoints often return only {code:0,msg:"success"}
+    // with no data field — accept that as a success.
+    return undefined as T;
   }
   return json.data;
 }
