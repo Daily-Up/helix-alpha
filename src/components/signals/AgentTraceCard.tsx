@@ -17,6 +17,7 @@
 
 import { useMemo, useState } from "react";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
+import { summarizeToolCall } from "@/components/agents/tool-summaries";
 
 interface AgentStepThinking {
   type: "thinking";
@@ -247,15 +248,17 @@ function EvidenceRow({
   call: AgentStepToolCall;
   count: number;
 }) {
-  const [open, setOpen] = useState(false);
+  const [showRaw, setShowRaw] = useState(false);
   const errored = !!call.error;
+  const summary = useMemo(
+    () => summarizeToolCall(call.tool, call.input, call.output),
+    [call.tool, call.input, call.output],
+  );
+  const hasSummary = !!summary.asked || !!summary.found;
+
   return (
-    <li className="border-t border-line first:border-t-0">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-baseline gap-3 py-2 text-left text-sm transition-colors hover:bg-surface-2/50"
-      >
+    <li className="border-t border-line first:border-t-0 py-2">
+      <div className="flex items-baseline gap-3 text-sm">
         <span
           aria-hidden
           className="inline-block h-1.5 w-1.5 rounded-full"
@@ -273,18 +276,49 @@ function EvidenceRow({
         <span className="ml-auto tabular text-[11px] text-fg-dim">
           {call.duration_ms}ms
         </span>
-        <span className="text-[10px] text-fg-dim">{open ? "▾" : "▸"}</span>
-      </button>
-      {open ? (
-        <div className="flex flex-col gap-2 px-4 pb-3 pt-1">
-          <PayloadDisclosure label="Asked for" value={call.input} />
-          <PayloadDisclosure
-            label={errored ? "Error" : "Found"}
-            value={errored ? call.error : call.output}
-            tone={errored ? "negative" : "default"}
-          />
+      </div>
+
+      {hasSummary || errored ? (
+        <div className="ml-5 mt-1 flex flex-col gap-0.5 text-xs">
+          {summary.asked ? (
+            <div className="flex gap-2 leading-relaxed">
+              <span className="shrink-0 text-fg-dim">Asked for:</span>
+              <span className="text-fg-muted">{summary.asked}</span>
+            </div>
+          ) : null}
+          {errored ? (
+            <div className="flex gap-2 leading-relaxed">
+              <span className="shrink-0 text-fg-dim">Error:</span>
+              <span className="text-negative">{call.error}</span>
+            </div>
+          ) : summary.found ? (
+            <div className="flex gap-2 leading-relaxed">
+              <span className="shrink-0 text-fg-dim">Found:</span>
+              <span className="text-fg">{summary.found}</span>
+            </div>
+          ) : null}
         </div>
       ) : null}
+
+      <div className="ml-5 mt-1">
+        <button
+          type="button"
+          onClick={() => setShowRaw((v) => !v)}
+          className="text-[10px] text-fg-dim transition-colors hover:text-fg-muted"
+        >
+          {showRaw ? "▾ hide raw" : "▸ raw payload"}
+        </button>
+        {showRaw ? (
+          <div className="mt-1 flex flex-col gap-2">
+            <PayloadDisclosure label="Input" value={call.input} />
+            <PayloadDisclosure
+              label={errored ? "Error" : "Output"}
+              value={errored ? call.error : call.output}
+              tone={errored ? "negative" : "default"}
+            />
+          </div>
+        ) : null}
+      </div>
     </li>
   );
 }
