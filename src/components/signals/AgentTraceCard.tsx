@@ -4,19 +4,15 @@
  * Agent trace card for the /signal/{id} audit page.
  *
  * Renders a completed agent trace in the same editorial style as the
- * live trace shown when judges click "Run live agent" — leads with
- * the conclusion, summarizes reasoning in prose with humanized tool
- * names, and tucks evidence + raw payloads behind a quiet disclosure.
+ * /briefing hero (Fraunces serif headline, generous spacing,
+ * hairline dividers, JetBrains Mono small-caps kickers).
  *
- * Why this matters for the product story:
- *   The Wave 1 audit page showed "Claude said this." The Wave 2 audit
- *   page shows "the agent looked at outlets X, Y, Z, queried base
- *   rates, then concluded this." That's the moat — chat-based
- *   competitors structurally can't surface this level of accountability.
+ * Shares its layout with `LiveAgentTrace` so the live-typing view
+ * judges see while an agent is running, and the historical view
+ * persisted on the signal audit page, look the same.
  */
 
 import { useMemo, useState } from "react";
-import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { summarizeToolCall } from "@/components/agents/tool-summaries";
 
 interface AgentStepThinking {
@@ -59,8 +55,17 @@ export interface AgentTraceData {
   error: string | null;
 }
 
+// ─── Design tokens (match BriefingPage) ─────────────────────────────
+const TEXT_BRAND = "#ede4d3";
+const TEXT_MUTED = "#8a857a";
+const TEXT_DIM = "#5d584e";
+const ACCENT = "#d97757";
+const POSITIVE = "#5cc97a";
+const NEGATIVE = "#e06c66";
+const BORDER_QUIET = "rgba(237, 228, 211, 0.08)";
+
 const TOOL_LABEL: Record<string, string> = {
-  search_outlet_coverage: "Outlet coverage check",
+  search_outlet_coverage: "Outlet coverage",
   query_asset_history: "Asset history",
   query_event_type_stats: "Event-type statistics",
   fetch_full_article: "Full article",
@@ -96,6 +101,7 @@ function titleCase(s: string): string {
 export function AgentTraceCard({ trace }: { trace: AgentTraceData }) {
   const durationMs =
     trace.finished_at != null ? trace.finished_at - trace.started_at : null;
+  const durationS = durationMs != null ? (durationMs / 1000).toFixed(1) : null;
 
   const final = useMemo(
     () =>
@@ -112,43 +118,112 @@ export function AgentTraceCard({ trace }: { trace: AgentTraceData }) {
 
   const agentLabel =
     trace.agent_name === "verification"
-      ? "verification agent"
+      ? "Verification agent"
       : trace.agent_name === "debate"
-        ? "debate agent"
-        : "research agent";
+        ? "Debate agent"
+        : "Research agent";
 
   return (
-    <Card>
-      <CardHeader className="flex-col items-stretch gap-1">
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <CardTitle>Agent decision</CardTitle>
-          <span className="text-[11px] uppercase tracking-wider text-fg-dim">
-            {agentLabel}
-          </span>
-          {durationMs != null ? (
-            <span className="ml-auto text-[11px] tabular text-fg-dim">
-              {(durationMs / 1000).toFixed(1)}s
-            </span>
-          ) : null}
-        </div>
-      </CardHeader>
+    <article
+      className="relative flex flex-col"
+      style={{
+        paddingLeft: "26px",
+        paddingRight: "26px",
+        paddingTop: "32px",
+        paddingBottom: "32px",
+        borderTop: `1px solid ${BORDER_QUIET}`,
+        borderBottom: `1px solid ${BORDER_QUIET}`,
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          position: "absolute",
+          left: 0,
+          top: "32px",
+          bottom: "32px",
+          width: "2px",
+          background: ACCENT,
+        }}
+      />
 
-      <CardBody className="flex flex-col gap-4">
-        {final ? <Conclusion step={final} /> : null}
-        {toolCalls.length > 0 ? <EvidenceTrail calls={toolCalls} /> : null}
+      <Kicker label={agentLabel} status={trace.status} durationS={durationS} />
 
-        {trace.error ? (
-          <div className="rounded border border-negative/30 bg-negative/10 p-2 text-xs text-negative">
-            <span className="font-medium">Agent error: </span>
-            {trace.error}
-          </div>
-        ) : null}
-      </CardBody>
-    </Card>
+      {final ? <Conclusion step={final} /> : null}
+
+      {toolCalls.length > 0 ? <Evidence calls={toolCalls} /> : null}
+
+      {trace.error ? (
+        <p
+          className="font-[var(--font-inter)]"
+          style={{
+            fontSize: "12px",
+            color: NEGATIVE,
+            marginTop: "20px",
+            fontStyle: "italic",
+          }}
+        >
+          Agent error — {trace.error}
+        </p>
+      ) : null}
+    </article>
   );
 }
 
-// ─── Conclusion ────────────────────────────────────────────────────
+function Kicker({
+  label,
+  status,
+  durationS,
+}: {
+  label: string;
+  status: "running" | "ok" | "error";
+  durationS: string | null;
+}) {
+  const statusColor =
+    status === "ok" ? POSITIVE : status === "error" ? NEGATIVE : ACCENT;
+  const statusLabel =
+    status === "ok" ? "Complete" : status === "error" ? "Error" : "Live";
+  return (
+    <div
+      className="flex items-baseline gap-3 flex-wrap"
+      style={{ marginBottom: "20px" }}
+    >
+      <span
+        className="font-[var(--font-jetbrains-mono)]"
+        style={{
+          fontSize: "10px",
+          fontWeight: 600,
+          letterSpacing: "0.22em",
+          color: ACCENT,
+          textTransform: "uppercase",
+        }}
+      >
+        {label}
+      </span>
+      <span style={{ color: TEXT_DIM, fontSize: "11px" }}>·</span>
+      <span
+        className="font-[var(--font-jetbrains-mono)]"
+        style={{
+          fontSize: "10px",
+          fontWeight: 600,
+          letterSpacing: "0.22em",
+          color: statusColor,
+          textTransform: "uppercase",
+        }}
+      >
+        {statusLabel}
+      </span>
+      {durationS ? (
+        <span
+          className="font-[var(--font-jetbrains-mono)] tabular-nums ml-auto"
+          style={{ fontSize: "11px", color: TEXT_MUTED }}
+        >
+          {durationS}s
+        </span>
+      ) : null}
+    </div>
+  );
+}
 
 function Conclusion({ step }: { step: AgentStepFinal }) {
   const out = step.output as Record<string, unknown> | null;
@@ -160,88 +235,136 @@ function Conclusion({ step }: { step: AgentStepFinal }) {
 
   if (out.verdict && typeof out.verdict === "string") {
     return (
-      <div>
-        <div className="text-[10px] uppercase tracking-wider text-fg-dim">
-          Verdict
-        </div>
-        <div className="mt-1 font-mono text-base text-fg">
+      <>
+        <h2
+          className="font-[var(--font-fraunces)]"
+          style={{
+            fontSize: "32px",
+            fontWeight: 400,
+            lineHeight: 1.2,
+            letterSpacing: "-0.02em",
+            color: TEXT_BRAND,
+          }}
+        >
           {titleCase(out.verdict)}
-        </div>
+        </h2>
         {reasoning ? (
-          <p className="mt-3 text-sm leading-relaxed text-fg-muted">
+          <p
+            className="font-[var(--font-inter)]"
+            style={{
+              fontSize: "15px",
+              lineHeight: 1.7,
+              color: TEXT_MUTED,
+              marginTop: "20px",
+              maxWidth: "70ch",
+            }}
+          >
             {reasoning}
           </p>
         ) : null}
-      </div>
+      </>
     );
   }
 
-  const fields: Array<{ label: string; value: string }> = [
-    { label: "Event type", value: titleCase(String(out.event_type ?? "—")) },
-    { label: "Sentiment", value: titleCase(String(out.sentiment ?? "—")) },
-    { label: "Severity", value: titleCase(String(out.severity ?? "—")) },
-    {
-      label: "Confidence",
-      value:
-        typeof out.confidence === "number"
-          ? `${(out.confidence * 100).toFixed(0)}%`
-          : "—",
-    },
-  ];
+  const eventType = String(out.event_type ?? "—");
+  const sentiment = String(out.sentiment ?? "—");
+  const severity = String(out.severity ?? "—");
+  const conf =
+    typeof out.confidence === "number"
+      ? `${(out.confidence * 100).toFixed(0)}%`
+      : null;
+  const sentimentColor =
+    sentiment === "positive"
+      ? POSITIVE
+      : sentiment === "negative"
+        ? NEGATIVE
+        : TEXT_MUTED;
 
   return (
-    <div>
-      <div className="grid grid-cols-2 gap-y-3 md:grid-cols-4">
-        {fields.map((f) => (
-          <div key={f.label}>
-            <div className="text-[10px] uppercase tracking-wider text-fg-dim">
-              {f.label}
-            </div>
-            <div className="mt-1 font-mono text-sm text-fg">{f.value}</div>
-          </div>
-        ))}
+    <>
+      <h2
+        className="font-[var(--font-fraunces)]"
+        style={{
+          fontSize: "28px",
+          fontWeight: 400,
+          lineHeight: 1.22,
+          letterSpacing: "-0.02em",
+          color: TEXT_BRAND,
+        }}
+      >
+        {titleCase(eventType)}{" "}
+        <span style={{ color: sentimentColor }}>· {titleCase(sentiment)}</span>
+      </h2>
+      <div
+        className="flex flex-wrap items-baseline gap-x-6 gap-y-2 font-[var(--font-jetbrains-mono)]"
+        style={{
+          marginTop: "12px",
+          fontSize: "11px",
+          letterSpacing: "0.16em",
+          color: TEXT_DIM,
+          textTransform: "uppercase",
+        }}
+      >
+        <span>Severity {titleCase(severity)}</span>
+        {conf ? <span style={{ color: ACCENT }}>{conf} confidence</span> : null}
       </div>
       {reasoning ? (
-        <p className="mt-4 text-sm leading-relaxed text-fg-muted">
+        <p
+          className="font-[var(--font-inter)]"
+          style={{
+            fontSize: "15px",
+            lineHeight: 1.7,
+            color: TEXT_MUTED,
+            marginTop: "24px",
+            maxWidth: "70ch",
+          }}
+        >
           {reasoning}
         </p>
       ) : null}
-    </div>
+    </>
   );
 }
 
-// ─── Evidence trail ────────────────────────────────────────────────
-
-function EvidenceTrail({ calls }: { calls: AgentStepToolCall[] }) {
-  // Group multiple calls to the same tool together.
+function Evidence({ calls }: { calls: AgentStepToolCall[] }) {
   const grouped = useMemo(() => {
-    const map = new Map<
-      string,
-      { call: AgentStepToolCall; count: number }
-    >();
+    const out: Array<{ call: AgentStepToolCall; count: number }> = [];
     for (const c of calls) {
-      const ex = map.get(c.tool);
-      if (ex) ex.count += 1;
-      else map.set(c.tool, { call: c, count: 1 });
+      const last = out[out.length - 1];
+      if (last && last.call.tool === c.tool) {
+        last.count += 1;
+        last.call = c;
+      } else {
+        out.push({ call: c, count: 1 });
+      }
     }
-    return [...map.values()];
+    return out;
   }, [calls]);
 
   return (
-    <div>
-      <div className="mb-2 text-[10px] uppercase tracking-wider text-fg-dim">
+    <section style={{ marginTop: "40px" }}>
+      <div
+        className="font-[var(--font-jetbrains-mono)]"
+        style={{
+          fontSize: "10px",
+          fontWeight: 600,
+          letterSpacing: "0.22em",
+          color: TEXT_DIM,
+          textTransform: "uppercase",
+        }}
+      >
         Evidence consulted
       </div>
-      <ul className="flex flex-col">
+      <ul className="flex flex-col" style={{ marginTop: "16px" }}>
         {grouped.map((g, i) => (
-          <EvidenceRow key={i} call={g.call} count={g.count} />
+          <EvidenceItem key={i} call={g.call} count={g.count} />
         ))}
       </ul>
-    </div>
+    </section>
   );
 }
 
-function EvidenceRow({
+function EvidenceItem({
   call,
   count,
 }: {
@@ -254,76 +377,124 @@ function EvidenceRow({
     () => summarizeToolCall(call.tool, call.input, call.output),
     [call.tool, call.input, call.output],
   );
-  const hasSummary = !!summary.asked || !!summary.found;
 
   return (
-    <li className="border-t border-line first:border-t-0 py-2">
-      <div className="flex items-baseline gap-3 text-sm">
-        <span
-          aria-hidden
-          className="inline-block h-1.5 w-1.5 rounded-full"
+    <li
+      style={{
+        borderTop: `1px solid ${BORDER_QUIET}`,
+        paddingTop: "16px",
+        paddingBottom: "16px",
+      }}
+    >
+      <div className="flex items-baseline gap-3 flex-wrap">
+        <h3
+          className="font-[var(--font-fraunces)]"
           style={{
-            background: errored ? "#e06c66" : "#5cc97a",
-            opacity: 0.8,
+            fontSize: "16px",
+            fontWeight: 400,
+            color: errored ? NEGATIVE : TEXT_BRAND,
+            letterSpacing: "-0.005em",
           }}
-        />
-        <span className={errored ? "text-negative" : "text-fg"}>
+        >
           {humanizeTool(call.tool)}
           {count > 1 ? (
-            <span className="ml-2 text-xs text-fg-dim">×{count}</span>
+            <span
+              className="font-[var(--font-jetbrains-mono)]"
+              style={{
+                marginLeft: "10px",
+                fontSize: "11px",
+                color: TEXT_DIM,
+                letterSpacing: "0.06em",
+              }}
+            >
+              ×{count}
+            </span>
           ) : null}
-        </span>
-        <span className="ml-auto tabular text-[11px] text-fg-dim">
+        </h3>
+        <span
+          className="font-[var(--font-jetbrains-mono)] tabular-nums ml-auto"
+          style={{ fontSize: "10px", color: TEXT_DIM }}
+        >
           {call.duration_ms}ms
         </span>
       </div>
 
-      {hasSummary || errored ? (
-        <div className="ml-5 mt-1 flex flex-col gap-0.5 text-xs">
-          {summary.asked ? (
-            <div className="flex gap-2 leading-relaxed">
-              <span className="shrink-0 text-fg-dim">Asked for:</span>
-              <span className="text-fg-muted">{summary.asked}</span>
-            </div>
-          ) : null}
-          {errored ? (
-            <div className="flex gap-2 leading-relaxed">
-              <span className="shrink-0 text-fg-dim">Error:</span>
-              <span className="text-negative">{call.error}</span>
-            </div>
-          ) : summary.found ? (
-            <div className="flex gap-2 leading-relaxed">
-              <span className="shrink-0 text-fg-dim">Found:</span>
-              <span className="text-fg">{summary.found}</span>
-            </div>
-          ) : null}
-        </div>
+      {summary.asked ? (
+        <p
+          className="font-[var(--font-inter)]"
+          style={{
+            fontSize: "13px",
+            lineHeight: 1.65,
+            color: TEXT_MUTED,
+            marginTop: "8px",
+            maxWidth: "70ch",
+          }}
+        >
+          <span style={{ color: TEXT_DIM }}>Asked for —&nbsp;</span>
+          {summary.asked}
+        </p>
       ) : null}
 
-      <div className="ml-5 mt-1">
-        <button
-          type="button"
-          onClick={() => setShowRaw((v) => !v)}
-          className="text-[10px] text-fg-dim transition-colors hover:text-fg-muted"
+      {errored ? (
+        <p
+          className="font-[var(--font-inter)]"
+          style={{
+            fontSize: "13px",
+            lineHeight: 1.65,
+            color: NEGATIVE,
+            marginTop: "4px",
+            maxWidth: "70ch",
+            fontStyle: "italic",
+          }}
         >
-          {showRaw ? "▾ hide raw" : "▸ raw payload"}
-        </button>
-        {showRaw ? (
-          <div className="mt-1 flex flex-col gap-2">
-            <PayloadDisclosure label="Input" value={call.input} />
-            <PayloadDisclosure
-              label={errored ? "Error" : "Output"}
-              value={errored ? call.error : call.output}
-              tone={errored ? "negative" : "default"}
-            />
-          </div>
-        ) : null}
-      </div>
+          <span style={{ color: TEXT_DIM }}>Error —&nbsp;</span>
+          {call.error}
+        </p>
+      ) : summary.found ? (
+        <p
+          className="font-[var(--font-inter)]"
+          style={{
+            fontSize: "13px",
+            lineHeight: 1.65,
+            color: TEXT_BRAND,
+            marginTop: "4px",
+            maxWidth: "70ch",
+          }}
+        >
+          <span style={{ color: TEXT_DIM }}>Found —&nbsp;</span>
+          {summary.found}
+        </p>
+      ) : null}
+
+      <button
+        type="button"
+        onClick={() => setShowRaw((v) => !v)}
+        className="font-[var(--font-jetbrains-mono)] transition-colors"
+        style={{
+          marginTop: "8px",
+          fontSize: "9.5px",
+          letterSpacing: "0.18em",
+          textTransform: "uppercase",
+          color: TEXT_DIM,
+        }}
+      >
+        {showRaw ? "Hide raw payload" : "Inspect raw payload"}
+      </button>
+      {showRaw ? (
+        <div style={{ marginTop: "10px" }} className="flex flex-col gap-2">
+          <RawBlock label="Input" value={call.input} />
+          <RawBlock
+            label={errored ? "Error" : "Output"}
+            value={errored ? call.error : call.output}
+            tone={errored ? "negative" : "default"}
+          />
+        </div>
+      ) : null}
     </li>
   );
 }
 
-function PayloadDisclosure({
+function RawBlock({
   label,
   value,
   tone = "default",
@@ -336,15 +507,31 @@ function PayloadDisclosure({
     typeof value === "string" ? value : JSON.stringify(value, null, 2);
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-wider text-fg-dim">
+      <div
+        className="font-[var(--font-jetbrains-mono)]"
+        style={{
+          fontSize: "9px",
+          fontWeight: 500,
+          letterSpacing: "0.18em",
+          color: TEXT_DIM,
+          textTransform: "uppercase",
+          marginBottom: "6px",
+        }}
+      >
         {label}
       </div>
       <pre
-        className={
-          tone === "negative"
-            ? "mt-1 max-h-72 overflow-auto rounded border border-line bg-bg p-2 font-mono text-[10px] text-negative"
-            : "mt-1 max-h-72 overflow-auto rounded border border-line bg-bg p-2 font-mono text-[10px] text-fg-muted"
-        }
+        style={{
+          fontSize: "10.5px",
+          lineHeight: 1.55,
+          maxHeight: "260px",
+          overflow: "auto",
+          padding: "10px 12px",
+          border: `1px solid ${BORDER_QUIET}`,
+          background: "rgba(237, 228, 211, 0.02)",
+          color: tone === "negative" ? NEGATIVE : TEXT_MUTED,
+          fontFamily: "var(--font-jetbrains-mono), monospace",
+        }}
       >
         {text}
       </pre>
