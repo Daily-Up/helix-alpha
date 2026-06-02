@@ -221,32 +221,36 @@ export async function signAddAPIKeyAction(opts: {
     );
   }
 
-  // For the universal /exchange endpoint (where addAPIKey goes), the
-  // signature is submitted INSIDE the JSON body — no X-API-Sign
-  // header, and the 0x01 prefix is NOT used. We still normalize the
-  // v byte: some wallets return v ∈ {0, 1} (EIP-1559 compact form),
-  // SoDEX's ecrecover wants the legacy v ∈ {27, 28}.
-  const apiSign = normalizeVByte(signature);
+  // SoDEX's universal signature format (reverse-engineered from the
+  // bundle's `s(sig, type)` helper):
+  //   1. Take raw 65-byte sig from eth_signTypedData_v4
+  //   2. If v ∈ {27, 28} (legacy form), SUBTRACT 27 to get {0, 1}
+  //   3. Prepend a type byte indicating the signing scheme:
+  //        0x01 = ExchangeAction       (trade orders)
+  //        0x02 = UserSignedAddAPIKey  (this path)
+  //   Final length = 66 bytes (1 prefix + 65 sig).
+  const apiSign = wrapUniversalSignature(signature, 0x02);
   return { apiSign, nonce, walletChainId };
 }
 
 /**
- * Normalize the v (recovery id) byte at the end of an ECDSA
- * signature. If the wallet returned v ∈ {0, 1}, add 27 to convert
- * to the legacy {27, 28} form some chains/services require.
+ * Wrap a 65-byte ECDSA signature into SoDEX's universal envelope:
+ *   - normalize v: legacy 27/28 → recovery-id 0/1
+ *   - prepend type byte indicating the signing scheme
  *
- * Input:  0x{r:64hex}{s:64hex}{v:2hex}   (130 hex chars after 0x)
- * Output: same length, only v adjusted.
+ * Input:  0x{r:64hex}{s:64hex}{v:2hex}     (130 hex chars after 0x)
+ * Output: 0x{type:2hex}{r:64hex}{s:64hex}{v:2hex}  (132 hex after 0x)
  */
-function normalizeVByte(sig: Hex): Hex {
+function wrapUniversalSignature(sig: Hex, typeByte: number): Hex {
   if (sig.length !== 132) return sig; // not a 65-byte sig — leave alone
-  const vHex = sig.slice(130);
-  const v = parseInt(vHex, 16);
-  if (v === 0 || v === 1) {
-    const normalized = (v + 27).toString(16).padStart(2, "0");
-    return (sig.slice(0, 130) + normalized) as Hex;
-  }
-  return sig;
+  const r = sig.slice(2, 66);
+  const s = sig.slice(66, 130);
+  const vHex = sig.slice(130, 132);
+  let v = parseInt(vHex, 16);
+  if (v >= 27) v -= 27; // legacy 27/28 → 0/1
+  const vNorm = v.toString(16).padStart(2, "0");
+  const typeHex = typeByte.toString(16).padStart(2, "0");
+  return (`0x${typeHex}${r}${s}${vNorm}`) as Hex;
 }
 
 /**
