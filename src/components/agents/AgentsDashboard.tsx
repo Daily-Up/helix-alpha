@@ -96,25 +96,19 @@ export function AgentsDashboard() {
       <BuildathonModeCard variant="agents" />
 
       {/* 24h overview */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
         <Stat label="Runs (24h)" value={data.totals_24h.runs.toString()} />
         <Stat
-          label="Total cost"
-          value={`$${data.totals_24h.cost_usd.toFixed(2)}`}
+          label="Successful"
+          value={data.per_agent_24h
+            .reduce((acc, a) => acc + a.ok, 0)
+            .toString()}
         />
         <Stat
-          label="Total tokens"
-          value={fmtCompact(
-            data.totals_24h.tokens_input + data.totals_24h.tokens_output,
-          )}
-        />
-        <Stat
-          label="Avg cost / run"
-          value={
-            data.totals_24h.runs > 0
-              ? `$${(data.totals_24h.cost_usd / data.totals_24h.runs).toFixed(4)}`
-              : "—"
-          }
+          label="Errored"
+          value={data.per_agent_24h
+            .reduce((acc, a) => acc + a.errored, 0)
+            .toString()}
         />
       </div>
 
@@ -133,18 +127,17 @@ export function AgentsDashboard() {
               {data.per_agent_24h.map((a) => (
                 <li
                   key={a.agent_name}
-                  className="grid grid-cols-[1fr_60px_60px_80px_100px] items-center gap-3 px-4 py-2 text-xs"
+                  className="grid grid-cols-[1fr_80px_80px_80px] items-center gap-3 px-4 py-2 text-xs"
                 >
                   <span className="font-mono font-medium text-fg">
                     {a.agent_name}
                   </span>
-                  <span className="text-fg-muted">{a.runs} run{a.runs === 1 ? "" : "s"}</span>
+                  <span className="text-fg-muted">
+                    {a.runs} run{a.runs === 1 ? "" : "s"}
+                  </span>
                   <span className="text-positive">{a.ok} ok</span>
                   <span className={a.errored > 0 ? "text-negative" : "text-fg-dim"}>
                     {a.errored} error{a.errored === 1 ? "" : "s"}
-                  </span>
-                  <span className="tabular text-right font-mono text-fg-muted">
-                    ${a.total_cost_usd.toFixed(4)}
                   </span>
                 </li>
               ))}
@@ -222,7 +215,7 @@ export function AgentsDashboard() {
                   (s) => s.type === "tool_call",
                 ).length;
                 const Row = (
-                  <div className="grid grid-cols-[80px_100px_1fr_80px_80px_100px] items-center gap-3 px-4 py-2 text-xs">
+                  <div className="grid grid-cols-[80px_100px_1fr_80px_120px] items-center gap-3 px-4 py-2 text-xs">
                     <Badge tone={t.status === "ok" ? "positive" : "negative"}>
                       {t.status}
                     </Badge>
@@ -232,9 +225,6 @@ export function AgentsDashboard() {
                     </span>
                     <span className="tabular text-right text-fg-muted">
                       {toolCalls} call{toolCalls === 1 ? "" : "s"}
-                    </span>
-                    <span className="tabular text-right text-fg-muted">
-                      ${t.cost_usd.toFixed(4)}
                     </span>
                     <span className="tabular text-right text-fg-dim">
                       {fmtRelative(t.started_at)} · {duration}

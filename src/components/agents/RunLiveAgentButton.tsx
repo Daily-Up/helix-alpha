@@ -28,10 +28,10 @@ const LABEL: Record<Props["mode"], string> = {
   debate: "Run live 3-agent debate",
 };
 
-const COST_HINT: Record<Props["mode"], string> = {
-  research: "~$0.04 · ~10s",
-  verification: "~$0.04 · ~10s",
-  debate: "~$0.12 · ~30s",
+const DURATION_HINT: Record<Props["mode"], string> = {
+  research: "~10s",
+  verification: "~10s",
+  debate: "~30s",
 };
 
 export function RunLiveAgentButton({
@@ -97,7 +97,7 @@ export function RunLiveAgentButton({
           <>
             ▶ {LABEL[mode]}{" "}
             <span className="text-[10px] font-normal text-fg-dim">
-              ({COST_HINT[mode]})
+              ({DURATION_HINT[mode]})
             </span>
           </>
         )}

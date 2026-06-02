@@ -90,10 +90,7 @@ export function AgentTraceCard({ trace }: { trace: AgentTraceData }) {
             </span>
           </div>
           <div className="text-[11px] text-fg-dim">
-            {trace.model ? `${trace.model} · ` : ""}
-            {durationMs != null ? `${(durationMs / 1000).toFixed(1)}s · ` : ""}
-            ${trace.cost_usd.toFixed(4)} ·{" "}
-            {trace.tokens_input + trace.tokens_output} tokens
+            {durationMs != null ? `${(durationMs / 1000).toFixed(1)}s` : ""}
           </div>
         </div>
         <p className="text-xs text-fg-muted">
