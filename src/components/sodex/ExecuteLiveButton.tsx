@@ -19,8 +19,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  DEFAULT_NETWORK,
-  NETWORK_STORAGE_KEY,
   SODEX_NETWORKS,
   type SodexNetwork,
 } from "@/lib/sodex-onchain/chains";
@@ -59,14 +57,8 @@ interface Props {
 }
 
 export function ExecuteLiveButton({ signal }: Props) {
-  // ── Network selection (from localStorage, controlled by the
-  // connect-sodex page) ──
-  const [network, setNetwork] = useState<SodexNetwork>(DEFAULT_NETWORK);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const stored = window.localStorage.getItem(NETWORK_STORAGE_KEY);
-    if (stored === "mainnet" || stored === "testnet") setNetwork(stored);
-  }, []);
+  // Mainnet only — testnet was scoped out.
+  const network: SodexNetwork = "mainnet";
 
   // ── Readiness ──
   const [ready, setReady] = useState(false);

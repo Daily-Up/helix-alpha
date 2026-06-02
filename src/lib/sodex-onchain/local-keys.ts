@@ -71,23 +71,7 @@ export function clearLocalKey(network: SodexNetwork): void {
 }
 
 /**
- * Mint a new keypair locally without registering it with SoDEX (the
- * "burner" flow used for testnet). The caller is expected to
- * `writeLocalKey` immediately so subsequent reads return it.
- */
-export function mintBurnerWallet(): StoredApiKey {
-  const privateKey = generatePrivateKey();
-  const account = privateKeyToAccount(privateKey);
-  return {
-    name: "", // empty signals burner mode at the call site
-    privateKey,
-    address: account.address,
-    createdAt: Date.now(),
-  };
-}
-
-/**
- * Mint a fresh keypair for a master+API-key flow. The caller is
+ * Mint a fresh keypair for the master+API-key flow. The caller is
  * expected to call `addAPIKey` on SoDEX with the returned `.address`,
  * THEN persist via `writeLocalKey`.
  */
@@ -106,11 +90,6 @@ export function mintNewApiKey(name: string): StoredApiKey {
 export function suggestKeyName(prefix = "helix"): string {
   const suffix = Math.random().toString(36).slice(2, 6);
   return `${prefix}-${suffix}`;
-}
-
-/** True when this stored key is a burner (no SoDEX API-key name). */
-export function isBurner(key: StoredApiKey | null): boolean {
-  return !!key && key.name === "";
 }
 
 // ─── Safety limits (per-network) ────────────────────────────────────

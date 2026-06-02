@@ -31,21 +31,17 @@ import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { cn } from "@/components/ui/cn";
 import {
-  DEFAULT_NETWORK,
-  NETWORK_STORAGE_KEY,
   SODEX_NETWORKS,
   type SodexNetwork,
 } from "@/lib/sodex-onchain/chains";
 import {
   addApiKey as sodexAddApiKey,
-  claimTestnetFaucet,
   getAccountState,
   listApiKeys,
   revokeApiKey as sodexRevokeApiKey,
 } from "@/lib/sodex-onchain/client";
 import {
   clearLocalKey,
-  mintBurnerWallet,
   mintNewApiKey,
   readLocalKey,
   readSafetyLimits,
@@ -61,331 +57,28 @@ import type {
 } from "@/lib/sodex-onchain/types";
 
 export function ConnectSodexPage() {
-  // ── Network state ──────────────────────────────────────────────
-  const [network, setNetwork] = useState<SodexNetwork>(DEFAULT_NETWORK);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const stored = window.localStorage.getItem(NETWORK_STORAGE_KEY);
-    if (stored === "mainnet" || stored === "testnet") setNetwork(stored);
-  }, []);
-  const setNetworkAndStore = useCallback((n: SodexNetwork) => {
-    setNetwork(n);
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(NETWORK_STORAGE_KEY, n);
-    }
-  }, []);
+  // Mainnet-only. SoDEX testnet was scoped out — its faucet doesn't
+  // credit fresh addresses without a manual bootstrap on
+  // testnet.sodex.com (the burner has no testnet ETH to call the
+  // deposit portal). The SodexNetwork type is retained for the
+  // executed_trades audit log so we can re-enable testnet later if
+  // SoDEX adds an account-bootstrap API.
+  const network: SodexNetwork = "mainnet";
 
   return (
     <div className="flex flex-col gap-5">
       <header className="flex flex-col gap-1">
         <h1 className="text-xl font-semibold text-fg">Connect SoDEX</h1>
         <p className="text-sm text-fg-muted">
-          Trade live on SoDEX with your own wallet and your own funds.
-          Helix never sees a private key — every secret lives only in
-          your browser. Orders go from your browser straight to SoDEX.
+          Trade live on SoDEX mainnet with your own wallet and your own
+          funds. Helix never sees a private key — your master wallet
+          signs addAPIKey once, and the resulting Helix-scoped key
+          stays in your browser. Revoke any time.
         </p>
       </header>
 
-      <NetworkPicker network={network} onChange={setNetworkAndStore} />
-
-      {/* Two distinct flows by network:
-          • Testnet → burner wallet. SoDEX testnet doesn't issue API
-            keys, and we don't want to put the user's master wallet
-            private key in localStorage. Browser mints a fresh
-            keypair, faucet drips to it, the burner IS the trading
-            identity.
-          • Mainnet → master wallet + Helix API key. Master stays
-            cold; only signs the one-time addAPIKey. The API key
-            (revocable from this page) signs every trade. */}
-      {network === "testnet" ? (
-        <TestnetBurnerFlow network={network} />
-      ) : (
-        <MasterKeyFlow network={network} />
-      )}
+      <MasterKeyFlow network={network} />
     </div>
-  );
-}
-
-// ─── Shared network picker ──────────────────────────────────────────
-
-function NetworkPicker({
-  network,
-  onChange,
-}: {
-  network: SodexNetwork;
-  onChange: (n: SodexNetwork) => void;
-}) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>1. Network</CardTitle>
-        <span className="text-[11px] text-fg-dim">
-          Testnet uses faucet tokens — recommended for trying it out.
-        </span>
-      </CardHeader>
-      <CardBody>
-        <div className="flex gap-2">
-          {(["testnet", "mainnet"] as SodexNetwork[]).map((n) => (
-            <button
-              key={n}
-              onClick={() => onChange(n)}
-              className={cn(
-                "rounded border px-3 py-1.5 text-xs font-medium transition-colors",
-                network === n
-                  ? "border-accent/40 bg-accent/15 text-accent-2"
-                  : "border-line bg-surface text-fg-muted hover:border-line-2 hover:text-fg",
-              )}
-            >
-              {SODEX_NETWORKS[n].label}
-              {n === "testnet" ? " · safe" : " · real funds"}
-            </button>
-          ))}
-          <span className="ml-auto self-center text-[11px] text-fg-dim">
-            chainId {SODEX_NETWORKS[network].chainId}
-          </span>
-        </div>
-      </CardBody>
-    </Card>
-  );
-}
-
-// ─── Testnet: burner-wallet flow ────────────────────────────────────
-
-function TestnetBurnerFlow({ network }: { network: SodexNetwork }) {
-  const [identity, setIdentity] = useState<StoredApiKey | null>(null);
-  const [reloadTick, setReloadTick] = useState(0);
-  const [accountState, setAccountState] = useState<SodexAccountState | null>(
-    null,
-  );
-  const [error, setError] = useState<string | null>(null);
-  const [actionMsg, setActionMsg] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-
-  // Read identity from localStorage when the page mounts / network
-  // changes / we regenerate.
-  useEffect(() => {
-    setIdentity(readLocalKey(network));
-  }, [network, reloadTick]);
-
-  // Pull SoDEX account state for the burner so the user sees their
-  // testnet balance + accountID.
-  useEffect(() => {
-    if (!identity) {
-      setAccountState(null);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const s = await getAccountState(network, identity.address);
-        if (!cancelled) setAccountState(s);
-      } catch (err) {
-        if (!cancelled) setError((err as Error).message);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [identity, network, reloadTick]);
-
-  const onGenerate = useCallback(async () => {
-    setBusy("generate");
-    setActionMsg(null);
-    setError(null);
-    try {
-      const next = mintBurnerWallet();
-      writeLocalKey(network, next);
-      setActionMsg(
-        `✓ Generated burner wallet ${next.address.slice(0, 6)}…${next.address.slice(-4)} — auto-claiming faucet…`,
-      );
-      setReloadTick((t) => t + 1);
-      // Auto-drip 100 vUSDC from the SoDEX testnet faucet so the
-      // burner can actually trade immediately. Open CORS — straight
-      // from the browser. If the faucet trips a captcha or rate
-      // limit, we surface the message verbatim so the user can
-      // claim manually via the button.
-      const drip = await claimTestnetFaucet(next.address);
-      if (drip.ok) {
-        setActionMsg(
-          `✓ Burner ready: ${next.address.slice(0, 6)}…${next.address.slice(-4)} · faucet ${drip.message}`,
-        );
-      } else {
-        setActionMsg(
-          `✓ Burner generated. Auto-faucet failed (${drip.message}) — use the "Claim 100 vUSDC" button below.`,
-        );
-      }
-      // Refresh again after a brief delay so the balance shows up.
-      setTimeout(() => setReloadTick((t) => t + 1), 1500);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(null);
-    }
-  }, [network]);
-
-  const onClaim = useCallback(async () => {
-    if (!identity) return;
-    setBusy("claim");
-    setActionMsg(null);
-    setError(null);
-    const drip = await claimTestnetFaucet(identity.address);
-    if (drip.ok) {
-      setActionMsg(`✓ Faucet: ${drip.message}`);
-      setTimeout(() => setReloadTick((t) => t + 1), 1500);
-    } else {
-      setError(`Faucet refused: ${drip.message}`);
-    }
-    setBusy(null);
-  }, [identity]);
-
-  const onWipe = useCallback(() => {
-    if (
-      !confirm(
-        "Delete this burner wallet from your browser? Any funds left in it are unrecoverable without the private key.",
-      )
-    ) {
-      return;
-    }
-    clearLocalKey(network);
-    setActionMsg("✓ Burner wiped from this browser.");
-    setReloadTick((t) => t + 1);
-  }, [network]);
-
-  const balanceLine = useMemo(() => {
-    if (!accountState?.B || accountState.B.length === 0) return "0";
-    return accountState.B.map((b) => `${b.t} ${b.a}`).join(" · ");
-  }, [accountState]);
-
-  return (
-    <>
-      <Card>
-        <CardHeader>
-          <CardTitle>2. Burner wallet (testnet)</CardTitle>
-          <span className="text-[11px] text-fg-dim">
-            Generated in your browser. SoDEX testnet doesn&apos;t use API
-            keys — the wallet itself signs orders.
-          </span>
-        </CardHeader>
-        <CardBody>
-          {!identity ? (
-            <div className="flex flex-col gap-3">
-              <p className="text-xs text-fg-muted">
-                Click below to mint a fresh keypair locally. Helix never
-                sees the private key — it lives only in this browser&apos;s
-                localStorage. If you wipe your browser data, the
-                wallet is unrecoverable, so don&apos;t fund it with
-                anything you can&apos;t afford to lose (testnet tokens are
-                free).
-              </p>
-              <div>
-                <button
-                  onClick={onGenerate}
-                  disabled={busy === "generate"}
-                  className={cn(
-                    "rounded border px-3 py-1.5 text-xs font-medium transition-colors",
-                    busy === "generate"
-                      ? "cursor-wait border-line bg-surface-2 text-fg-dim"
-                      : "border-accent/40 bg-accent/15 text-accent-2 hover:bg-accent/25",
-                  )}
-                >
-                  {busy === "generate"
-                    ? "Generating…"
-                    : "+ Generate burner wallet"}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-3 text-sm">
-              <div className="grid grid-cols-[120px_1fr] gap-x-3 gap-y-1 font-mono text-xs">
-                <span className="text-fg-dim">Address</span>
-                <span className="break-all text-fg">{identity.address}</span>
-                <span className="text-fg-dim">Account ID</span>
-                <span className="text-fg">
-                  {accountState?.aid ?? "fetching…"}
-                </span>
-                <span className="text-fg-dim">Balance</span>
-                <span className="text-fg">{balanceLine}</span>
-              </div>
-
-              {(!accountState || accountState.B.length === 0) ? (
-                <div className="rounded border border-warning/30 bg-warning/5 p-2 text-xs text-warning">
-                  No balance yet — the faucet usually takes ~10s to
-                  reflect. Hit ↻ Refresh in a moment, or click
-                  &quot;Claim 100 vUSDC&quot; if the first auto-claim
-                  was rate-limited.
-                </div>
-              ) : null}
-
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={onClaim}
-                  disabled={busy === "claim"}
-                  className={cn(
-                    "rounded border px-2.5 py-1 text-xs font-medium transition-colors",
-                    busy === "claim"
-                      ? "cursor-wait border-line bg-surface-2 text-fg-dim"
-                      : "border-accent/40 bg-accent/15 text-accent-2 hover:bg-accent/25",
-                  )}
-                >
-                  {busy === "claim"
-                    ? "Claiming…"
-                    : "+ Claim 100 vUSDC from faucet"}
-                </button>
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(identity.address);
-                    setActionMsg("✓ Address copied");
-                  }}
-                  className="rounded border border-line bg-surface px-2.5 py-1 text-xs text-fg-muted hover:border-accent/40 hover:text-accent-2"
-                >
-                  Copy address
-                </button>
-                <button
-                  onClick={() => setReloadTick((t) => t + 1)}
-                  className="rounded border border-line bg-surface px-2.5 py-1 text-xs text-fg-muted hover:border-line-2 hover:text-fg"
-                >
-                  ↻ Refresh balance
-                </button>
-                <a
-                  href="https://testnet.sodex.com/faucet"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="rounded border border-line bg-surface px-2.5 py-1 text-xs text-fg-muted hover:border-accent/40 hover:text-accent-2"
-                  title="If the in-app claim is rate-limited, the official faucet page may show a captcha you can complete."
-                >
-                  Open faucet page →
-                </a>
-                <button
-                  onClick={onWipe}
-                  className="ml-auto rounded border border-line bg-surface px-2.5 py-1 text-xs text-fg-muted hover:border-negative/40 hover:text-negative"
-                >
-                  Wipe burner
-                </button>
-              </div>
-            </div>
-          )}
-          {error ? (
-            <div className="mt-3 rounded border border-negative/30 bg-negative/10 p-2 text-xs text-negative">
-              {error}
-            </div>
-          ) : null}
-        </CardBody>
-      </Card>
-
-      <SafetyLimitsCard network={network} />
-
-      {actionMsg ? (
-        <div className="rounded border border-positive/30 bg-positive/5 px-3 py-2 text-xs text-positive">
-          {actionMsg}
-        </div>
-      ) : null}
-
-      {identity ? <MyTradesPanel wallet={identity.address} /> : null}
-
-      {identity ? (
-        <ReadyBanner identity={identity} network={network} />
-      ) : null}
-    </>
   );
 }
 
