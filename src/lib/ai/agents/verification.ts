@@ -33,6 +33,7 @@ import { queryBaseRateTool } from "./tools/query-base-rate";
 import { queryPriceAroundCatalystTool } from "./tools/query-price-around-catalyst";
 import { queryMarketRegimeTool } from "./tools/query-market-regime";
 import { querySimilarCatalystTool } from "./tools/query-similar-catalyst";
+import { queryMacroContextTool } from "./tools/query-macro-context";
 import type { AgentTool } from "./tools/types";
 
 const PRICING = { input: 3, cached: 0.3, output: 15 };
@@ -50,6 +51,7 @@ const TOOLS: Record<string, AgentTool> = {
   query_price_around_catalyst: queryPriceAroundCatalystTool as AgentTool,
   query_market_regime: queryMarketRegimeTool as AgentTool,
   query_similar_catalyst: querySimilarCatalystTool as AgentTool,
+  query_macro_context: queryMacroContextTool as AgentTool,
 };
 
 const verdictTool: Anthropic.Tool = {

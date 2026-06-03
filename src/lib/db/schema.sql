@@ -886,7 +886,45 @@ ALTER TABLE historical_catalysts ADD COLUMN btc_rsi_14 REAL;
 ALTER TABLE historical_catalysts ADD COLUMN btc_return_30d_pct REAL;
 CREATE INDEX IF NOT EXISTS idx_hist_catalysts_regime ON historical_catalysts(btc_regime);
 
--- ── 24. Schema version (manual migrations) ────────────────────────────────
+-- ── 24. Macro calibration (Prompt 3 — macro reaction conditioning) ───────
+-- One row per dated macro release or special macro event (SVB collapse,
+-- yen carry unwind, debt-ceiling crisis, etc.). Joins actuals from FRED
+-- with same-day cross-asset moves (SPX, DXY, 10Y yield) and the BTC/ETH
+-- reaction across multiple horizons. The agent uses this to ask:
+--   "what's the typical BTC reaction when CPI surprises hot?"
+--   "what happens to BTC the day after SVB-style banking events?"
+-- Sourced by scripts/build-macro-context.mjs.
+
+CREATE TABLE IF NOT EXISTS macro_calibration (
+  id                  TEXT PRIMARY KEY,           -- "cpi-2024-03-12"
+  date                TEXT NOT NULL,              -- YYYY-MM-DD
+  ts_ms               INTEGER NOT NULL,           -- release moment, ms epoch
+  event_type          TEXT NOT NULL,              -- CPI | Core_CPI | PCE | NFP | Unemployment | FOMC_decision | special | ...
+  description         TEXT NOT NULL,
+  /** Raw values from the source release. */
+  actual              REAL,
+  previous            REAL,
+  /** actual - previous, signed. Crude surprise proxy (no consensus available
+   *  without paid feed). Positive = release came in higher than prior. */
+  surprise_proxy      REAL,
+  /** Cross-asset moves on the day, percent (yield in basis points). */
+  spx_move_1d_pct     REAL,
+  dxy_move_1d_pct     REAL,
+  ten_year_move_bp    REAL,
+  /** BTC reaction: the 1h candle open at release time → close 1h later. */
+  btc_move_1h_pct     REAL,
+  btc_move_1d_pct     REAL,
+  btc_move_3d_pct     REAL,
+  btc_move_7d_pct     REAL,
+  eth_move_1d_pct     REAL,
+  notes               TEXT,
+  ingested_at         INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+);
+CREATE INDEX IF NOT EXISTS idx_macro_calib_type ON macro_calibration(event_type);
+CREATE INDEX IF NOT EXISTS idx_macro_calib_date ON macro_calibration(date);
+CREATE INDEX IF NOT EXISTS idx_macro_calib_ts   ON macro_calibration(ts_ms DESC);
+
+-- ── 25. Schema version (manual migrations) ────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS schema_version (
   version  INTEGER PRIMARY KEY,

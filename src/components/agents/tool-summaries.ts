@@ -74,6 +74,8 @@ export function summarizeToolCall(
       return summarizeMarketRegime(input, output);
     case "query_similar_catalyst":
       return summarizeSimilarCatalyst(input, output);
+    case "query_macro_context":
+      return summarizeMacroContext(input, output);
     case "fetch_full_article":
       return summarizeFullArticle(input, output);
     case "submit_classification":
@@ -278,6 +280,42 @@ function summarizeSimilarCatalyst(input: Json, output: Json): ToolSummary {
     `n=${n}`,
     median != null ? `${fmtMove(median)} median BTC` : "",
     mean != null ? `${fmtMove(mean)} mean` : "",
+    hit != null ? `${fmtPct(hit)} positive` : "",
+  ].filter(Boolean);
+  return { asked, found: parts.join(" · ") };
+}
+
+// ─── query_macro_context ───────────────────────────────────────────
+
+function summarizeMacroContext(input: Json, output: Json): ToolSummary {
+  const i = asObj(input);
+  const o = asObj(output);
+  const mode = asStr(i.mode) ?? "nearest";
+  if (mode === "nearest") {
+    const date = asStr(i.date) ?? "?";
+    const asked = `Macro context near ${date.slice(0, 10)}`;
+    if (o.found === false) return { asked, found: "No macro release in window — quiet day" };
+    const ev = asObj(o.event);
+    const type = asStr(ev.event_type);
+    const surprise = asNum(ev.surprise_proxy);
+    const btc1d = asNum(ev.btc_move_1d_pct);
+    const parts: string[] = [];
+    if (type) parts.push(type);
+    if (surprise != null) parts.push(`surprise ${fmtMove(surprise)} vs prior`);
+    if (btc1d != null) parts.push(`BTC 1d ${fmtMove(btc1d)}`);
+    return { asked, found: parts.length > 0 ? parts.join(" · ") : "n/a" };
+  }
+  // cohort
+  const eventType = asStr(i.event_type) ?? "?";
+  const surpriseSign = asStr(i.surprise_sign) ?? "any";
+  const asked = `Past ${eventType} reactions (surprise=${surpriseSign})`;
+  const n = asNum(o.sample_size);
+  if (!n) return { asked, found: "No matching events" };
+  const med = asNum(o.btc_1d_median_pct);
+  const hit = asNum(o.btc_1d_hit_rate);
+  const parts = [
+    `n=${n}`,
+    med != null ? `BTC 1d median ${fmtMove(med)}` : "",
     hit != null ? `${fmtPct(hit)} positive` : "",
   ].filter(Boolean);
   return { asked, found: parts.join(" · ") };

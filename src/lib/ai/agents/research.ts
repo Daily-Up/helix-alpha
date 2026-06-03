@@ -35,6 +35,7 @@ import { queryBaseRateTool } from "./tools/query-base-rate";
 import { queryPriceAroundCatalystTool } from "./tools/query-price-around-catalyst";
 import { queryMarketRegimeTool } from "./tools/query-market-regime";
 import { querySimilarCatalystTool } from "./tools/query-similar-catalyst";
+import { queryMacroContextTool } from "./tools/query-macro-context";
 import type { AgentTool } from "./tools/types";
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -57,6 +58,7 @@ const TOOLS: Record<string, AgentTool> = {
   query_price_around_catalyst: queryPriceAroundCatalystTool as AgentTool,
   query_market_regime: queryMarketRegimeTool as AgentTool,
   query_similar_catalyst: querySimilarCatalystTool as AgentTool,
+  query_macro_context: queryMacroContextTool as AgentTool,
 };
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -180,6 +182,13 @@ function systemPrompt(universe: Array<{ id: string; symbol: string; name: string
     "    trend — your conviction needs to reflect that risk explicitly,",
     "    not paper over it. The same applies in reverse for SHORT into",
     "    an uptrend.",
+    "  - On macro days call query_macro_context(mode='nearest', date=today)",
+    "    to check if a CPI/PCE/NFP/FOMC release is sitting in the same",
+    "    24h window as the headline. Macro-day price action dominates",
+    "    catalyst reaction by 1-2 orders of magnitude — a crypto headline",
+    "    on hot-CPI day reads totally differently than on a quiet day.",
+    "    For broader 'what does BTC usually do on hot CPI prints?' use",
+    "    mode='cohort' with surprise_sign='positive'.",
     "  - When the catalyst falls into a named category, also call",
     "    query_similar_catalyst with that category. Pass the current",
     "    regime in the `regime` filter to ask 'how did past X events do",
