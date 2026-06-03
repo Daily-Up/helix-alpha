@@ -110,6 +110,14 @@ const TRUSTED_X_ACCOUNTS: readonly string[] = [
 const TRUSTED_TITLE_CAP = 320;
 const DEFAULT_TITLE_CAP = 240;
 
+/**
+ * Minimum like-count for the blue-verified-with-asset fallback gate.
+ * Live data check (June 2026): 10 likes is enough to filter out
+ * shitposts while keeping fast-moving alerts from emerging KOLs.
+ * Re-tune if the fallback bucket starts dominating volume.
+ */
+const MIN_FALLBACK_LIKES = 10;
+
 /** A NewsItem that carries the trusted-account flag we attach here. */
 export type TweetItem = NewsItem & { is_trusted_x_account?: boolean };
 
@@ -188,6 +196,27 @@ export async function fetchTweets(opts: {
     if (!isTweet(item)) continue;
 
     const trusted = isTrustedAccount(item.author);
+
+    // VOLUME GATE — keep the feed at ~5-15 items/hour instead of 100+.
+    // We accept a tweet only when ONE of these is true:
+    //   (a) Author is on the trusted list (CoinDesk, Wu Blockchain,
+    //       Halborn, etc.) — primary signal
+    //   (b) The author is blue-verified AND the tweet mentions a
+    //       tradable asset (matched_currencies non-empty) AND it has
+    //       at least MIN_FALLBACK_LIKES likes — a safety net so a new
+    //       Halborn-class breaker we haven't whitelisted yet doesn't
+    //       get silently dropped
+    // Everything else is dropped before it touches the classifier.
+    // is_blue_verified is typed boolean in NewsItem but the upstream
+    // SoSoValue payload uses 0/1 for the stored event type; coerce
+    // safely either way.
+    const blue = Boolean(item.is_blue_verified);
+    const passesFallback =
+      blue &&
+      (item.matched_currencies?.length ?? 0) > 0 &&
+      (item.like_count ?? 0) >= MIN_FALLBACK_LIKES;
+    if (!trusted && !passesFallback) continue;
+
     const cap = trusted ? TRUSTED_TITLE_CAP : DEFAULT_TITLE_CAP;
 
     // If the item somehow has a real title, keep it. Otherwise synthesise.
