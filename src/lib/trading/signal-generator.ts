@@ -109,12 +109,23 @@ function classifySourceTier(scoreOrAuthor: {
   author: string | null;
 }): SourceTier {
   const a = (scoreOrAuthor.author ?? "").toLowerCase();
-  const tier1 = ["bloomberg", "reuters", "wsj", "ft.com", "coinbase", "sec.gov"];
+  // Tier 1: institutional newsrooms + regulators + on-chain security
+  // firms whose first-hand alerts are essentially never wrong.
+  const tier1 = [
+    "bloomberg", "reuters", "wsj", "ft.com", "ft_", "coinbase", "sec.gov",
+    // Top-tier crypto-native breaking news / on-chain investigators
+    "wublockchain", "halborn", "peckshield", "slowmist", "certikalert",
+    "zachxbt", "lookonchain", "whale_alert",
+  ];
   if (tier1.some((t) => a.includes(t))) return 1;
+  // Tier 2: established crypto newsrooms + reputable analysts.
   const tier2 = [
     "panews", "chaincatcher", "decrypt", "decrpt", "foresightnews",
     "theblock", "coindesk", "cointelegraph", "unchained", "techflow",
-    "odaily", "benzinga",
+    "odaily", "benzinga", "blockworks", "dlnews", "watcherguru",
+    "messari", "defiantnews", "rektnews", "blockcastnews",
+    "cyvers", "beosin", "hacken", "solidityscan", "blockaid",
+    "tayvano", "officer_cia", "spreekaway",
   ];
   if (tier2.some((t) => a.includes(t))) return 2;
   if (scoreOrAuthor.is_blue_verified === 1) return 2;

@@ -28,7 +28,7 @@ import {
   sanitizeText,
   validateTitle,
 } from "@/lib/pipeline/ingestion-validation";
-import { fetchHackTweets } from "./x-hack-feed";
+import { fetchTweets, isTrustedXAccount } from "./x-tweet-feed";
 import { embed } from "@/lib/pipeline/embeddings";
 import { classifyFreshness } from "@/lib/pipeline/freshness";
 import { corpusFilter } from "@/lib/calibration/corpus-filter";
@@ -108,30 +108,37 @@ export async function runNewsIngest(
 
   // ── 1. Fetch news ──────────────────────────────────────────────
   // Standard editorial feed (categories 1, 2, 3, 13 — Odaily,
-  // Cointelegraph, The Block, etc.) plus the hack-flavor X-post
-  // subset of categories 4 + 7 (security firms like Halborn,
-  // PeckShield, SlowMist post first-hand exploit alerts there).
-  // Tweets are typically 15-90 minutes ahead of editorial coverage
-  // for exploit/hack events.
-  const [editorial, hackTweets] = await Promise.all([
+  // Cointelegraph, The Block, etc.) plus the full X feed (categories
+  // 4 + 7 — KOL + project / newsroom tweets). Tweets land 15-90
+  // minutes ahead of editorial coverage on breaking stories; for
+  // some events (Wu Blockchain scoops, on-chain exploit alerts) X
+  // is the only source for the first hour or two.
+  //
+  // We don't keyword-filter the X feed; the corpus pre-filter and
+  // classifier do the quality work downstream. Posts from a curated
+  // set of trusted accounts (Wu Blockchain, CoinDesk, Halborn, etc.)
+  // are tagged so the corpus pre-filter can let them through and the
+  // source-tier scorer can rate them as tier-1.
+  const dayWindow = Math.max(1, Math.ceil(windowMs / (24 * 60 * 60 * 1000)));
+  const [editorial, tweets] = await Promise.all([
     News.fetchRecentNews({
-      daysBack: Math.max(1, Math.ceil(windowMs / (24 * 60 * 60 * 1000))),
+      daysBack: dayWindow,
       maxItems,
       language: "en",
     }),
-    fetchHackTweets({
-      daysBack: Math.max(1, Math.ceil(windowMs / (24 * 60 * 60 * 1000))),
-      maxItems: 100,
+    fetchTweets({
+      daysBack: dayWindow,
+      maxItems: 300,
     }).catch((e) => {
-      console.warn(`[news-ingest] hack-tweet fetch failed: ${(e as Error).message}`);
-      return [] as Awaited<ReturnType<typeof fetchHackTweets>>;
+      console.warn(`[news-ingest] tweet fetch failed: ${(e as Error).message}`);
+      return [] as Awaited<ReturnType<typeof fetchTweets>>;
     }),
   ]);
 
   // De-dup by id (an item could appear in both feeds if SoSoValue
   // ever reuses ids across categories).
   const mergedById = new Map<string, (typeof editorial)[number]>();
-  for (const x of [...editorial, ...hackTweets]) mergedById.set(x.id, x);
+  for (const x of [...editorial, ...tweets]) mergedById.set(x.id, x);
   const items = [...mergedById.values()];
 
   // Filter to the actual window (fetchRecentNews uses day-resolution).
@@ -277,6 +284,15 @@ export async function runNewsIngest(
     const targets: StoredEvent[] = [];
     for (const e of rawTargets) {
       if (opts.reclassify) {
+        targets.push(e);
+        continue;
+      }
+      // Trusted X accounts (Wu Blockchain, Halborn, CoinDesk, etc.)
+      // bypass the corpus filter — they break stories ahead of the
+      // editorial corpus by definition, so requiring structural
+      // similarity to past signals would systematically drop the
+      // freshest, highest-signal inputs.
+      if (isTrustedXAccount(e.author)) {
         targets.push(e);
         continue;
       }
