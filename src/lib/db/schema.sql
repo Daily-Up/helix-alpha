@@ -815,7 +815,78 @@ CREATE INDEX IF NOT EXISTS idx_executed_trades_signal
 CREATE INDEX IF NOT EXISTS idx_executed_trades_filled_at
   ON executed_trades(filled_at DESC);
 
--- ── 22. Schema version (manual migrations) ────────────────────────────────
+-- ── 22. Historical OHLCV (Wave 2 — regime classifier) ────────────────────
+-- Hourly klines for BTC/ETH/SOL/etc back to each asset's earliest Binance
+-- candle. Used by the regime classifier and by the "what's a similar
+-- historical setup" tool the research agent calls. Source = Binance
+-- public klines, ingested once via scripts/ingest-binance-history.mjs.
+--
+-- This is a *separate* table from klines_daily for three reasons:
+--   1. asset key is the upper-case SYMBOL (e.g. "BTC"), not our internal
+--      tok-foo id — so the regime classifier doesn't depend on the
+--      assets registry being present.
+--   2. granularity is 1h, not 1d. We want intraday drawdown / vol.
+--   3. ts is ms-epoch INTEGER (matches the rest of Wave 2), not a
+--      YYYY-MM-DD TEXT date.
+
+CREATE TABLE IF NOT EXISTS historical_klines_hourly (
+  symbol   TEXT NOT NULL,                        -- "BTC", "ETH", "SOL"
+  ts_ms    INTEGER NOT NULL,                     -- candle open time, ms epoch
+  open     REAL NOT NULL,
+  high     REAL NOT NULL,
+  low      REAL NOT NULL,
+  close    REAL NOT NULL,
+  volume   REAL NOT NULL,
+  PRIMARY KEY (symbol, ts_ms)
+);
+CREATE INDEX IF NOT EXISTS idx_hist_klines_ts ON historical_klines_hourly(ts_ms DESC);
+
+-- ── 23. Historical catalyst events (Wave 2 — base-rate tool) ─────────────
+-- The 362-event hand-curated dataset from scripts/build-catalysts.mjs.
+-- Every row has BTC and ETH realized moves attached at 4 horizons so the
+-- agent can query "how did past corporate_treasury_buy events perform?"
+-- without needing to recompute returns from klines on every call.
+
+CREATE TABLE IF NOT EXISTS historical_catalysts (
+  id                  TEXT PRIMARY KEY,           -- stable slug: "covid-crash-2020-03-12"
+  ts_ms               INTEGER NOT NULL,           -- event happened at, ms epoch
+  date                TEXT NOT NULL,              -- YYYY-MM-DD UTC for grouping
+  category            TEXT NOT NULL,              -- macro_shock | corporate_treasury_buy | ...
+  asset               TEXT,                       -- "BTC" | "ETH" | NULL when generic
+  description         TEXT NOT NULL,
+  /** Realized BTC moves around the event, percent. */
+  btc_move_event_day  REAL,
+  btc_move_1d         REAL,
+  btc_move_3d         REAL,
+  btc_move_7d         REAL,
+  btc_move_30d        REAL,
+  /** Same for ETH (NULL when pre-launch). */
+  eth_move_event_day  REAL,
+  eth_move_1d         REAL,
+  eth_move_3d         REAL,
+  eth_move_7d         REAL,
+  eth_move_30d        REAL,
+  /** Free-form JSON for category-specific extras (Saylor buy size, FOMC
+   *  rate change bps, hack stolen amount, etc.). NULL when no extras. */
+  meta_json           TEXT,
+  ingested_at         INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+);
+CREATE INDEX IF NOT EXISTS idx_hist_catalysts_category ON historical_catalysts(category);
+CREATE INDEX IF NOT EXISTS idx_hist_catalysts_ts       ON historical_catalysts(ts_ms DESC);
+CREATE INDEX IF NOT EXISTS idx_hist_catalysts_asset    ON historical_catalysts(asset);
+
+-- Regime snapshot at the moment of each catalyst (backfilled from
+-- historical_klines_hourly by scripts/backfill-catalyst-regime.mjs).
+-- Lets `query_similar_catalyst` answer "how did X events perform when
+-- BTC was in a downtrend?" without recomputing regime per query.
+-- Columns are nullable on legacy rows that pre-date the backfill.
+ALTER TABLE historical_catalysts ADD COLUMN btc_regime TEXT;            -- up|down|sideways
+ALTER TABLE historical_catalysts ADD COLUMN btc_drawdown_pct REAL;      -- vs 90d rolling ATH
+ALTER TABLE historical_catalysts ADD COLUMN btc_rsi_14 REAL;
+ALTER TABLE historical_catalysts ADD COLUMN btc_return_30d_pct REAL;
+CREATE INDEX IF NOT EXISTS idx_hist_catalysts_regime ON historical_catalysts(btc_regime);
+
+-- ── 24. Schema version (manual migrations) ────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS schema_version (
   version  INTEGER PRIMARY KEY,

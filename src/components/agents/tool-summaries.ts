@@ -70,6 +70,10 @@ export function summarizeToolCall(
       return summarizeBaseRate(input, output);
     case "query_price_around_catalyst":
       return summarizePriceAroundCatalyst(input, output);
+    case "query_market_regime":
+      return summarizeMarketRegime(input, output);
+    case "query_similar_catalyst":
+      return summarizeSimilarCatalyst(input, output);
     case "fetch_full_article":
       return summarizeFullArticle(input, output);
     case "submit_classification":
@@ -224,6 +228,59 @@ function summarizePriceAroundCatalyst(input: Json, output: Json): ToolSummary {
     asked,
     found: parts.length > 0 ? parts.join(" · ") : "Limited data",
   };
+}
+
+// ─── query_market_regime ───────────────────────────────────────────
+
+function summarizeMarketRegime(input: Json, output: Json): ToolSummary {
+  const i = asObj(input);
+  const o = asObj(output);
+  const symbol = asStr(i.symbol) ?? "BTC";
+  const dt = asStr(i.datetime);
+  const asked = dt
+    ? `${symbol} market regime at ${dt.slice(0, 10)}`
+    : `Current ${symbol} market regime`;
+
+  if (o.found === false) return { asked, found: "No data available" };
+  const trend = asStr(o.trend);
+  const dd = asNum(o.drawdown_pct);
+  const r30 = asNum(o.return_30d_pct);
+  const rsi = asNum(o.rsi_14);
+  const days = asNum(o.days_since_ath);
+  if (!trend) return { asked, found: "No data available" };
+  const parts = [
+    trend.toUpperCase(),
+    dd != null ? `${dd.toFixed(1)}% from ATH` : "",
+    days != null ? `${days}d since ATH` : "",
+    r30 != null ? `${fmtMove(r30)} 30d` : "",
+    rsi != null ? `RSI ${rsi.toFixed(0)}` : "",
+  ].filter(Boolean);
+  return { asked, found: parts.join(" · ") };
+}
+
+// ─── query_similar_catalyst ────────────────────────────────────────
+
+function summarizeSimilarCatalyst(input: Json, output: Json): ToolSummary {
+  const i = asObj(input);
+  const o = asObj(output);
+  const category = asStr(i.category) ?? "?";
+  const horizon = asStr(i.horizon) ?? "7d";
+  const asked = `Historical ${category.replace(/_/g, " ")} events @ ${horizon}`;
+
+  const n = asNum(o.sample_size);
+  if (n == null || n === 0) {
+    return { asked, found: "No matching historical events" };
+  }
+  const mean = asNum(o.btc_mean_pct);
+  const median = asNum(o.btc_median_pct);
+  const hit = asNum(o.btc_hit_rate_pos);
+  const parts = [
+    `n=${n}`,
+    median != null ? `${fmtMove(median)} median BTC` : "",
+    mean != null ? `${fmtMove(mean)} mean` : "",
+    hit != null ? `${fmtPct(hit)} positive` : "",
+  ].filter(Boolean);
+  return { asked, found: parts.join(" · ") };
 }
 
 // ─── fetch_full_article ────────────────────────────────────────────

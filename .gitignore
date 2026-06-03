@@ -79,3 +79,5 @@ next-env.d.ts
 
 .vercel
 tmp_screens/
+tmp_*.csv
+tmp_*.mjs

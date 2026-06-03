@@ -31,6 +31,8 @@ import { assetHistoryTool } from "./tools/asset-history";
 import { eventTypeStatsTool } from "./tools/event-type-stats";
 import { queryBaseRateTool } from "./tools/query-base-rate";
 import { queryPriceAroundCatalystTool } from "./tools/query-price-around-catalyst";
+import { queryMarketRegimeTool } from "./tools/query-market-regime";
+import { querySimilarCatalystTool } from "./tools/query-similar-catalyst";
 import type { AgentTool } from "./tools/types";
 
 const PRICING = { input: 3, cached: 0.3, output: 15 };
@@ -46,6 +48,8 @@ const TOOLS: Record<string, AgentTool> = {
   query_event_type_stats: eventTypeStatsTool as AgentTool,
   query_base_rate: queryBaseRateTool as AgentTool,
   query_price_around_catalyst: queryPriceAroundCatalystTool as AgentTool,
+  query_market_regime: queryMarketRegimeTool as AgentTool,
+  query_similar_catalyst: querySimilarCatalystTool as AgentTool,
 };
 
 const verdictTool: Anthropic.Tool = {

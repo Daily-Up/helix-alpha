@@ -72,6 +72,7 @@ import {
   scoreAnonymizedActor,
   capTierForReliability,
 } from "@/lib/pipeline/reliability";
+import { capTierForRegime } from "@/lib/pipeline/regime-cap";
 import {
   ASSET_RELEVANCE_SCORE,
   type AssetRelevanceLevel,
@@ -1846,6 +1847,30 @@ export async function runSignalGen(
         ` tier downgraded because the source signals its own uncertainty.`;
     }
     tier = relCap.tier;
+
+    // ── Regime cap (counter-trend protection) ──
+    // AUTHORITATIVE: src/lib/pipeline/regime-cap.ts.
+    //
+    // Refuses AUTO-tier LONGs into a clearly down-trending BTC tape (and
+    // SHORTs into a clearly up-trending tape). The reasoning: even when
+    // the catalyst is real and well-corroborated, 1-3d horizons are
+    // dominated by tape direction. A LONG-the-catalyst into BTC trend=
+    // down + drawdown<-8% + RSI<40 has historically lost more often than
+    // it has won, regardless of the catalyst's published fundamentals.
+    //
+    // The cap is conservative: it only fires when ALL three regime
+    // conditions are met simultaneously. Sideways tapes and mild
+    // pullbacks don't trigger.
+    const regimeCap = await capTierForRegime({
+      direction,
+      asset_kind: primaryAsset.kind,
+      asset_symbol: primaryAsset.symbol,
+      current_tier: tier,
+    });
+    if (regimeCap.capped) {
+      enrichedReasoning += `\n\nRegime cap → ${regimeCap.tier.toUpperCase()}: ${regimeCap.reason}`;
+    }
+    tier = regimeCap.tier;
 
     // ── Price-already-moved check (Dimension 2) ──
     // Compute realized_fraction from the asset's price at catalyst publish

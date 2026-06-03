@@ -33,6 +33,8 @@ import { eventTypeStatsTool } from "./tools/event-type-stats";
 import { fetchFullArticleTool } from "./tools/fetch-full-article";
 import { queryBaseRateTool } from "./tools/query-base-rate";
 import { queryPriceAroundCatalystTool } from "./tools/query-price-around-catalyst";
+import { queryMarketRegimeTool } from "./tools/query-market-regime";
+import { querySimilarCatalystTool } from "./tools/query-similar-catalyst";
 import type { AgentTool } from "./tools/types";
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -53,6 +55,8 @@ const TOOLS: Record<string, AgentTool> = {
   fetch_full_article: fetchFullArticleTool as AgentTool,
   query_base_rate: queryBaseRateTool as AgentTool,
   query_price_around_catalyst: queryPriceAroundCatalystTool as AgentTool,
+  query_market_regime: queryMarketRegimeTool as AgentTool,
+  query_similar_catalyst: querySimilarCatalystTool as AgentTool,
 };
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -170,6 +174,21 @@ function systemPrompt(universe: Array<{ id: string; symbol: string; name: string
     "    for the broad type, query_base_rate for the specific subtype.",
     "    If the base rate says ~3% mean move and you proposed a 15%",
     "    target, dial down — the model's intuition is mis-calibrated.",
+    "  - **Regime context is mandatory for any directional take.** Before",
+    "    you propose a LONG, call query_market_regime on the primary",
+    "    asset. If trend=down and drawdown < -8%, longing IS counter-",
+    "    trend — your conviction needs to reflect that risk explicitly,",
+    "    not paper over it. The same applies in reverse for SHORT into",
+    "    an uptrend.",
+    "  - When the catalyst falls into a named category, also call",
+    "    query_similar_catalyst with that category. Pass the current",
+    "    regime in the `regime` filter to ask 'how did past X events do",
+    "    WHEN BTC was already in this regime?' — that's the empirically",
+    "    relevant question, not the unconditional average. Example:",
+    "    'a Saylor buy WHEN BTC is in down regime' is what predicts the",
+    "    next 7 days, not 'a Saylor buy in general'. You'll get n, mean,",
+    "    median, hit rate, and the most extreme historical analogs —",
+    "    cite the numbers verbatim.",
     "  - Cite specific tool results in your final `reasoning` string.",
     "    Numbers and named outlets, not adjectives.",
     "",
