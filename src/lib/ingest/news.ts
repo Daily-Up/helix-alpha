@@ -28,6 +28,7 @@ import {
   sanitizeText,
   validateTitle,
 } from "@/lib/pipeline/ingestion-validation";
+import { fetchHackTweets } from "./x-hack-feed";
 import { embed } from "@/lib/pipeline/embeddings";
 import { classifyFreshness } from "@/lib/pipeline/freshness";
 import { corpusFilter } from "@/lib/calibration/corpus-filter";
@@ -106,11 +107,32 @@ export async function runNewsIngest(
   }
 
   // ── 1. Fetch news ──────────────────────────────────────────────
-  const items = await News.fetchRecentNews({
-    daysBack: Math.max(1, Math.ceil(windowMs / (24 * 60 * 60 * 1000))),
-    maxItems,
-    language: "en",
-  });
+  // Standard editorial feed (categories 1, 2, 3, 13 — Odaily,
+  // Cointelegraph, The Block, etc.) plus the hack-flavor X-post
+  // subset of categories 4 + 7 (security firms like Halborn,
+  // PeckShield, SlowMist post first-hand exploit alerts there).
+  // Tweets are typically 15-90 minutes ahead of editorial coverage
+  // for exploit/hack events.
+  const [editorial, hackTweets] = await Promise.all([
+    News.fetchRecentNews({
+      daysBack: Math.max(1, Math.ceil(windowMs / (24 * 60 * 60 * 1000))),
+      maxItems,
+      language: "en",
+    }),
+    fetchHackTweets({
+      daysBack: Math.max(1, Math.ceil(windowMs / (24 * 60 * 60 * 1000))),
+      maxItems: 100,
+    }).catch((e) => {
+      console.warn(`[news-ingest] hack-tweet fetch failed: ${(e as Error).message}`);
+      return [] as Awaited<ReturnType<typeof fetchHackTweets>>;
+    }),
+  ]);
+
+  // De-dup by id (an item could appear in both feeds if SoSoValue
+  // ever reuses ids across categories).
+  const mergedById = new Map<string, (typeof editorial)[number]>();
+  for (const x of [...editorial, ...hackTweets]) mergedById.set(x.id, x);
+  const items = [...mergedById.values()];
 
   // Filter to the actual window (fetchRecentNews uses day-resolution).
   const cutoff = Date.now() - windowMs;

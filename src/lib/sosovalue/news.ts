@@ -68,6 +68,32 @@ export function searchNews(query: {
 }
 
 /**
+ * Multi-keyword search helper. Runs each keyword as a separate
+ * `/news/search` query and merges + dedups the results. Use this to
+ * sweep variations of the same theme (hack / exploit / drained /
+ * stolen / rug pull) without running them as one OR expression
+ * (SoSoValue's search is keyword-substring, not boolean).
+ */
+export async function searchNewsMulti(
+  keywords: string[],
+  opts?: { pageSize?: number; sort?: "relevance" | "publish_time" },
+): Promise<NewsItem[]> {
+  const pageSize = opts?.pageSize ?? 50;
+  const sort = opts?.sort ?? "publish_time";
+  const all = await Promise.all(
+    keywords.map((k) =>
+      searchNews({ keyword: k, page_size: pageSize, sort }).then(
+        (r) => r.list ?? [],
+        () => [] as NewsItem[],
+      ),
+    ),
+  );
+  const merged = new Map<string, NewsItem>();
+  for (const list of all) for (const it of list) merged.set(it.id, it);
+  return [...merged.values()];
+}
+
+/**
  * Pull the full last-N-days news feed by paging through `/news`.
  *
  * The API caps `start_time`/`end_time` to the last 7 days, so this helper
