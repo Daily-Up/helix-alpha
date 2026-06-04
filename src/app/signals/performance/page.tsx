@@ -54,6 +54,10 @@ interface RecentRow {
    *  signal fired. Trimmed to a single line on the table; the audit
    *  page has the full version. */
   title: string | null;
+  /** When NULL the realized_pct is meaningless (no kline data for the
+   *  asset, e.g. tok-hype / idx-ssidefi). The UI renders "—" instead
+   *  of a misleading 0.00%. */
+  price_at_outcome: number | null;
 }
 
 async function loadTierStats(): Promise<TierRow[]> {
@@ -66,7 +70,9 @@ async function loadTierStats(): Promise<TierRow[]> {
            SUM(CASE WHEN outcome = 'blocked'    THEN 1 ELSE 0 END) AS blocked,
            SUM(CASE WHEN outcome = 'dismissed'  THEN 1 ELSE 0 END) AS dismissed,
            SUM(CASE WHEN outcome IS NULL        THEN 1 ELSE 0 END) AS pending,
-           AVG(CASE WHEN outcome IN ('target_hit','stop_hit','flat') THEN realized_pct END) AS avg_realized_pct
+           AVG(CASE WHEN outcome IN ('target_hit','stop_hit')
+                  OR (outcome = 'flat' AND price_at_outcome IS NOT NULL)
+                  THEN realized_pct END) AS avg_realized_pct
     FROM signal_outcomes
     GROUP BY tier
     ORDER BY
@@ -81,7 +87,9 @@ async function loadSubtypeStats(): Promise<SubtypeRow[]> {
            SUM(CASE WHEN outcome = 'target_hit' THEN 1 ELSE 0 END) AS wins,
            SUM(CASE WHEN outcome = 'stop_hit'   THEN 1 ELSE 0 END) AS losses,
            SUM(CASE WHEN outcome = 'flat'       THEN 1 ELSE 0 END) AS flat,
-           AVG(CASE WHEN outcome IN ('target_hit','stop_hit','flat') THEN realized_pct END) AS avg_realized_pct
+           AVG(CASE WHEN outcome IN ('target_hit','stop_hit')
+                  OR (outcome = 'flat' AND price_at_outcome IS NOT NULL)
+                  THEN realized_pct END) AS avg_realized_pct
     FROM signal_outcomes
     WHERE catalyst_subtype IS NOT NULL AND catalyst_subtype != ''
       AND outcome IS NOT NULL
@@ -95,7 +103,7 @@ async function loadRecent(): Promise<RecentRow[]> {
   return await all<RecentRow>(`
     SELECT o.signal_id, o.asset_id AS asset, o.direction, o.tier,
            o.catalyst_subtype, o.outcome, o.realized_pct,
-           o.generated_at, o.outcome_at,
+           o.generated_at, o.outcome_at, o.price_at_outcome,
            n.title AS title
     FROM signal_outcomes o
     LEFT JOIN signals s ON s.id = o.signal_id
@@ -119,7 +127,9 @@ async function loadTotals() {
     SELECT COUNT(*) AS total,
            SUM(CASE WHEN outcome IS NOT NULL THEN 1 ELSE 0 END) AS resolved,
            SUM(CASE WHEN outcome IS NULL THEN 1 ELSE 0 END) AS pending,
-           AVG(CASE WHEN outcome IN ('target_hit','stop_hit','flat') THEN realized_pct END) AS avg_pct,
+           AVG(CASE WHEN outcome IN ('target_hit','stop_hit')
+                  OR (outcome = 'flat' AND price_at_outcome IS NOT NULL)
+                  THEN realized_pct END) AS avg_pct,
            SUM(CASE WHEN outcome = 'target_hit' THEN 1 ELSE 0 END) AS target_hits,
            SUM(CASE WHEN outcome = 'stop_hit' THEN 1 ELSE 0 END) AS stop_hits,
            SUM(CASE WHEN outcome = 'flat' THEN 1 ELSE 0 END) AS flats
@@ -320,19 +330,29 @@ export default async function PerformancePage() {
                 href={`/signal/${r.signal_id}`}
               />,
               <OutcomeBadge key="o" outcome={r.outcome ?? ""} />,
-              <span
-                key="r"
-                style={{
-                  color:
-                    r.realized_pct == null
-                      ? COLORS.text
-                      : r.realized_pct > 0
-                        ? COLORS.pos
-                        : COLORS.neg,
-                }}
-              >
-                {fmtPct(r.realized_pct, true)}
-              </span>,
+              (() => {
+                // Without a price_at_outcome the realized_pct=0 is a
+                // placeholder, not a real flat. Show "—" to be honest.
+                const unpriceable =
+                  r.outcome === "flat" && r.price_at_outcome == null;
+                return (
+                  <span
+                    key="r"
+                    title={unpriceable ? "no kline data for this asset" : undefined}
+                    style={{
+                      color: unpriceable
+                        ? COLORS.muted
+                        : r.realized_pct == null
+                          ? COLORS.text
+                          : r.realized_pct > 0
+                            ? COLORS.pos
+                            : COLORS.neg,
+                    }}
+                  >
+                    {unpriceable ? "—" : fmtPct(r.realized_pct, true)}
+                  </span>
+                );
+              })(),
             ])}
           />
         )}
