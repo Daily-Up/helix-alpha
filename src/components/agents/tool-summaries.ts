@@ -76,6 +76,8 @@ export function summarizeToolCall(
       return summarizeSimilarCatalyst(input, output);
     case "query_macro_context":
       return summarizeMacroContext(input, output);
+    case "search_x_live":
+      return summarizeXLive(input, output);
     case "fetch_full_article":
       return summarizeFullArticle(input, output);
     case "submit_classification":
@@ -319,6 +321,36 @@ function summarizeMacroContext(input: Json, output: Json): ToolSummary {
     hit != null ? `${fmtPct(hit)} positive` : "",
   ].filter(Boolean);
   return { asked, found: parts.join(" · ") };
+}
+
+// ─── search_x_live ────────────────────────────────────────────────
+
+function summarizeXLive(input: Json, output: Json): ToolSummary {
+  const i = asObj(input);
+  const o = asObj(output);
+  const query = asStr(i.query) ?? "(no query)";
+  const hrs = asNum(i.max_age_hours) ?? 12;
+  const trustedOnly = i.trusted_only === false ? false : true;
+  const asked = trustedOnly
+    ? `Live X search for "${query}" — trusted accounts, last ${hrs}h`
+    : `Live X search for "${query}" — last ${hrs}h, all accounts`;
+
+  const matched = asNum(o.matched_count) ?? 0;
+  if (matched === 0) {
+    return { asked, found: "No tweets in window" };
+  }
+  const results = asArr(o.results);
+  // Collect unique authors
+  const authors = new Set<string>();
+  for (const t of results) {
+    const a = asStr(asObj(t).author);
+    if (a) authors.add(`@${a}`);
+  }
+  const top = [...authors].slice(0, 3).join(", ");
+  return {
+    asked,
+    found: `${matched} ${plural(matched, "tweet")} from ${top}${authors.size > 3 ? ` + ${authors.size - 3} more` : ""}`,
+  };
 }
 
 // ─── fetch_full_article ────────────────────────────────────────────

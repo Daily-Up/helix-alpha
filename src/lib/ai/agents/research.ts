@@ -36,6 +36,7 @@ import { queryPriceAroundCatalystTool } from "./tools/query-price-around-catalys
 import { queryMarketRegimeTool } from "./tools/query-market-regime";
 import { querySimilarCatalystTool } from "./tools/query-similar-catalyst";
 import { queryMacroContextTool } from "./tools/query-macro-context";
+import { searchXLiveTool } from "./tools/search-x-live";
 import type { AgentTool } from "./tools/types";
 import { getMarketPulse, formatPulseForPrompt } from "@/lib/regime/snapshot";
 
@@ -60,6 +61,7 @@ const TOOLS: Record<string, AgentTool> = {
   query_market_regime: queryMarketRegimeTool as AgentTool,
   query_similar_catalyst: querySimilarCatalystTool as AgentTool,
   query_macro_context: queryMacroContextTool as AgentTool,
+  search_x_live: searchXLiveTool as AgentTool,
 };
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -186,6 +188,12 @@ function systemPrompt(
     "    trend — your conviction needs to reflect that risk explicitly,",
     "    not paper over it. The same applies in reverse for SHORT into",
     "    an uptrend.",
+    "  - On exploit / regulatory / breaking-news headlines call",
+    "    search_x_live with a short keyword (token, protocol, or",
+    "    security firm). This hits SoSoValue live so you see tweets",
+    "    from the LAST FEW MINUTES — critical when Halborn / PeckShield /",
+    "    SlowMist / Wu Blockchain may have already confirmed (or denied)",
+    "    the story before our ingest cron picked it up. Cheap, ~300ms.",
     "  - On macro days call query_macro_context(mode='nearest', date=today)",
     "    to check if a CPI/PCE/NFP/FOMC release is sitting in the same",
     "    24h window as the headline. Macro-day price action dominates",

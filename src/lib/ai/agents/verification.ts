@@ -34,6 +34,7 @@ import { queryPriceAroundCatalystTool } from "./tools/query-price-around-catalys
 import { queryMarketRegimeTool } from "./tools/query-market-regime";
 import { querySimilarCatalystTool } from "./tools/query-similar-catalyst";
 import { queryMacroContextTool } from "./tools/query-macro-context";
+import { searchXLiveTool } from "./tools/search-x-live";
 import type { AgentTool } from "./tools/types";
 import { getMarketPulse, formatPulseForPrompt } from "@/lib/regime/snapshot";
 
@@ -53,6 +54,7 @@ const TOOLS: Record<string, AgentTool> = {
   query_market_regime: queryMarketRegimeTool as AgentTool,
   query_similar_catalyst: querySimilarCatalystTool as AgentTool,
   query_macro_context: queryMacroContextTool as AgentTool,
+  search_x_live: searchXLiveTool as AgentTool,
 };
 
 const verdictTool: Anthropic.Tool = {

@@ -37,6 +37,7 @@ import { assetHistoryTool } from "./tools/asset-history";
 import { eventTypeStatsTool } from "./tools/event-type-stats";
 import { queryBaseRateTool } from "./tools/query-base-rate";
 import { queryPriceAroundCatalystTool } from "./tools/query-price-around-catalyst";
+import { searchXLiveTool } from "./tools/search-x-live";
 import type { AgentTool } from "./tools/types";
 import { getMarketPulse, formatPulseForPrompt } from "@/lib/regime/snapshot";
 
@@ -50,6 +51,7 @@ const TOOLS: Record<string, AgentTool> = {
   query_event_type_stats: eventTypeStatsTool as AgentTool,
   query_base_rate: queryBaseRateTool as AgentTool,
   query_price_around_catalyst: queryPriceAroundCatalystTool as AgentTool,
+  search_x_live: searchXLiveTool as AgentTool,
 };
 
 const sideTool: Anthropic.Tool = {
