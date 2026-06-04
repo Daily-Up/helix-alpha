@@ -60,8 +60,48 @@ interface RecentRow {
   price_at_outcome: number | null;
 }
 
+/**
+ * Defensive filter applied to every rollup on this page:
+ *
+ *   - Drop shadow-v2 backtest rows (framework_version='v2' or signal_id
+ *     ending '-shadow-v2'). They're internal A/B-compare data, not
+ *     user-facing receipts.
+ *   - Drop `regulatory_statement` + `earnings_reaction` — both produce
+ *     mostly-noise signals (Fed-speak, treasury "earnings" on assets
+ *     that don't have earnings) that clutter the table without
+ *     informing the user.
+ *   - Dedupe to one row per (asset, day, subtype, direction) bucket.
+ *     The signal-gen path was firing 74 times on a single perp-us500
+ *     macro_print event; until that bug is fixed in src/lib/trading,
+ *     the page-level dedup keeps the table honest.
+ *
+ * Companion one-off purge: scripts/dedupe-signal-outcomes.mjs already
+ * removed the historical bloat. This CTE is the going-forward guard.
+ */
+const CANONICAL = `signal_outcomes_canonical AS (
+  SELECT o.*
+  FROM signal_outcomes o
+  WHERE COALESCE(o.framework_version, 'v1') = 'v1'
+    AND o.signal_id NOT LIKE '%-shadow-v2'
+    AND (o.catalyst_subtype IS NULL
+         OR o.catalyst_subtype NOT IN ('regulatory_statement', 'earnings_reaction'))
+    AND o.signal_id = (
+      SELECT MIN(o2.signal_id) FROM signal_outcomes o2
+      WHERE o2.asset_id = o.asset_id
+        AND COALESCE(o2.catalyst_subtype, '') = COALESCE(o.catalyst_subtype, '')
+        AND o2.direction = o.direction
+        AND substr(datetime(o2.generated_at/1000,'unixepoch'),1,10)
+            = substr(datetime(o.generated_at/1000,'unixepoch'),1,10)
+        AND COALESCE(o2.framework_version, 'v1') = 'v1'
+        AND o2.signal_id NOT LIKE '%-shadow-v2'
+        AND (o2.catalyst_subtype IS NULL
+             OR o2.catalyst_subtype NOT IN ('regulatory_statement', 'earnings_reaction'))
+    )
+)`;
+
 async function loadTierStats(): Promise<TierRow[]> {
   return await all<TierRow>(`
+    WITH ${CANONICAL}
     SELECT tier,
            COUNT(*) AS total,
            SUM(CASE WHEN outcome = 'target_hit' THEN 1 ELSE 0 END) AS target_hit,
@@ -73,7 +113,7 @@ async function loadTierStats(): Promise<TierRow[]> {
            AVG(CASE WHEN outcome IN ('target_hit','stop_hit')
                   OR (outcome = 'flat' AND price_at_outcome IS NOT NULL)
                   THEN realized_pct END) AS avg_realized_pct
-    FROM signal_outcomes
+    FROM signal_outcomes_canonical
     GROUP BY tier
     ORDER BY
       CASE tier WHEN 'auto' THEN 1 WHEN 'review' THEN 2 WHEN 'info' THEN 3 ELSE 4 END
@@ -82,6 +122,7 @@ async function loadTierStats(): Promise<TierRow[]> {
 
 async function loadSubtypeStats(): Promise<SubtypeRow[]> {
   return await all<SubtypeRow>(`
+    WITH ${CANONICAL}
     SELECT catalyst_subtype,
            COUNT(*) AS n,
            SUM(CASE WHEN outcome = 'target_hit' THEN 1 ELSE 0 END) AS wins,
@@ -90,7 +131,7 @@ async function loadSubtypeStats(): Promise<SubtypeRow[]> {
            AVG(CASE WHEN outcome IN ('target_hit','stop_hit')
                   OR (outcome = 'flat' AND price_at_outcome IS NOT NULL)
                   THEN realized_pct END) AS avg_realized_pct
-    FROM signal_outcomes
+    FROM signal_outcomes_canonical
     WHERE catalyst_subtype IS NOT NULL AND catalyst_subtype != ''
       AND outcome IS NOT NULL
     GROUP BY catalyst_subtype
@@ -101,11 +142,12 @@ async function loadSubtypeStats(): Promise<SubtypeRow[]> {
 
 async function loadRecent(): Promise<RecentRow[]> {
   return await all<RecentRow>(`
+    WITH ${CANONICAL}
     SELECT o.signal_id, o.asset_id AS asset, o.direction, o.tier,
            o.catalyst_subtype, o.outcome, o.realized_pct,
            o.generated_at, o.outcome_at, o.price_at_outcome,
            n.title AS title
-    FROM signal_outcomes o
+    FROM signal_outcomes_canonical o
     LEFT JOIN signals s ON s.id = o.signal_id
     LEFT JOIN news_events n ON n.id = s.triggered_by_event_id
     WHERE o.outcome IN ('target_hit','stop_hit','flat')
@@ -124,6 +166,7 @@ async function loadTotals() {
     stop_hits: number;
     flats: number;
   }>(`
+    WITH ${CANONICAL}
     SELECT COUNT(*) AS total,
            SUM(CASE WHEN outcome IS NOT NULL THEN 1 ELSE 0 END) AS resolved,
            SUM(CASE WHEN outcome IS NULL THEN 1 ELSE 0 END) AS pending,
@@ -133,7 +176,7 @@ async function loadTotals() {
            SUM(CASE WHEN outcome = 'target_hit' THEN 1 ELSE 0 END) AS target_hits,
            SUM(CASE WHEN outcome = 'stop_hit' THEN 1 ELSE 0 END) AS stop_hits,
            SUM(CASE WHEN outcome = 'flat' THEN 1 ELSE 0 END) AS flats
-    FROM signal_outcomes
+    FROM signal_outcomes_canonical
   `);
   return r;
 }
