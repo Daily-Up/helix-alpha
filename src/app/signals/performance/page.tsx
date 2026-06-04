@@ -1,0 +1,441 @@
+/**
+ * Signal performance — honest accounting of past signals.
+ *
+ * The product question this page answers: "If I had executed every
+ * AUTO/REVIEW signal Helix ever fired, what would have happened?"
+ *
+ * What we measure
+ *   - Volume: how many signals at each tier
+ *   - Resolution: target_hit / stop_hit / flat / dismissed / blocked
+ *   - Realized P&L: average pct move from entry to outcome
+ *   - Win rate among resolved (excludes flat / blocked / dismissed)
+ *
+ * Design language matches /briefing — Fraunces hero, hairlines, mono
+ * kickers, generous spacing.
+ */
+import { Shell } from "@/components/layout/Shell";
+import { all, get } from "@/lib/db/client";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+interface TierRow {
+  tier: string;
+  total: number;
+  target_hit: number;
+  stop_hit: number;
+  flat: number;
+  blocked: number;
+  dismissed: number;
+  pending: number;
+  avg_realized_pct: number | null;
+}
+
+interface SubtypeRow {
+  catalyst_subtype: string;
+  n: number;
+  wins: number;
+  losses: number;
+  flat: number;
+  avg_realized_pct: number | null;
+}
+
+interface RecentRow {
+  signal_id: string;
+  asset: string;
+  direction: string;
+  tier: string;
+  catalyst_subtype: string;
+  outcome: string | null;
+  realized_pct: number | null;
+  generated_at: number;
+  outcome_at: number | null;
+}
+
+async function loadTierStats(): Promise<TierRow[]> {
+  return await all<TierRow>(`
+    SELECT tier,
+           COUNT(*) AS total,
+           SUM(CASE WHEN outcome = 'target_hit' THEN 1 ELSE 0 END) AS target_hit,
+           SUM(CASE WHEN outcome = 'stop_hit'   THEN 1 ELSE 0 END) AS stop_hit,
+           SUM(CASE WHEN outcome = 'flat'       THEN 1 ELSE 0 END) AS flat,
+           SUM(CASE WHEN outcome = 'blocked'    THEN 1 ELSE 0 END) AS blocked,
+           SUM(CASE WHEN outcome = 'dismissed'  THEN 1 ELSE 0 END) AS dismissed,
+           SUM(CASE WHEN outcome IS NULL        THEN 1 ELSE 0 END) AS pending,
+           AVG(CASE WHEN outcome IN ('target_hit','stop_hit','flat') THEN realized_pct END) AS avg_realized_pct
+    FROM signal_outcomes
+    GROUP BY tier
+    ORDER BY
+      CASE tier WHEN 'auto' THEN 1 WHEN 'review' THEN 2 WHEN 'info' THEN 3 ELSE 4 END
+  `);
+}
+
+async function loadSubtypeStats(): Promise<SubtypeRow[]> {
+  return await all<SubtypeRow>(`
+    SELECT catalyst_subtype,
+           COUNT(*) AS n,
+           SUM(CASE WHEN outcome = 'target_hit' THEN 1 ELSE 0 END) AS wins,
+           SUM(CASE WHEN outcome = 'stop_hit'   THEN 1 ELSE 0 END) AS losses,
+           SUM(CASE WHEN outcome = 'flat'       THEN 1 ELSE 0 END) AS flat,
+           AVG(CASE WHEN outcome IN ('target_hit','stop_hit','flat') THEN realized_pct END) AS avg_realized_pct
+    FROM signal_outcomes
+    WHERE catalyst_subtype IS NOT NULL AND catalyst_subtype != ''
+      AND outcome IS NOT NULL
+    GROUP BY catalyst_subtype
+    HAVING n >= 2
+    ORDER BY n DESC
+  `);
+}
+
+async function loadRecent(): Promise<RecentRow[]> {
+  return await all<RecentRow>(`
+    SELECT o.signal_id, o.asset_id AS asset, o.direction, o.tier,
+           o.catalyst_subtype, o.outcome, o.realized_pct,
+           o.generated_at, o.outcome_at
+    FROM signal_outcomes o
+    WHERE o.outcome IN ('target_hit','stop_hit','flat')
+    ORDER BY o.generated_at DESC
+    LIMIT 25
+  `);
+}
+
+async function loadTotals() {
+  const r = await get<{
+    total: number;
+    resolved: number;
+    pending: number;
+    avg_pct: number | null;
+    target_hits: number;
+    stop_hits: number;
+    flats: number;
+  }>(`
+    SELECT COUNT(*) AS total,
+           SUM(CASE WHEN outcome IS NOT NULL THEN 1 ELSE 0 END) AS resolved,
+           SUM(CASE WHEN outcome IS NULL THEN 1 ELSE 0 END) AS pending,
+           AVG(CASE WHEN outcome IN ('target_hit','stop_hit','flat') THEN realized_pct END) AS avg_pct,
+           SUM(CASE WHEN outcome = 'target_hit' THEN 1 ELSE 0 END) AS target_hits,
+           SUM(CASE WHEN outcome = 'stop_hit' THEN 1 ELSE 0 END) AS stop_hits,
+           SUM(CASE WHEN outcome = 'flat' THEN 1 ELSE 0 END) AS flats
+    FROM signal_outcomes
+  `);
+  return r;
+}
+
+function fmtPct(x: number | null | undefined, withSign = false): string {
+  if (x == null) return "—";
+  const sign = withSign && x > 0 ? "+" : "";
+  return `${sign}${x.toFixed(2)}%`;
+}
+
+// ─── Design tokens ──
+const COLORS = {
+  pos: "#34c39a",
+  neg: "#e25b66",
+  text: "#e7e5e0",
+  muted: "#8a857d",
+  dim: "#5c5852",
+  line: "rgba(255,255,255,0.07)",
+};
+
+const KICKER = {
+  fontFamily: "var(--font-jetbrains-mono)",
+  fontSize: 10,
+  letterSpacing: "0.22em",
+  textTransform: "uppercase" as const,
+  color: COLORS.muted,
+};
+
+const HEADLINE = {
+  fontFamily: "var(--font-fraunces)",
+  fontSize: 32,
+  lineHeight: 1.15,
+  color: COLORS.text,
+  letterSpacing: "-0.01em",
+};
+
+function HairlineHeader({ kicker, headline, note }: { kicker: string; headline: string; note?: string }) {
+  return (
+    <div style={{ paddingBottom: 28, marginBottom: 28, borderBottom: `1px solid ${COLORS.line}` }}>
+      <div style={KICKER}>{kicker}</div>
+      <h1 style={{ ...HEADLINE, marginTop: 10 }}>{headline}</h1>
+      {note && (
+        <p style={{ marginTop: 12, color: COLORS.muted, fontSize: 14, lineHeight: 1.6, maxWidth: 720 }}>{note}</p>
+      )}
+    </div>
+  );
+}
+
+export default async function PerformancePage() {
+  const [totals, tiers, subtypes, recent] = await Promise.all([
+    loadTotals(),
+    loadTierStats(),
+    loadSubtypeStats(),
+    loadRecent(),
+  ]);
+
+  const winRate =
+    totals && (totals.target_hits + totals.stop_hits) > 0
+      ? totals.target_hits / (totals.target_hits + totals.stop_hits)
+      : null;
+
+  return (
+    <Shell>
+      <HairlineHeader
+        kicker="Signal Performance"
+        headline="What happened to the signals we fired"
+        note="Honest accounting. Includes everything Helix ever proposed — AUTO, REVIEW, INFO. We score against the suggested target / stop. Flat = neither target nor stop was hit before the signal expired. Blocked = the pre-save invariant gate refused the signal at fire time. Dismissed = the lifecycle sweeper closed it."
+      />
+
+      {/* Top-line totals */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 24, marginBottom: 36 }}>
+        <Stat
+          kicker="Total signals"
+          value={String(totals?.total ?? 0)}
+          note={`${totals?.resolved ?? 0} resolved · ${totals?.pending ?? 0} pending`}
+        />
+        <Stat
+          kicker="Win rate"
+          value={winRate == null ? "—" : `${Math.round(winRate * 100)}%`}
+          note={`${totals?.target_hits ?? 0} target hits / ${totals?.stop_hits ?? 0} stops`}
+          color={winRate == null ? COLORS.text : winRate > 0.5 ? COLORS.pos : COLORS.neg}
+        />
+        <Stat
+          kicker="Avg realized"
+          value={fmtPct(totals?.avg_pct ?? null, true)}
+          note="across resolved outcomes"
+          color={
+            totals?.avg_pct == null
+              ? COLORS.text
+              : totals.avg_pct > 0
+                ? COLORS.pos
+                : COLORS.neg
+          }
+        />
+        <Stat
+          kicker="Flat rate"
+          value={
+            totals && totals.resolved > 0
+              ? `${Math.round((totals.flats / totals.resolved) * 100)}%`
+              : "—"
+          }
+          note="expired without hitting target or stop"
+        />
+      </div>
+
+      {/* By tier */}
+      <Section title="By tier" kicker="Breakdown">
+        <SimpleTable
+          head={["Tier", "Total", "Target hit", "Stop hit", "Flat", "Avg realized"]}
+          rows={tiers.map((t) => [
+            <span key="t" style={{ textTransform: "uppercase", letterSpacing: "0.1em", fontSize: 11 }}>
+              {t.tier}
+            </span>,
+            String(t.total),
+            <Cell key="w" v={t.target_hit} color={COLORS.pos} />,
+            <Cell key="l" v={t.stop_hit} color={COLORS.neg} />,
+            String(t.flat),
+            <span
+              key="r"
+              style={{
+                color:
+                  t.avg_realized_pct == null
+                    ? COLORS.text
+                    : t.avg_realized_pct > 0
+                      ? COLORS.pos
+                      : COLORS.neg,
+              }}
+            >
+              {fmtPct(t.avg_realized_pct, true)}
+            </span>,
+          ])}
+        />
+      </Section>
+
+      {/* By subtype */}
+      {subtypes.length > 0 && (
+        <Section title="By catalyst subtype" kicker="What works">
+          <SimpleTable
+            head={["Subtype", "n", "Wins", "Losses", "Flat", "Avg realized"]}
+            rows={subtypes.map((s) => [
+              s.catalyst_subtype,
+              String(s.n),
+              <Cell key="w" v={s.wins} color={COLORS.pos} />,
+              <Cell key="l" v={s.losses} color={COLORS.neg} />,
+              String(s.flat),
+              <span
+                key="r"
+                style={{
+                  color:
+                    s.avg_realized_pct == null
+                      ? COLORS.text
+                      : s.avg_realized_pct > 0
+                        ? COLORS.pos
+                        : COLORS.neg,
+                }}
+              >
+                {fmtPct(s.avg_realized_pct, true)}
+              </span>,
+            ])}
+          />
+        </Section>
+      )}
+
+      {/* Recent resolved */}
+      <Section title="Recent resolved signals" kicker="Receipts">
+        {recent.length === 0 ? (
+          <p style={{ color: COLORS.muted, fontSize: 14 }}>No resolved signals yet.</p>
+        ) : (
+          <SimpleTable
+            head={["Date", "Asset", "Tier", "Dir", "Subtype", "Outcome", "Realized"]}
+            rows={recent.map((r) => [
+              new Date(r.generated_at).toISOString().slice(0, 10),
+              r.asset,
+              <span key="t" style={{ textTransform: "uppercase", fontSize: 11, letterSpacing: "0.1em" }}>
+                {r.tier}
+              </span>,
+              <span
+                key="d"
+                style={{ color: r.direction === "long" ? COLORS.pos : COLORS.neg, fontSize: 11 }}
+              >
+                {r.direction.toUpperCase()}
+              </span>,
+              r.catalyst_subtype ?? "—",
+              <OutcomeBadge key="o" outcome={r.outcome ?? ""} />,
+              <span
+                key="r"
+                style={{
+                  color:
+                    r.realized_pct == null
+                      ? COLORS.text
+                      : r.realized_pct > 0
+                        ? COLORS.pos
+                        : COLORS.neg,
+                }}
+              >
+                {fmtPct(r.realized_pct, true)}
+              </span>,
+            ])}
+          />
+        )}
+      </Section>
+    </Shell>
+  );
+}
+
+function Stat({ kicker, value, note, color }: { kicker: string; value: string; note?: string; color?: string }) {
+  return (
+    <div>
+      <div style={KICKER}>{kicker}</div>
+      <div
+        style={{
+          fontFamily: "var(--font-fraunces)",
+          fontSize: 36,
+          lineHeight: 1.1,
+          color: color ?? COLORS.text,
+          marginTop: 8,
+          letterSpacing: "-0.01em",
+        }}
+      >
+        {value}
+      </div>
+      {note && (
+        <div style={{ marginTop: 6, color: COLORS.muted, fontSize: 12 }}>{note}</div>
+      )}
+    </div>
+  );
+}
+
+function Section({ title, kicker, children }: { title: string; kicker?: string; children: React.ReactNode }) {
+  return (
+    <section style={{ marginBottom: 40 }}>
+      {kicker && <div style={KICKER}>{kicker}</div>}
+      <h2
+        style={{
+          fontFamily: "var(--font-fraunces)",
+          fontSize: 22,
+          color: COLORS.text,
+          marginTop: 6,
+          marginBottom: 18,
+        }}
+      >
+        {title}
+      </h2>
+      {children}
+    </section>
+  );
+}
+
+function SimpleTable({ head, rows }: { head: string[]; rows: React.ReactNode[][] }) {
+  return (
+    <div style={{ borderTop: `1px solid ${COLORS.line}` }}>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead>
+          <tr>
+            {head.map((h, i) => (
+              <th
+                key={i}
+                style={{
+                  textAlign: "left",
+                  padding: "10px 12px",
+                  borderBottom: `1px solid ${COLORS.line}`,
+                  ...KICKER,
+                  color: COLORS.dim,
+                }}
+              >
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i}>
+              {r.map((c, j) => (
+                <td
+                  key={j}
+                  style={{
+                    padding: "12px",
+                    borderBottom: `1px solid ${COLORS.line}`,
+                    color: COLORS.text,
+                    fontSize: 13,
+                  }}
+                >
+                  {c}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function Cell({ v, color }: { v: number; color: string }) {
+  return <span style={{ color: v > 0 ? color : COLORS.muted }}>{v}</span>;
+}
+
+function OutcomeBadge({ outcome }: { outcome: string }) {
+  const styles: Record<string, { color: string; label: string }> = {
+    target_hit: { color: COLORS.pos, label: "Target" },
+    stop_hit: { color: COLORS.neg, label: "Stop" },
+    flat: { color: COLORS.muted, label: "Flat" },
+    dismissed: { color: COLORS.dim, label: "Dismissed" },
+    blocked: { color: COLORS.dim, label: "Blocked" },
+  };
+  const s = styles[outcome] ?? { color: COLORS.muted, label: outcome };
+  return (
+    <span
+      style={{
+        ...KICKER,
+        color: s.color,
+        fontSize: 10,
+        padding: "3px 8px",
+        border: `1px solid ${s.color}33`,
+        borderRadius: 4,
+      }}
+    >
+      {s.label}
+    </span>
+  );
+}

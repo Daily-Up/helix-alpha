@@ -30,6 +30,7 @@ const NAV: Array<{ section: string; items: NavItem[] }> = [
     items: [
       { href: "/briefing", label: "Daily Briefing", badge: "NEW" },
       { href: "/signals", label: "Live Signals" },
+      { href: "/signals/performance", label: "Performance", badge: "NEW" },
       { href: "/portfolio", label: "Paper Portfolio" },
       { href: "/index-fund", label: "AlphaIndex", badge: "NEW" },
       { href: "/learnings", label: "Learnings", badge: "NEW" },
