@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { TradeModeBadge } from "./TradeModeBadge";
 
 /**
  * Top bar — shows the current UTC time + a "live" indicator.
@@ -32,6 +33,7 @@ export function Topbar() {
         <span className="text-fg-dim">UTC</span>
       </div>
       <div className="flex items-center gap-3">
+        <TradeModeBadge />
         <span className="flex items-center gap-1.5">
           <span className="dash-live-dot" aria-hidden />
           <span className="font-[var(--font-jetbrains-mono)] text-[11px] uppercase text-fg-muted" style={{ letterSpacing: "0.1em" }}>
