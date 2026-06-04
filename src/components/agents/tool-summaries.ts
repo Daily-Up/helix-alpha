@@ -226,7 +226,9 @@ function summarizePriceAroundCatalyst(input: Json, output: Json): ToolSummary {
   const i = asObj(input);
   const o = asObj(output);
   const symbol = asStr(i.symbol) ?? "?";
-  const catalyst = asStr(i.catalyst_iso);
+  // The tool accepts catalyst_time (input) and echoes catalyst_iso
+  // (output). Either is fine for the headline.
+  const catalyst = asStr(i.catalyst_time) ?? asStr(o.catalyst_iso);
   const asked = catalyst
     ? `${symbol} price action around ${new Date(catalyst).toISOString().slice(0, 10)}`
     : `${symbol} price tape around catalyst`;
@@ -235,18 +237,39 @@ function summarizePriceAroundCatalyst(input: Json, output: Json): ToolSummary {
     const reason = asStr(o.error) ?? asStr(o.reason) ?? "no price data";
     return { asked, found: `Unavailable — ${reason}` };
   }
-  const pre = asNum(o.pct_pre);
-  const post = asNum(o.pct_post);
+  // Read the tool's ACTUAL output fields (the previous version of this
+  // summarizer was reading non-existent fields like pct_pre / pct_post
+  // / last_price, which guaranteed every render fell through to
+  // "Limited data" — even when the tool had returned real data).
+  const preObj = asObj(o.pre_catalyst_close);
+  const preClose = asNum(preObj.close);
+  const preDate = asStr(preObj.date);
+  const implied1d = asNum(o.implied_move_1d_pct);
+  const implied3d = asNum(o.implied_move_3d_pct);
+  const currentMove = asNum(o.current_move_pct);
+  const currentPrice = asNum(o.current_price);
+
   const parts: string[] = [];
-  if (pre != null) parts.push(`${fmtMove(pre * 100)} in lead-up`);
-  if (post != null) parts.push(`${fmtMove(post * 100)} since`);
-  if (parts.length === 0) {
-    const lastPrice = asNum(o.last_price);
-    if (lastPrice != null) parts.push(`Last ${symbol}: $${lastPrice.toLocaleString()}`);
+  if (preClose != null) {
+    const closeStr =
+      preClose >= 1000
+        ? `$${Math.round(preClose).toLocaleString()}`
+        : `$${preClose.toFixed(2)}`;
+    parts.push(
+      preDate ? `pre $${closeStr.slice(1)} (${preDate})` : `pre ${closeStr}`,
+    );
   }
+  if (implied1d != null) parts.push(`+1d ${fmtMove(implied1d)}`);
+  if (implied3d != null) parts.push(`+3d ${fmtMove(implied3d)}`);
+  if (currentMove != null && implied3d == null) {
+    parts.push(`now ${fmtMove(currentMove)} from pre`);
+  } else if (currentPrice != null && implied1d == null && implied3d == null) {
+    parts.push(`last ${symbol} $${currentPrice.toFixed(2)}`);
+  }
+
   return {
     asked,
-    found: parts.length > 0 ? parts.join(" · ") : "Limited data",
+    found: parts.length > 0 ? parts.join(" · ") : "No klines in window for this symbol",
   };
 }
 
