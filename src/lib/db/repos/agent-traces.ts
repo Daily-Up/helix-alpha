@@ -223,7 +223,17 @@ export async function getTraceForSignal(
 }
 
 /** Recent traces across the system, newest first. Used by the agents
- *  observability page (Wave 2 / Wave 3). */
+ *  observability page (Wave 2 / Wave 3).
+ *
+ *  Traces that have been stuck in `status='running'` longer than
+ *  STUCK_AFTER_MS are coerced to `error` at read time so the
+ *  observability UI doesn't show a forever-spinning row when a
+ *  process crashed mid-run before finally{} could close the trace.
+ *  We rewrite the in-memory row only — no DB mutation here. A
+ *  periodic cleanup script can permanently fix the row if desired.
+ */
+const STUCK_AFTER_MS = 5 * 60 * 1000;
+
 export async function listRecentTraces(limit = 50): Promise<AgentTraceRow[]> {
   const rows = await all<RawRow>(
     `SELECT * FROM agent_traces
@@ -231,5 +241,19 @@ export async function listRecentTraces(limit = 50): Promise<AgentTraceRow[]> {
      LIMIT ?`,
     [limit],
   );
-  return rows.map(rowToTrace);
+  const now = Date.now();
+  return rows.map((r) => {
+    const trace = rowToTrace(r);
+    if (
+      trace.status === "running" &&
+      trace.started_at < now - STUCK_AFTER_MS
+    ) {
+      return {
+        ...trace,
+        status: "error" as const,
+        error: trace.error ?? "Stuck — never closed (likely a crash mid-run)",
+      };
+    }
+    return trace;
+  });
 }

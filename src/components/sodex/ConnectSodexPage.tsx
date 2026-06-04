@@ -251,6 +251,34 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
 
   return (
     <>
+      {/* Already-connected banner — when there's a stored API key, the
+          user is already in Live mode. Show it explicitly so the page
+          doesn't look like a fresh-setup form. */}
+      {localKey ? (
+        <div
+          className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded border border-positive/30 bg-positive/5 p-3 text-sm"
+          style={{ borderColor: "rgba(52, 195, 154, 0.35)" }}
+        >
+          <div className="flex flex-col gap-1">
+            <span
+              className="font-[var(--font-jetbrains-mono)] text-[10px] uppercase text-positive"
+              style={{ letterSpacing: "0.22em" }}
+            >
+              Live mode active
+            </span>
+            <span className="text-fg">
+              You have a Helix-scoped SoDEX API key stored in this browser.
+              Execute Live works on signal cards. Master wallet only needed
+              again to rotate or revoke this key.
+            </span>
+            <span className="font-mono text-xs text-fg-muted">
+              key: <span className="text-fg">{localKey.name || "(burner)"}</span>{" "}
+              · address: <span className="text-fg">{localKey.address.slice(0, 8)}…{localKey.address.slice(-6)}</span>
+            </span>
+          </div>
+        </div>
+      ) : null}
+
       <Card>
         <CardHeader>
           <CardTitle>2. Connect your wallet</CardTitle>
