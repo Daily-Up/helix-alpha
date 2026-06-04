@@ -38,6 +38,7 @@ import { eventTypeStatsTool } from "./tools/event-type-stats";
 import { queryBaseRateTool } from "./tools/query-base-rate";
 import { queryPriceAroundCatalystTool } from "./tools/query-price-around-catalyst";
 import type { AgentTool } from "./tools/types";
+import { getMarketPulse, formatPulseForPrompt } from "@/lib/regime/snapshot";
 
 const PRICING = { input: 3, cached: 0.3, output: 15 };
 const MAX_ROUNDS_PER_SIDE = 4;
@@ -221,6 +222,15 @@ async function runSide(
 ): Promise<SideResult> {
   const traceId = randomUUID();
   const model = getModel();
+
+  let marketPulse: string | undefined;
+  try {
+    const pulse = await getMarketPulse();
+    marketPulse = formatPulseForPrompt(pulse);
+  } catch (e) {
+    console.warn(`[debate-${side}] market pulse failed: ${(e as Error).message}`);
+  }
+
   await AgentTraces.startTrace({
     id: traceId,
     agent_name: `debate-${side}`,
@@ -240,7 +250,7 @@ async function runSide(
       ? [
           "You are the BULL agent in a structured debate about whether to",
           "execute a proposed trade.",
-          "",
+          marketPulse ? "\n" + marketPulse + "\n" : "",
           "Your assignment: argue the trade IS sound. Find the evidence",
           "that supports executing at the proposed tier. Use tools to",
           "build a case grounded in numbers, then submit_argument with",
@@ -253,7 +263,7 @@ async function runSide(
       : [
           "You are the BEAR agent in a structured debate about whether to",
           "execute a proposed trade.",
-          "",
+          marketPulse ? "\n" + marketPulse + "\n" : "",
           "Your assignment: argue the trade is NOT sound. Find the",
           "evidence that supports downgrading or killing it. Use tools",
           "to build a case grounded in numbers, then submit_argument",
@@ -473,6 +483,15 @@ async function runSynthesizer(input: {
 }): Promise<SynthResult> {
   const traceId = randomUUID();
   const model = getModel();
+
+  let marketPulse: string | undefined;
+  try {
+    const pulse = await getMarketPulse();
+    marketPulse = formatPulseForPrompt(pulse);
+  } catch (e) {
+    console.warn(`[debate-synth] market pulse failed: ${(e as Error).message}`);
+  }
+
   await AgentTraces.startTrace({
     id: traceId,
     agent_name: "debate-synth",
@@ -483,6 +502,7 @@ async function runSynthesizer(input: {
 
   const sys = [
     "You are the SYNTHESIZER agent in a structured debate. You have just",
+    marketPulse ? "\n" + marketPulse + "\n" : "",
     "read the bull's case and the bear's case for executing a trade. Both",
     "had access to the same tools and built their arguments from real",
     "evidence.",

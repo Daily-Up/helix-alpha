@@ -35,6 +35,7 @@ import { queryMarketRegimeTool } from "./tools/query-market-regime";
 import { querySimilarCatalystTool } from "./tools/query-similar-catalyst";
 import { queryMacroContextTool } from "./tools/query-macro-context";
 import type { AgentTool } from "./tools/types";
+import { getMarketPulse, formatPulseForPrompt } from "@/lib/regime/snapshot";
 
 const PRICING = { input: 3, cached: 0.3, output: 15 };
 const MAX_ROUNDS = 5;
@@ -100,9 +101,10 @@ const verdictTool: Anthropic.Tool = {
   },
 };
 
-function systemPrompt(): string {
+function systemPrompt(marketPulse?: string): string {
   return [
     "You are Helix's verification agent.",
+    marketPulse ? "\n" + marketPulse + "\n" : "",
     "",
     "A signal generator just proposed a trade. Your job is to STRESS-",
     "TEST that proposal before it executes. You are not arguing in",
@@ -191,6 +193,14 @@ export async function runVerificationAgent(input: {
   const traceId = input.traceId ?? randomUUID();
   const model = getModel();
 
+  let marketPulse: string | undefined;
+  try {
+    const pulse = await getMarketPulse();
+    marketPulse = formatPulseForPrompt(pulse);
+  } catch (e) {
+    console.warn(`[verification-agent] market pulse failed: ${(e as Error).message}`);
+  }
+
   await AgentTraces.startTrace({
     id: traceId,
     agent_name: "verification",
@@ -219,7 +229,7 @@ export async function runVerificationAgent(input: {
       const resp = await client.messages.create({
         model,
         max_tokens: MAX_OUTPUT_TOKENS,
-        system: systemPrompt(),
+        system: systemPrompt(marketPulse),
         tools,
         messages,
       });

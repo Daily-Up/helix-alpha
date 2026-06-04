@@ -37,6 +37,7 @@ import { queryMarketRegimeTool } from "./tools/query-market-regime";
 import { querySimilarCatalystTool } from "./tools/query-similar-catalyst";
 import { queryMacroContextTool } from "./tools/query-macro-context";
 import type { AgentTool } from "./tools/types";
+import { getMarketPulse, formatPulseForPrompt } from "@/lib/regime/snapshot";
 
 // ─────────────────────────────────────────────────────────────────────────
 // Pricing / config
@@ -144,7 +145,10 @@ const classifyTool: Anthropic.Tool = {
 // System prompt
 // ─────────────────────────────────────────────────────────────────────────
 
-function systemPrompt(universe: Array<{ id: string; symbol: string; name: string; kind: string }>): string {
+function systemPrompt(
+  universe: Array<{ id: string; symbol: string; name: string; kind: string }>,
+  marketPulse?: string,
+): string {
   const universeList = universe
     .slice(0, 100)
     .map((a) => `  ${a.id} (${a.symbol}) — ${a.kind}`)
@@ -201,6 +205,7 @@ function systemPrompt(universe: Array<{ id: string; symbol: string; name: string
     "  - Cite specific tool results in your final `reasoning` string.",
     "    Numbers and named outlets, not adjectives.",
     "",
+    marketPulse ? marketPulse + "\n" : "",
     "AVAILABLE ASSETS (use the exact id):",
     universeList,
     universe.length > 100 ? `  ... and ${universe.length - 100} more` : "",
@@ -259,6 +264,19 @@ export async function runResearchAgent(input: {
   const traceId = input.traceId ?? randomUUID();
   const model = getModel();
 
+  // Pre-compute the ambient market context once per agent run. This
+  // gets prepended to the system prompt so the agent knows BTC/ETH/SOL
+  // regime without having to call query_market_regime first.
+  // Failure is non-fatal — agent works without pulse but loses
+  // a round trip when it later calls the tool explicitly.
+  let marketPulse: string | undefined;
+  try {
+    const pulse = await getMarketPulse();
+    marketPulse = formatPulseForPrompt(pulse);
+  } catch (e) {
+    console.warn(`[research-agent] market pulse failed: ${(e as Error).message}`);
+  }
+
   await AgentTraces.startTrace({
     id: traceId,
     agent_name: "research",
@@ -286,7 +304,7 @@ export async function runResearchAgent(input: {
       const resp = await client.messages.create({
         model,
         max_tokens: MAX_OUTPUT_TOKENS,
-        system: systemPrompt(input.universe),
+        system: systemPrompt(input.universe, marketPulse),
         tools,
         messages,
       });
