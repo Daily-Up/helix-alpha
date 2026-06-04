@@ -15,6 +15,19 @@ export default function SignalsPage() {
             catalyst subtype, asset relevance, lifecycle, source tier —
             visible on hover.
           </p>
+          <p className="mt-3 text-[12px] text-fg-muted">
+            <a
+              className="underline decoration-dotted underline-offset-4 hover:text-fg"
+              href="/signals/performance"
+            >
+              See realized performance →
+            </a>
+            <span className="mx-3 text-fg-dim">·</span>
+            <span>
+              Demo mode is the default — connect a SoDEX wallet via the
+              badge in the top bar to enable LIVE execution.
+            </span>
+          </p>
         </header>
 
         <SignalsDashboard />
