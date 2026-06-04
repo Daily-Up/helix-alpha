@@ -116,12 +116,21 @@ export function AgentTraceCard({ trace }: { trace: AgentTraceData }) {
     [trace.steps],
   );
 
-  const agentLabel =
-    trace.agent_name === "verification"
-      ? "Verification agent"
-      : trace.agent_name === "debate"
-        ? "Debate agent"
-        : "Research agent";
+  // Agent labels — actual agent_name values are `research`,
+  // `verification`, `debate-bull`, `debate-bear`, `debate-synth`.
+  // Previously this checked `=== "debate"` which never matched any
+  // of the three debate variants, so they ALL fell through to
+  // "Research agent" — producing duplicate "RESEARCH AGENT" labels
+  // on every multi-agent audit page.
+  const agentLabel = (() => {
+    const name = trace.agent_name;
+    if (name === "verification") return "Verification agent";
+    if (name === "debate-bull") return "Debate · Bull case";
+    if (name === "debate-bear") return "Debate · Bear case";
+    if (name === "debate-synth") return "Debate · Synthesis";
+    if (name === "research") return "Research agent";
+    return name; // fall back to raw name for any new agent type
+  })();
 
   return (
     <article

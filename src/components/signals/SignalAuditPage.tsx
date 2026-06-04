@@ -148,7 +148,38 @@ export function SignalAuditPage({ signalId }: { signalId: string }) {
       .finally(() => setLoading(false));
   }, [signalId]);
 
-  if (loading) return <div className="text-sm text-fg-dim">Loading audit…</div>;
+  if (loading) {
+    // Skeleton that mirrors the actual audit layout so the page
+    // doesn't show a tiny "Loading audit…" line floating alone for
+    // the 2-4s while we wait for the parallelised /api/data/signal
+    // round trips to finish.
+    return (
+      <div className="dash-page-enter flex flex-col gap-6 animate-pulse">
+        <div className="h-3 w-32 rounded bg-fg-dim/10" />
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="h-7 w-16 rounded bg-fg-dim/10" />
+          <div className="h-7 w-14 rounded bg-fg-dim/10" />
+          <div className="h-7 w-20 rounded bg-fg-dim/10" />
+          <div className="h-7 w-24 rounded bg-fg-dim/10" />
+          <div className="h-7 w-12 rounded bg-fg-dim/10" />
+        </div>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div className="h-20 rounded bg-fg-dim/5" />
+          <div className="h-20 rounded bg-fg-dim/5" />
+          <div className="h-20 rounded bg-fg-dim/5" />
+          <div className="h-20 rounded bg-fg-dim/5" />
+          <div className="h-20 rounded bg-fg-dim/5" />
+          <div className="h-20 rounded bg-fg-dim/5" />
+        </div>
+        <div className="h-4 w-full rounded bg-fg-dim/5" />
+        <div className="h-4 w-5/6 rounded bg-fg-dim/5" />
+        <div className="h-4 w-4/6 rounded bg-fg-dim/5" />
+        <div className="mt-6 text-[11px] uppercase tracking-[0.18em] text-fg-dim">
+          Loading audit…
+        </div>
+      </div>
+    );
+  }
   if (error || !data)
     return (
       <div className="text-sm text-negative">
