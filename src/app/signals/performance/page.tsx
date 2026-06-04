@@ -50,6 +50,10 @@ interface RecentRow {
   realized_pct: number | null;
   generated_at: number;
   outcome_at: number | null;
+  /** news_events.title — what the agent was reasoning about when the
+   *  signal fired. Trimmed to a single line on the table; the audit
+   *  page has the full version. */
+  title: string | null;
 }
 
 async function loadTierStats(): Promise<TierRow[]> {
@@ -91,8 +95,11 @@ async function loadRecent(): Promise<RecentRow[]> {
   return await all<RecentRow>(`
     SELECT o.signal_id, o.asset_id AS asset, o.direction, o.tier,
            o.catalyst_subtype, o.outcome, o.realized_pct,
-           o.generated_at, o.outcome_at
+           o.generated_at, o.outcome_at,
+           n.title AS title
     FROM signal_outcomes o
+    LEFT JOIN signals s ON s.id = o.signal_id
+    LEFT JOIN news_events n ON n.id = s.triggered_by_event_id
     WHERE o.outcome IN ('target_hit','stop_hit','flat')
     ORDER BY o.generated_at DESC
     LIMIT 25
@@ -286,20 +293,32 @@ export default async function PerformancePage() {
           <p style={{ color: COLORS.muted, fontSize: 14 }}>No resolved signals yet.</p>
         ) : (
           <SimpleTable
-            head={["Date", "Asset", "Tier", "Dir", "Subtype", "Outcome", "Realized"]}
+            head={["Date", "Asset", "Dir", "Headline", "Outcome", "Realized"]}
             rows={recent.map((r) => [
               new Date(r.generated_at).toISOString().slice(0, 10),
-              r.asset,
-              <span key="t" style={{ textTransform: "uppercase", fontSize: 11, letterSpacing: "0.1em" }}>
-                {r.tier}
-              </span>,
+              <a
+                key="a"
+                href={`/signal/${r.signal_id}`}
+                style={{
+                  color: COLORS.text,
+                  textDecoration: "none",
+                  borderBottom: `1px dotted ${COLORS.muted}`,
+                }}
+              >
+                {r.asset}
+              </a>,
               <span
                 key="d"
                 style={{ color: r.direction === "long" ? COLORS.pos : COLORS.neg, fontSize: 11 }}
               >
                 {r.direction.toUpperCase()}
               </span>,
-              r.catalyst_subtype ?? "—",
+              <HeadlineCell
+                key="h"
+                title={r.title}
+                fallback={r.catalyst_subtype}
+                href={`/signal/${r.signal_id}`}
+              />,
               <OutcomeBadge key="o" outcome={r.outcome ?? ""} />,
               <span
                 key="r"
@@ -413,6 +432,40 @@ function SimpleTable({ head, rows }: { head: string[]; rows: React.ReactNode[][]
 
 function Cell({ v, color }: { v: number; color: string }) {
   return <span style={{ color: v > 0 ? color : COLORS.muted }}>{v}</span>;
+}
+
+function HeadlineCell({
+  title,
+  fallback,
+  href,
+}: {
+  title: string | null;
+  fallback: string | null;
+  href: string;
+}) {
+  // Single-line, character-clamped (CSS line-clamp would need an extra
+  // wrapper for ellipsis to play nicely inside table cells). 92 chars
+  // is a comfortable upper bound on a 1440px viewport.
+  const raw = title?.trim() || fallback || "—";
+  const display = raw.length > 92 ? raw.slice(0, 92).trimEnd() + "…" : raw;
+  return (
+    <a
+      href={href}
+      title={raw}
+      style={{
+        color: COLORS.text,
+        textDecoration: "none",
+        display: "block",
+        maxWidth: 520,
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+        fontSize: 13,
+      }}
+    >
+      {display}
+    </a>
+  );
 }
 
 function OutcomeBadge({ outcome }: { outcome: string }) {

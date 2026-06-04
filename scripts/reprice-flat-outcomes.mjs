@@ -100,21 +100,40 @@ function resolveFlat(signal, klines) {
   };
 }
 
-const r = await db.execute(
-  `SELECT signal_id, asset_id, direction, target_pct, stop_pct,
-          price_at_generation, generated_at, expires_at
-   FROM signal_outcomes
-   WHERE outcome = 'flat' AND price_at_outcome IS NULL
-   ORDER BY generated_at ASC`,
-);
+// Reprice every EXPIRED flat outcome. Two reasons:
+//   1. The "stale klines locked us at 0%" set — rows with NULL
+//      price_at_outcome that got fixed by the first pass.
+//   2. Rows where klines were partially available at resolve time:
+//      the resolver used the close of the last available bar (which
+//      was earlier than expires_at), so price_at_outcome is non-null
+//      but doesn't reflect the actual close at expiry. Now that
+//      klines_daily is current, we replay against the correct window.
+//
+// Only EXPIRED signals — anything still pending should stay pending.
+const r = await db.execute({
+  sql: `SELECT signal_id, asset_id, direction, target_pct, stop_pct,
+               price_at_generation, generated_at, expires_at,
+               price_at_outcome, realized_pct
+        FROM signal_outcomes
+        WHERE outcome = 'flat'
+          AND expires_at < ?
+        ORDER BY generated_at ASC`,
+  args: [Date.now()],
+});
 
-console.log(`Found ${r.rows.length} flat outcomes with no price at outcome.\n`);
+console.log(`Found ${r.rows.length} expired flat outcomes to consider.\n`);
 
-let repriced = 0;
+let touched = 0;
 let still_no_klines = 0;
 let upgraded = 0; // flat → target_hit / stop_hit
+let realized_changed = 0; // realized_pct moved meaningfully
+let unchanged = 0;
 
 for (const row of r.rows) {
+  if (row.price_at_generation == null) {
+    // Can't compute a directional move with no anchor.
+    continue;
+  }
   const klines = await klinesForWindow(
     String(row.asset_id),
     Number(row.generated_at),
@@ -136,6 +155,17 @@ for (const row of r.rows) {
     klines,
   );
   if (!verdict) continue;
+
+  const oldRealized = row.realized_pct != null ? Number(row.realized_pct) : null;
+  const isUpgrade = verdict.outcome !== "flat";
+  const realizedShifted =
+    verdict.realized_pct != null &&
+    (oldRealized == null || Math.abs(verdict.realized_pct - oldRealized) >= 0.01);
+
+  if (!isUpgrade && !realizedShifted) {
+    unchanged++;
+    continue;
+  }
 
   const sizeR = await db.execute({
     sql: `SELECT suggested_size_usd AS size FROM signals WHERE id = ?`,
@@ -160,17 +190,22 @@ for (const row of r.rows) {
       String(row.signal_id),
     ],
   });
-  repriced++;
-  if (verdict.outcome !== "flat") upgraded++;
+  touched++;
+  if (isUpgrade) upgraded++;
+  else realized_changed++;
 
-  if (repriced % 5 === 0) {
-    console.log(`  [${repriced}] ${row.signal_id} ${row.asset_id} ${row.direction} → ${verdict.outcome} ${verdict.realized_pct?.toFixed?.(2)}%`);
+  if (touched % 5 === 0 || isUpgrade) {
+    const oldStr = oldRealized == null ? "—" : oldRealized.toFixed(2) + "%";
+    const newStr = verdict.realized_pct == null ? "—" : verdict.realized_pct.toFixed(2) + "%";
+    console.log(`  [${touched}] ${row.asset_id} ${row.direction} ${oldStr} → ${verdict.outcome} ${newStr}`);
   }
 }
 
 console.log(`\nDONE`);
-console.log(`  Repriced:           ${repriced}`);
-console.log(`  Upgraded to hit:    ${upgraded}`);
-console.log(`  Still missing data: ${still_no_klines}`);
+console.log(`  Touched:            ${touched}`);
+console.log(`    upgraded to hit:  ${upgraded}`);
+console.log(`    realized changed: ${realized_changed}`);
+console.log(`  Unchanged:          ${unchanged}`);
+console.log(`  Missing klines:     ${still_no_klines}`);
 
 process.exit(0);
