@@ -17,6 +17,10 @@ export interface ResolutionJobResult {
   still_pending: number;
   skipped_no_prices: number;
   errors: number;
+  /** Flat outcomes whose `realized_pct` we backfilled from fresh klines
+   *  because the original resolution ran while klines_daily was stale
+   *  (price_at_outcome was NULL). */
+  flats_repriced: number;
 }
 
 export async function runResolutionJob(
@@ -32,6 +36,7 @@ export async function runResolutionJob(
     still_pending: 0,
     skipped_no_prices: 0,
     errors: 0,
+    flats_repriced: 0,
   };
 
   for (const row of pending) {
@@ -72,6 +77,58 @@ export async function runResolutionJob(
       );
     }
   }
+
+  // Second pass: re-resolve flat outcomes whose `price_at_outcome` is
+  // NULL. Those rows were resolved while klines_daily was stale and
+  // are stuck at `realized_pct=0` — a placeholder, not a real flat.
+  // Now that klines are fresh we can compute the actual directional
+  // close-to-close ROI at expiry.
+  try {
+    const flats = await Outcomes.listFlatOutcomesMissingPrice();
+    for (const row of flats) {
+      try {
+        const klines = await klinesForWindow(
+          row.asset_id,
+          row.generated_at,
+          row.expires_at,
+        );
+        if (klines.length === 0) continue;
+        const signal: ResolveSignalInput = {
+          asset_id: row.asset_id,
+          direction: row.direction,
+          price_at_generation: row.price_at_generation,
+          target_pct: row.target_pct,
+          stop_pct: row.stop_pct,
+          generated_at: row.generated_at,
+          expires_at: row.expires_at,
+        };
+        const verdict = resolveOutcome({
+          signal,
+          klines,
+          // Pin "now" to past-expiry so we always get a terminal verdict.
+          now: row.expires_at + 1,
+        });
+        if (verdict.outcome == null) continue;
+        await Outcomes.recomputeFlatResolution(row.signal_id, {
+          outcome: verdict.outcome,
+          outcome_at_ms: verdict.outcome_at_ms ?? row.expires_at,
+          price_at_outcome: verdict.price_at_outcome,
+          realized_pct: verdict.realized_pct,
+        });
+        result.flats_repriced++;
+      } catch (err) {
+        result.errors++;
+        console.warn(
+          `[resolve-job] reprice error on ${row.signal_id}: ${(err as Error).message}`,
+        );
+      }
+    }
+  } catch (err) {
+    console.warn(
+      `[resolve-job] flat-reprice pass failed: ${(err as Error).message}`,
+    );
+  }
+
   return result;
 }
 

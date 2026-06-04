@@ -289,6 +289,64 @@ export async function applyResolution(
   );
 }
 
+/**
+ * Like `applyResolution` but without the "outcome IS NULL" guard.
+ *
+ * Use only for re-resolving FLAT outcomes that were locked in when the
+ * kline window was empty (klines_daily lagged the resolution job, so
+ * the resolver fell through to `flat` with `price_at_outcome=NULL` and
+ * `realized_pct=0`). Now that klines_daily is fresh, recomputing those
+ * rows lets the at-expiry directional close-to-close ROI surface on the
+ * performance page instead of a misleading "0%".
+ *
+ * Refuses to overwrite `target_hit` / `stop_hit` / `blocked` /
+ * `dismissed` — those are real, not artefacts of stale data.
+ */
+export async function recomputeFlatResolution(
+  signalId: string,
+  update: ResolutionUpdate,
+): Promise<void> {
+  const size = await get<{ size: number | null }>(
+    `SELECT suggested_size_usd AS size FROM signals WHERE id = ?`,
+    [signalId],
+  );
+  const sizeUsd = size?.size ?? null;
+  const pnl =
+    update.realized_pct != null && sizeUsd != null
+      ? (update.realized_pct / 100) * sizeUsd
+      : null;
+
+  await run(
+    `UPDATE signal_outcomes
+     SET outcome = ?, outcome_at = ?, price_at_outcome = ?,
+         realized_pct = ?, realized_pnl_usd = ?
+     WHERE signal_id = ? AND outcome = 'flat'`,
+    [
+      update.outcome,
+      update.outcome_at_ms,
+      update.price_at_outcome,
+      update.realized_pct,
+      pnl,
+      signalId,
+    ],
+  );
+}
+
+/**
+ * Rows whose `outcome='flat'` was decided before klines_daily had any
+ * bar covering the signal window — the row has no `price_at_outcome`
+ * (and therefore `realized_pct=0` is a placeholder, not a real flat).
+ *
+ * `recomputeFlatOutcomesJob` re-resolves these once klines are fresh.
+ */
+export async function listFlatOutcomesMissingPrice(): Promise<OutcomeRow[]> {
+  return all<OutcomeRow>(
+    `SELECT * FROM signal_outcomes
+     WHERE outcome = 'flat' AND price_at_outcome IS NULL
+     ORDER BY generated_at ASC`,
+  );
+}
+
 export function horizonStringToHours(s: string): number {
   const m = s.trim().match(/^(\d+(?:\.\d+)?)([hd])$/i);
   if (!m) return 24;
