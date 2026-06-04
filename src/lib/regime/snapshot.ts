@@ -49,9 +49,16 @@ export async function getMarketPulse(at?: number): Promise<MarketPulse> {
  *   - SOL: DOWN, close $72, -26.6% from ATH (23d), RSI 41, 30d -14.5%, vol 50%
  */
 export function formatPulseForPrompt(pulse: MarketPulse): string {
-  const dt = new Date(pulse.computed_at).toISOString().slice(0, 16) + "Z";
+  // Quantize the timestamp to the hour. Regime moves slowly and this
+  // lets multiple agent runs within the hour reuse the Anthropic
+  // prompt cache (cache hit requires byte-identical system prompt).
+  // Without quantizing, every run is a fresh minute → cache miss →
+  // pay full input rate on the ~3k-token system prompt.
+  const hour = new Date(Math.floor(pulse.computed_at / 3_600_000) * 3_600_000)
+    .toISOString()
+    .slice(0, 13) + ":00Z";
   const lines = [
-    `MARKET PULSE — ${dt}  (auto-injected; you don't need to call query_market_regime to know this)`,
+    `MARKET PULSE — ${hour}  (auto-injected; you don't need to call query_market_regime to know this)`,
   ];
   for (const r of pulse.rows) {
     if ("missing" in r) {
