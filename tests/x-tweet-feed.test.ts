@@ -13,7 +13,7 @@
 import { describe, expect, it } from "vitest";
 import { isTrustedXAccount, _internals } from "@/lib/ingest/x-tweet-feed";
 
-const { synthesiseTitle, isTweet } = _internals;
+const { synthesiseTitle, isTweet, passesContentRelevance } = _internals;
 
 describe("isTrustedXAccount — only first-mover / capital / hack / firm-size accounts", () => {
   // Tier 1: capital + policy newsrooms
@@ -177,6 +177,120 @@ describe("fetchTweets volume gate (mocked SoSoValue)", () => {
         content: "btc moon",
       }),
     ).toBe(false);
+  });
+});
+
+describe("passesContentRelevance — content gate", () => {
+  // Real Cointelegraph posts from the live feed. Some are crypto-
+  // relevant (must pass); some are general tech / political /
+  // commentary (must drop).
+
+  describe("DROPS off-topic content", () => {
+    it("AI safety policy commentary (Anthropic cyber threats report)", () => {
+      expect(
+        passesContentRelevance(
+          "AI firm Anthropic mapped a year's worth of AI-enabled cyber threats, finding that malicious actors are quickly becoming more dangerous",
+        ),
+      ).toBe(false);
+    });
+
+    it("Elon Musk X Money rollout (no crypto context)", () => {
+      expect(
+        passesContentRelevance(
+          "🚨 JUST IN: Elon Musk says, 'We are gradually widening the availability of X Money.'",
+        ),
+      ).toBe(false);
+    });
+
+    it("AI CEOs urging Congress on AI policy", () => {
+      expect(
+        passesContentRelevance(
+          "🇺🇸 JUST IN: Top AI CEOs including Sam Altman, Dario Amodei, and Demis Hassabis are urging Congress to pass laws protecting against AI-enabled",
+        ),
+      ).toBe(false);
+    });
+
+    it("Generic political commentary (Trump on affordability)", () => {
+      expect(
+        passesContentRelevance(
+          "🇺🇸 NOW: President Trump claims he and Republicans are winning the affordability battle by record numbers",
+        ),
+      ).toBe(false);
+    });
+
+    it("KOL question / chit-chat", () => {
+      expect(
+        passesContentRelevance("GM legends, what are we trading today?"),
+      ).toBe(false);
+    });
+  });
+
+  describe("KEEPS crypto-relevant content", () => {
+    it("ETF flow data (the gold-standard market input)", () => {
+      expect(
+        passesContentRelevance(
+          "🇺🇸 ETF Flows: BTC, ETH, SOL, and XRP spot ETFs experienced net outflows on June 4. BTC: -$396.6M ETH: -$52.94M",
+        ),
+      ).toBe(true);
+    });
+
+    it("Fed Beige Book / macro release", () => {
+      expect(
+        passesContentRelevance(
+          "🇺🇸 LATEST: The Fed's Beige Book shows steady employment and slight economic growth across the US, but inflation is ticking higher",
+        ),
+      ).toBe(true);
+    });
+
+    it("Hyperliquid perp volume record (Wu Blockchain style)", () => {
+      expect(
+        passesContentRelevance(
+          "Hyperliquid's May Perps Volume Hits Record 6.63% of Global CEX Total and 14.4% of Binance",
+        ),
+      ).toBe(true);
+    });
+
+    it("MicroStrategy BTC purchase", () => {
+      expect(
+        passesContentRelevance(
+          "Strategy announces purchase of 5,000 additional BTC for $500M",
+        ),
+      ).toBe(true);
+    });
+
+    it("BlackRock spot ETH ETF filing", () => {
+      expect(
+        passesContentRelevance(
+          "BlackRock files for Spot Ethereum ETF with SEC",
+        ),
+      ).toBe(true);
+    });
+
+    it("SEC action on a token", () => {
+      expect(
+        passesContentRelevance(
+          "SEC sues XRP issuer over unregistered securities offering",
+        ),
+      ).toBe(true);
+    });
+
+    it("Exploit alert with $ amount", () => {
+      expect(
+        passesContentRelevance(
+          "Curve pools exploited for $61M via Vyper reentrancy bug",
+        ),
+      ).toBe(true);
+    });
+
+    it("Listing announcement", () => {
+      expect(
+        passesContentRelevance("Binance announces listing of $XYZ"),
+      ).toBe(true);
+    });
+
+    it("$ticker mention is sufficient", () => {
+      expect(passesContentRelevance("Hot take on $SOL ecosystem")).toBe(true);
+    });
   });
 });
 

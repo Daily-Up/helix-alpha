@@ -133,6 +133,76 @@ const DEFAULT_TITLE_CAP = 240;
  */
 const MIN_FALLBACK_LIKES = 50;
 
+/**
+ * Author handles whose every post is by definition crypto-relevant.
+ * Bypasses the content-relevance gate below — when a security firm
+ * tweets, it's because something on-chain happened. Same for whale
+ * trackers — every tweet from whale_alert is a large transfer.
+ */
+const CONTENT_GATE_BYPASS = new Set<string>([
+  "halborn", "peckshield", "peckshieldalert", "slowmist", "certik",
+  "certikalert", "beosin", "cyvers", "hacken", "solidityscan",
+  "blockaid", "rektnews",
+  "whale_alert", "lookonchain",
+]);
+
+/**
+ * Content-relevance regex. Even from trusted accounts like
+ * Cointelegraph and Wu Blockchain, only a fraction of posts are
+ * crypto-market relevant — the rest is general tech, political
+ * commentary, or AI-policy content that has nothing to do with our
+ * tradable universe.
+ *
+ * A tweet passes the content gate when its (title + content) text
+ * contains at least one of:
+ *
+ *   - a crypto asset ticker or name (BTC, ETH, $XYZ, bitcoin, …)
+ *   - a regulator + crypto-relevant context (SEC, CFTC, FCA, MAS)
+ *   - ETF flow / spot-ETF mentions
+ *   - a major exchange (Binance, Coinbase, Kraken, OKX, Bybit, …)
+ *   - an exploit verb (hack, exploit, drained, stolen, rug)
+ *   - a market-structure event (listing, delisting, halving, fork)
+ *   - a treasury/ETF firm action (BlackRock, MicroStrategy, ARK, …)
+ *   - macro/Fed events (FOMC, CPI, PCE, NFP, Beige Book, …)
+ *
+ * The list is broad on purpose: a false-positive ("we mention BTC in
+ * passing") costs one Claude classification (~$0.001 on Haiku); a
+ * false-negative (we drop the next "MSTR buys $2B BTC" post) costs
+ * us the trade entirely. Tune toward recall.
+ */
+const RELEVANCE_PATTERNS: RegExp[] = [
+  // Tickers (whole-word so "BTC" doesn't match "subtleBTCwithin")
+  /\b(btc|eth|sol|xrp|bnb|ada|doge|avax|link|matic|dot|atom|near|arb|op|shib|pepe|uni|mkr|aave|bch|ltc|trx|fil|inj|tia|sei|jup|jto|wld|ena|ondo|pyth|render|tao)\b/i,
+  // $ticker pattern
+  /\$[A-Z]{2,6}\b/,
+  // Asset names
+  /\b(bitcoin|ethereum|solana|ripple|cardano|dogecoin|polygon|polkadot|chainlink|avalanche|hyperliquid|polymarket|kalshi)\b/i,
+  // Categories
+  /\b(crypto|cryptocurrenc|stablecoin|defi|cex|dex|perp(s|etual)?|tokeniz|on[- ]chain|altcoin|meme[- ]?coin)\b/i,
+  // ETF / institutional product
+  /\b(spot etf|futures etf|etf (flow|inflow|outflow)|net (inflow|outflow))/i,
+  // Exchanges
+  /\b(binance|coinbase|kraken|okx|bybit|hyperliquid|uniswap|gate\.io|kucoin|bitfinex|gemini|crypto\.com)\b/i,
+  // Treasury / ETF firms
+  /\b(microstrategy|strategy|blackrock|fidelity|ark invest|arkinvest|21shares|grayscale|bitwise|vaneck|hashdex|valkyrie|metaplanet|marathon|riot)\b/i,
+  // Regulators (with crypto-relevant context within 50 chars)
+  /\b(sec|cftc|fca|mas|finma|fincen|ofac|esma|treasury department)\b.{0,80}\b(crypto|token|bitcoin|ethereum|coin|digital asset|stablecoin|btc|eth|exchange)\b/i,
+  /\b(crypto|token|bitcoin|ethereum|coin|digital asset|stablecoin|btc|eth|exchange)\b.{0,80}\b(sec|cftc|fca|mas|finma|fincen|ofac|esma)\b/i,
+  // Macro / Fed
+  /\b(fomc|federal reserve|fed|cpi|pce|nfp|nonfarm|beige book|powell|inflation|rate (hike|cut)|jobs report|treasury yield|10-?year)\b/i,
+  // Exploit verbs
+  /\b(hack|hacked|exploit|exploited|drained|stolen|theft|reentranc|flash loan|rug ?pull|compromis|phishing|sim swap)\b/i,
+  // Market-structure events
+  /\b(listing|delist|halving|fork|airdrop|launch (a |its )?token|unlock|tge|token (sale|launch))\b/i,
+  // Capital actions
+  /\b(filed|files|filing|approves|approved|rejects|rejected|sues|charges|settles|settled|halts|halted|seized|raises|raised)\b.{0,40}\b(crypto|token|bitcoin|ethereum|coin|btc|eth|etf|exchange|protocol|treasury)\b/i,
+  /\b(crypto|token|bitcoin|ethereum|coin|btc|eth|etf|exchange|protocol|treasury)\b.{0,40}\b(filed|files|filing|approves|approved|rejects|sues|charges|settles|halts|seized|raises|raised|buy|buys|bought|sell|sells|sold|acquire|acquired)\b/i,
+];
+
+function passesContentRelevance(text: string): boolean {
+  return RELEVANCE_PATTERNS.some((re) => re.test(text));
+}
+
 /** A NewsItem that carries the trusted-account flag we attach here. */
 export type TweetItem = NewsItem & { is_trusted_x_account?: boolean };
 
@@ -238,6 +308,20 @@ export async function fetchTweets(opts: {
       (item.like_count ?? 0) >= MIN_FALLBACK_LIKES;
     if (!trusted && !passesFallback) continue;
 
+    // CONTENT-RELEVANCE GATE — even trusted accounts post off-topic
+    // content (Cointelegraph on AI policy, Wu Blockchain on Tesla,
+    // etc.). Reject tweets whose text doesn't match the crypto-/
+    // macro-relevance patterns. Security firms + on-chain trackers
+    // bypass — when they tweet, it's relevant by definition.
+    const authorLower = (item.author ?? "").toLowerCase();
+    const bypassContent = [...CONTENT_GATE_BYPASS].some(
+      (a) => authorLower === a || authorLower.startsWith(a),
+    );
+    if (!bypassContent) {
+      const blob = `${item.title ?? ""}\n${item.content ?? ""}`;
+      if (!passesContentRelevance(blob)) continue;
+    }
+
     const cap = trusted ? TRUSTED_TITLE_CAP : DEFAULT_TITLE_CAP;
 
     // If the item somehow has a real title, keep it. Otherwise synthesise.
@@ -269,7 +353,9 @@ export function isTrustedXAccount(author: string | null | undefined): boolean {
 export const _internals = {
   TRUSTED_X_ACCOUNTS,
   TWEET_CATEGORIES,
+  CONTENT_GATE_BYPASS,
   isTweet,
   isTrustedAccount,
+  passesContentRelevance,
   synthesiseTitle,
 };
