@@ -4,7 +4,7 @@
  * Lock down the filter logic so a regression doesn't accidentally
  * let untrusted-account spam through OR drop fresh tweets.
  */
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { NewsItem } from "@/lib/sosovalue/types";
 
 // Stub the SoSoValue client so the test stays hermetic.
@@ -37,6 +37,10 @@ function tweet(overrides: Partial<NewsItem>): NewsItem {
 }
 
 describe("search_x_live", () => {
+  beforeEach(() => {
+    searchNewsSpy.mockReset();
+  });
+
   it("returns only tweet-category items (drops cat=1 editorial)", async () => {
     searchNewsSpy.mockResolvedValueOnce({
       list: [
@@ -91,6 +95,38 @@ describe("search_x_live", () => {
     const r = await searchXLiveTool.handle({ query: "x" });
     expect(r.matched_count).toBe(0);
     expect(r.summary.toLowerCase()).toContain("failed");
+  });
+
+  it("auto-broadens to the first keyword when the full phrase yields 0 trusted tweets", async () => {
+    // Round 1: agent passes a long phrase, nothing matches the trust list
+    searchNewsSpy.mockResolvedValueOnce({
+      list: [
+        tweet({ id: "1", category: 7, author: "RandomBlogger", content: "Coinbase SpaceX futures filings rumour" }),
+      ],
+    });
+    // Round 2: tool auto-retries with just "Coinbase", trusted result appears
+    searchNewsSpy.mockResolvedValueOnce({
+      list: [
+        tweet({ id: "2", category: 7, author: "CoinDesk", content: "Coinbase launches pre-IPO perpetual futures" }),
+      ],
+    });
+    const r = await searchXLiveTool.handle({ query: "Coinbase SpaceX futures" });
+    expect(searchNewsSpy).toHaveBeenCalledTimes(2);
+    expect(r.matched_count).toBe(1);
+    expect(r.results[0].author).toBe("CoinDesk");
+    expect(r.summary).toContain('broadened to "Coinbase"');
+  });
+
+  it("does NOT auto-broaden when the original query already returns results", async () => {
+    searchNewsSpy.mockResolvedValueOnce({
+      list: [
+        tweet({ id: "1", category: 7, author: "CoinDesk", content: "Coinbase SpaceX futures: real product, launching now" }),
+      ],
+    });
+    const r = await searchXLiveTool.handle({ query: "Coinbase SpaceX futures" });
+    expect(searchNewsSpy).toHaveBeenCalledTimes(1); // no broadening retry
+    expect(r.matched_count).toBe(1);
+    expect(r.summary).not.toContain("broadened");
   });
 
   it("strips HTML colour spans from content", async () => {

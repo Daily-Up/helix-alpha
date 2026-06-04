@@ -115,40 +115,66 @@ export const searchXLiveTool: AgentTool<Input, Output> = {
     const trustedOnly = input.trusted_only ?? true;
     const cutoffMs = Date.now() - maxAgeHours * 60 * 60 * 1000;
 
-    let raw;
-    try {
-      raw = await News.searchNews({
-        keyword: input.query,
-        page_size: 50,
-        sort: "publish_time",
-      });
-    } catch (err) {
-      return {
-        query: input.query,
-        scanned: 0,
-        matched_count: 0,
-        results: [],
-        summary: `Live X search failed: ${(err as Error).message}`,
-      };
-    }
+    // Build a sequence of progressively-broader queries to try if the
+    // original returns 0 tweets. SoSoValue uses substring matching,
+    // so an agent passing the entire headline ("Coinbase SpaceX
+    // futures") will match almost nothing — but "Coinbase" alone
+    // matches plenty. This auto-broadening keeps the tool useful even
+    // when the agent prompts it poorly.
+    const tryQueries = [input.query];
+    const words = input.query
+      .split(/\s+/)
+      .filter((w) => w.length >= 3)
+      .filter((w) => !/^(the|and|for|with|from|that|this)$/i.test(w));
+    if (words.length > 1) tryQueries.push(words[0]);
+    if (words.length > 2) tryQueries.push(`${words[0]} ${words[1]}`);
 
-    const items = raw.list ?? [];
-    const tweets: Tweet[] = [];
-    for (const it of items) {
-      if (!TWEET_CATEGORIES.has(it.category)) continue;
-      if (Number(it.release_time) < cutoffMs) continue;
-      const author = String(it.author ?? "");
-      const trusted = isTrustedXAccount(author);
-      if (trustedOnly && !trusted) continue;
-      const content = stripHtml(String(it.content ?? ""));
-      if (!content) continue;
-      tweets.push({
-        released_iso: new Date(Number(it.release_time)).toISOString(),
-        author,
-        is_trusted: trusted,
-        content: content.length > 320 ? content.slice(0, 320) + "…" : content,
-      });
-      if (tweets.length >= MAX_RESULTS) break;
+    let scanned = 0;
+    let usedQuery = input.query;
+    let tweets: Tweet[] = [];
+
+    for (const q of tryQueries) {
+      let raw;
+      try {
+        raw = await News.searchNews({
+          keyword: q,
+          page_size: 50,
+          sort: "publish_time",
+        });
+      } catch (err) {
+        // Network failure on the first query — bail. Don't retry
+        // because it's likely a SoSoValue outage, not a query issue.
+        return {
+          query: input.query,
+          scanned: 0,
+          matched_count: 0,
+          results: [],
+          summary: `Live X search failed: ${(err as Error).message}`,
+        };
+      }
+
+      const items = raw.list ?? [];
+      scanned += items.length;
+      tweets = [];
+      for (const it of items) {
+        if (!TWEET_CATEGORIES.has(it.category)) continue;
+        if (Number(it.release_time) < cutoffMs) continue;
+        const author = String(it.author ?? "");
+        const trusted = isTrustedXAccount(author);
+        if (trustedOnly && !trusted) continue;
+        const content = stripHtml(String(it.content ?? ""));
+        if (!content) continue;
+        tweets.push({
+          released_iso: new Date(Number(it.release_time)).toISOString(),
+          author,
+          is_trusted: trusted,
+          content: content.length > 320 ? content.slice(0, 320) + "…" : content,
+        });
+        if (tweets.length >= MAX_RESULTS) break;
+      }
+
+      usedQuery = q;
+      if (tweets.length > 0) break; // got something, stop broadening
     }
 
     const trustedHits = tweets.filter((t) => t.is_trusted).length;
@@ -156,12 +182,15 @@ export const searchXLiveTool: AgentTool<Input, Output> = {
     if (tweets.length === 0) {
       summary =
         `No matching tweets in the last ${maxAgeHours}h for "${input.query}"` +
+        (usedQuery !== input.query ? ` (also tried "${usedQuery}")` : "") +
         (trustedOnly ? " from trusted accounts" : "") +
-        ". Either the story hasn't hit X yet or it's outside the corpus we trust.";
+        ". Either the story hasn't hit X yet, or it's outside the trusted-account corpus. Consider " +
+        "(a) re-calling with trusted_only=false, (b) a shorter keyword like a single token / ticker / handle, or (c) wider max_age_hours.";
     } else {
       const authors = [...new Set(tweets.map((t) => `@${t.author}`))].slice(0, 5);
+      const broadened = usedQuery !== input.query ? ` (broadened to "${usedQuery}")` : "";
       summary =
-        `${tweets.length} tweets in the last ${maxAgeHours}h ` +
+        `${tweets.length} tweets in the last ${maxAgeHours}h${broadened} ` +
         `(${trustedHits} from trusted accounts): ${authors.join(", ")}` +
         (tweets.length > authors.length ? ` + ${tweets.length - authors.length} more` : "") +
         `. Most recent: "${tweets[0].content.slice(0, 120)}…"`;
@@ -169,7 +198,7 @@ export const searchXLiveTool: AgentTool<Input, Output> = {
 
     return {
       query: input.query,
-      scanned: items.length,
+      scanned,
       matched_count: tweets.length,
       results: tweets,
       summary,
