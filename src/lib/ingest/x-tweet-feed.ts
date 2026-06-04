@@ -44,44 +44,50 @@ const TWEET_CATEGORIES = new Set<number>([
 ]);
 
 /**
- * Curated set of high-signal X accounts. Inclusion is conservative:
- * each must clear a bar of "their first-hand reporting is on-topic
- * and historically reliable for crypto market events". This list is
- * additive — adding noisy sources here doesn't hurt by itself (the
- * classifier still rates each post on its merits), but it does cost
- * us a classification cycle, so we keep it tight.
+ * Curated X accounts whose posts are worth running through the
+ * classifier. The list is tight on purpose — each entry has to clear
+ * one of four signal bars:
+ *
+ *   1. **Capital + policy** — institutional desk reporting, regulator
+ *      actions, treasury company moves (BlackRock filings, SEC
+ *      decisions, Saylor buys). Real money flows, not commentary.
+ *   2. **First-mover on-chain** — large transfer alerts, whale moves,
+ *      and on-chain investigators who post BEFORE editorial picks it up.
+ *   3. **Hacks + exploits** — security firms that detect drains live.
+ *   4. **Firm-size buying / selling** — corporate treasury actions,
+ *      ETF flows, ARK / BlackRock / 21Shares-flavor disclosures.
+ *
+ * Commentary, analysis, KOL takes, and individual researchers are
+ * deliberately excluded. They're often correct but they don't break
+ * news — they react to it. Reacting to a reactor adds latency.
  *
  * Matching is case-insensitive substring on the SoSoValue author
- * field — "WuBlockchain12", "wublockchain", "wu blockchain" all
- * match the same entry "wublockchain".
+ * field, so "WuBlockchain12", "wublockchain", and "wu_blockchain"
+ * all match the entry "wublockchain".
  */
 const TRUSTED_X_ACCOUNTS: readonly string[] = [
-  // Editorial newsrooms (their X account often breaks ahead of their site)
-  "coindesk",
-  "theblock__",          // The Block official
+  // ── 1. Capital + policy (institutional newsrooms + regulators) ──
+  "coindesk",            // CoinDesk — institutional reporting
+  "theblock__",          // The Block — first to break Saylor / BlackRock filings
   "decryptmedia",
-  "cointelegraph",
-  "defiantnews",         // The Defiant
-  "dlnews_",             // DL News
-  "blockworks_",
-  "watcherguru",
-  "messaricrypto",
-  "bloomberg",
+  "cointelegraph",       // covers SEC / regulatory actions
+  "bloomberg",           // institutional breaking news
   "reuters",
   "wsj",
-  "ft",                  // Financial Times
-  "ftcrypto",
-  // Crypto-native breaking news / on-chain investigators
+  "ftcrypto",            // FT crypto desk (umbrella "ft" too noisy)
+  "financialtimes",
+  "blockworks_",         // institutional crypto desk reporting
+
+  // ── 2. First-mover on-chain (whale moves + investigators) ──
   "wublockchain",        // Wu Blockchain — Chinese-language scoops first
   "wublockchain12",
-  "rektnews",
-  "zachxbt",
-  "tayvano_",
-  "officer_cia",
-  "spreekaway",
-  "lookonchain",
-  "whale_alert",         // large transfers (often pre-news)
-  // Security firms — first to detect on-chain exploits
+  "lookonchain",         // on-chain wallet tracking, breaks moves fast
+  "whale_alert",         // automated large-transfer alerts
+  "watcherguru",         // breaking institutional + macro headlines
+  "zachxbt",             // on-chain investigations
+  "spreekaway",          // on-chain sleuth
+
+  // ── 3. Hacks + exploits (security firms with on-chain detection) ──
   "halborn",
   "peckshield",
   "peckshieldalert",
@@ -93,14 +99,21 @@ const TRUSTED_X_ACCOUNTS: readonly string[] = [
   "hacken",
   "solidityscan",
   "blockaid",
-  // High-signal individual researchers / analysts
-  "hsakatrades",
-  "mev_",                // mev.io
-  "thedefivillain",
-  "0xfoobar",
-  "twobitidiot",         // Ryan Selkis
-  "udiwertheimer",
-  "lopp",                // Jameson Lopp
+  "rektnews",            // Rekt — exploit post-mortems
+
+  // ── 4. Firm-size buying / selling (treasury + ETF flow trackers) ──
+  "saylor",              // MicroStrategy / Strategy
+  "strategy",            // Strategy.com (Saylor's company)
+  "blackrock",
+  "fidelity",
+  "arkinvest",           // ARK Invest disclosures
+  "21shares",
+  "grayscale",
+  "bitwiseinvest",
+  "vaneckcrypto",
+  "hashdex",
+  "purposeinvest",
+  "valkyrieinvest",
 ];
 
 /**
@@ -112,11 +125,13 @@ const DEFAULT_TITLE_CAP = 240;
 
 /**
  * Minimum like-count for the blue-verified-with-asset fallback gate.
- * Live data check (June 2026): 10 likes is enough to filter out
- * shitposts while keeping fast-moving alerts from emerging KOLs.
- * Re-tune if the fallback bucket starts dominating volume.
+ * Tuned against live data (June 2026): 10 likes was too loose,
+ * surfacing pure chart-commentary KOLs ("BTC bottoming signal").
+ * 50 raises the bar to "this post has actual broadcast" — still
+ * catches a new breaking-news account before we whitelist it, but
+ * filters out shitposts that just happen to mention $BTC.
  */
-const MIN_FALLBACK_LIKES = 10;
+const MIN_FALLBACK_LIKES = 50;
 
 /** A NewsItem that carries the trusted-account flag we attach here. */
 export type TweetItem = NewsItem & { is_trusted_x_account?: boolean };
@@ -128,7 +143,13 @@ function isTweet(item: NewsItem): boolean {
 function isTrustedAccount(author: string | null | undefined): boolean {
   if (!author) return false;
   const a = author.toLowerCase();
-  return TRUSTED_X_ACCOUNTS.some((n) => a.includes(n));
+  // Prefix-match, not substring. Substring matching allowed short
+  // entries like "ft" (for FTCrypto) to false-positive on handles
+  // like "NFTsAreNice" / "SwftCoin" / "MagicCraftGame" where "ft"
+  // appears mid-string. Prefix match preserves the "WuBlockchain12"
+  // → "wublockchain" case (entry is a prefix of the handle) while
+  // rejecting the mid-string matches.
+  return TRUSTED_X_ACCOUNTS.some((n) => a === n || a.startsWith(n));
 }
 
 /**

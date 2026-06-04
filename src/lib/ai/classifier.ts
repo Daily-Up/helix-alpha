@@ -22,7 +22,7 @@ import {
 import { EventRecencies } from "@/lib/db/repos/classifications";
 import type { StoredEvent } from "@/lib/db/repos/events";
 import { DEFAULT_UNIVERSE, type Asset } from "@/lib/universe";
-import { anthropic, getModel } from "./client";
+import { anthropic, getClassifierModel } from "./client";
 import {
   CLASSIFY_PROMPT_VERSION,
   classifySystemPrompt,
@@ -90,7 +90,7 @@ export async function classifyEvent(
 ): Promise<ClassificationResult> {
   const universe = options?.universe ?? DEFAULT_UNIVERSE;
   const persist = options?.persist ?? true;
-  const model = getModel();
+  const model = getClassifierModel();
 
   const start = Date.now();
   const response = await anthropic().messages.create({

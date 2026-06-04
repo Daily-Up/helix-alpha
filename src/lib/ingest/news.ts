@@ -89,8 +89,10 @@ export interface NewsIngestOptions {
   skipClassify?: boolean;
 }
 
-/** Anthropic Sonnet 4.5 pricing (USD per M tokens). */
-const PRICING = { input: 3, cached: 0.3, output: 15 };
+/** Anthropic pricing per M tokens. Classifier path uses Haiku 4.5 by
+ *  default ($1 in / $0.10 cached / $5 out) — see ANTHROPIC_CLASSIFIER_MODEL.
+ *  If you flip the classifier back to Sonnet, swap to 3 / 0.3 / 15. */
+const PRICING = { input: 1, cached: 0.1, output: 5 };
 
 export async function runNewsIngest(
   opts: NewsIngestOptions = {},

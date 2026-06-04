@@ -38,7 +38,11 @@ const EnvSchema = z.object({
 
   // Anthropic
   ANTHROPIC_API_KEY: z.string().min(1, "ANTHROPIC_API_KEY is required"),
+  /** Reasoning-heavy model (agents, briefing). Default: Sonnet 4.5. */
   ANTHROPIC_MODEL: z.string().default("claude-sonnet-4-5"),
+  /** Cheap classifier model for batch news tagging. ~5× cheaper than
+   *  Sonnet on this task with negligible quality loss. */
+  ANTHROPIC_CLASSIFIER_MODEL: z.string().default("claude-haiku-4-5"),
 
   // Database — Wave 2 onwards: Turso (hosted libSQL). Both URL and token
   // are required at runtime; left optional in the schema so `next build`

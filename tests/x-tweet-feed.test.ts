@@ -15,30 +15,63 @@ import { isTrustedXAccount, _internals } from "@/lib/ingest/x-tweet-feed";
 
 const { synthesiseTitle, isTweet } = _internals;
 
-describe("isTrustedXAccount", () => {
-  it("matches WuBlockchain12", () => {
-    expect(isTrustedXAccount("WuBlockchain12")).toBe(true);
-  });
-  it("matches wublockchain (no digits)", () => {
-    expect(isTrustedXAccount("wublockchain")).toBe(true);
-  });
-  it("matches CoinDesk", () => {
+describe("isTrustedXAccount — only first-mover / capital / hack / firm-size accounts", () => {
+  // Tier 1: capital + policy newsrooms
+  it("matches institutional newsrooms (CoinDesk, Bloomberg, Reuters, FT, WSJ)", () => {
     expect(isTrustedXAccount("CoinDesk")).toBe(true);
-  });
-  it("matches Halborn (security firm)", () => {
-    expect(isTrustedXAccount("HalbornSecurity")).toBe(true);
-  });
-  it("matches lookonchain", () => {
-    expect(isTrustedXAccount("lookonchain")).toBe(true);
-  });
-  it("matches whale_alert (large transfers)", () => {
-    expect(isTrustedXAccount("whale_alert")).toBe(true);
-  });
-  it("matches Bloomberg + Reuters via the institutional list", () => {
     expect(isTrustedXAccount("Bloomberg")).toBe(true);
     expect(isTrustedXAccount("Reuters")).toBe(true);
+    expect(isTrustedXAccount("FTCrypto")).toBe(true);
+    expect(isTrustedXAccount("WSJ")).toBe(true);
   });
-  it("rejects random KOL handles", () => {
+
+  // Tier 2: first-mover on-chain
+  it("matches Wu Blockchain across handle variants", () => {
+    expect(isTrustedXAccount("WuBlockchain12")).toBe(true);
+    expect(isTrustedXAccount("wublockchain")).toBe(true);
+  });
+  it("matches on-chain investigators (lookonchain, whale_alert, watcherguru, zachxbt)", () => {
+    expect(isTrustedXAccount("lookonchain")).toBe(true);
+    expect(isTrustedXAccount("whale_alert")).toBe(true);
+    expect(isTrustedXAccount("WatcherGuru")).toBe(true);
+    expect(isTrustedXAccount("zachxbt")).toBe(true);
+  });
+
+  // Tier 3: hacks + exploits (security firms)
+  it("matches security firms (Halborn, PeckShield, SlowMist, CertiK)", () => {
+    expect(isTrustedXAccount("HalbornSecurity")).toBe(true);
+    expect(isTrustedXAccount("PeckShieldAlert")).toBe(true);
+    expect(isTrustedXAccount("SlowMist_Team")).toBe(true);
+    expect(isTrustedXAccount("CertiKAlert")).toBe(true);
+  });
+
+  // Tier 4: firm-size buying / selling
+  it("matches treasury + ETF firms (Saylor, BlackRock, Fidelity, ARK, 21Shares, Grayscale)", () => {
+    expect(isTrustedXAccount("saylor")).toBe(true);
+    expect(isTrustedXAccount("BlackRock")).toBe(true);
+    expect(isTrustedXAccount("Fidelity")).toBe(true);
+    expect(isTrustedXAccount("ARKInvest")).toBe(true);
+    expect(isTrustedXAccount("21Shares")).toBe(true);
+    expect(isTrustedXAccount("Grayscale")).toBe(true);
+  });
+
+  // Regression — substring matching used to false-positive these
+  it("rejects mid-string substring matches (NFTsAreNice, SwftCoin, MagicCraftGame)", () => {
+    // All three contain "ft" mid-string which substring matching
+    // would accept. Prefix matching correctly rejects them.
+    expect(isTrustedXAccount("NFTsAreNice")).toBe(false);
+    expect(isTrustedXAccount("SwftCoin")).toBe(false);
+    expect(isTrustedXAccount("MagicCraftGame")).toBe(false);
+  });
+
+  // Explicit rejections — commentary / researchers / random KOLs
+  it("rejects pure-commentary KOLs (twobitidiot, lopp, udi, hsaka)", () => {
+    expect(isTrustedXAccount("twobitidiot")).toBe(false);
+    expect(isTrustedXAccount("lopp")).toBe(false);
+    expect(isTrustedXAccount("udiwertheimer")).toBe(false);
+    expect(isTrustedXAccount("hsakatrades")).toBe(false);
+  });
+  it("rejects random anon KOL handles", () => {
     expect(isTrustedXAccount("crashiusclay69")).toBe(false);
     expect(isTrustedXAccount("anonymous_anon")).toBe(false);
   });
@@ -72,7 +105,7 @@ describe("fetchTweets volume gate (mocked SoSoValue)", () => {
     return (
       r.is_blue_verified === 1 &&
       r.matched_currencies.length > 0 &&
-      (r.like_count ?? 0) >= 10
+      (r.like_count ?? 0) >= 50
     );
   }
 
@@ -90,7 +123,7 @@ describe("fetchTweets volume gate (mocked SoSoValue)", () => {
     ).toBe(true);
   });
 
-  it("untrusted blue-verified with matched asset + 10 likes PASSES (fallback)", () => {
+  it("untrusted blue-verified with matched asset + 50+ likes PASSES (fallback)", () => {
     expect(
       passesGate({
         id: "2",
@@ -98,7 +131,7 @@ describe("fetchTweets volume gate (mocked SoSoValue)", () => {
         author: "RandomKOL",
         is_blue_verified: 1,
         matched_currencies: [{ currency_id: "1", symbol: "BTC", name: "Bitcoin" }],
-        like_count: 50,
+        like_count: 75,
         content: "BTC breakout coming",
       }),
     ).toBe(true);
@@ -118,7 +151,7 @@ describe("fetchTweets volume gate (mocked SoSoValue)", () => {
     ).toBe(false);
   });
 
-  it("untrusted blue-verified with asset but <10 likes DROPPED", () => {
+  it("untrusted blue-verified with asset but <50 likes DROPPED", () => {
     expect(
       passesGate({
         id: "4",
@@ -126,7 +159,7 @@ describe("fetchTweets volume gate (mocked SoSoValue)", () => {
         author: "RandomBlueKOL",
         is_blue_verified: 1,
         matched_currencies: [{ currency_id: "1", symbol: "ETH", name: "Ethereum" }],
-        like_count: 3,
+        like_count: 25,
         content: "eth",
       }),
     ).toBe(false);
