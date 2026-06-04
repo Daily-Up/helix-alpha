@@ -345,18 +345,31 @@ function summarizeXLive(input: Json, output: Json): ToolSummary {
   const i = asObj(input);
   const o = asObj(output);
   const query = asStr(i.query) ?? "(no query)";
-  const hrs = asNum(i.max_age_hours) ?? 12;
-  const trustedOnly = i.trusted_only === false ? false : true;
-  const asked = trustedOnly
-    ? `Live X search for "${query}" — trusted accounts, last ${hrs}h`
-    : `Live X search for "${query}" — last ${hrs}h, all accounts`;
+  const hrs = asNum(i.max_age_hours) ?? 24;
+  // Resolve mode: explicit `mode` wins, fall back to legacy `trusted_only`,
+  // otherwise default to noise_filter. Same logic as the tool.
+  const explicitMode = asStr(i.mode);
+  const mode: "trusted_only" | "noise_filter" | "all" =
+    (explicitMode === "trusted_only" ||
+    explicitMode === "noise_filter" ||
+    explicitMode === "all"
+      ? explicitMode
+      : null) ??
+    (i.trusted_only === true ? "trusted_only" : "noise_filter");
+
+  const modeLabel =
+    mode === "trusted_only"
+      ? "trusted accounts only"
+      : mode === "noise_filter"
+        ? "noise-filtered"
+        : "all results";
+  const asked = `Live X search for "${query}" — ${modeLabel}, last ${hrs}h`;
 
   const matched = asNum(o.matched_count) ?? 0;
   if (matched === 0) {
     return { asked, found: "No tweets in window" };
   }
   const results = asArr(o.results);
-  // Collect unique authors
   const authors = new Set<string>();
   for (const t of results) {
     const a = asStr(asObj(t).author);

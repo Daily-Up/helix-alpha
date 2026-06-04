@@ -28,7 +28,7 @@
  */
 
 import { News } from "@/lib/sosovalue";
-import { isTrustedXAccount } from "@/lib/ingest/x-tweet-feed";
+import { isTrustedXAccount, isCryptoRelevantText } from "@/lib/ingest/x-tweet-feed";
 import { sanitizeText } from "@/lib/pipeline/ingestion-validation";
 import type { AgentTool } from "./types";
 
@@ -43,11 +43,23 @@ interface Input {
   /**
    * Cap on age in hours. Tweets older than this are dropped client-side
    * so a stale match (the same hack from last week showing up first by
-   * relevance sort) doesn't pollute the agent's reasoning. Default: 12.
+   * relevance sort) doesn't pollute the agent's reasoning. Default: 24.
    */
   max_age_hours?: number;
-  /** Only include tweets from the curated trusted-account whitelist
-   *  (security firms, WuBlockchain, watcherguru, etc.). Default true. */
+  /** Trust mode — controls how aggressively noise gets filtered.
+   *   "trusted_only"  — old behaviour, only the curated trust list.
+   *                     Highest precision, lowest recall. Use this when
+   *                     verifying breaking exploits with high stakes.
+   *   "noise_filter"  — DEFAULT. Keyword-search with a crypto-relevance
+   *                     content gate + blue-verified-or-engaged signal,
+   *                     trusted accounts always pass. Good balance.
+   *   "all"           — return everything the keyword search returned,
+   *                     no filtering. Useful when you're sleuthing a
+   *                     brand-new project the trust list / patterns
+   *                     don't cover yet.
+   */
+  mode?: "trusted_only" | "noise_filter" | "all";
+  /** Deprecated alias for mode='trusted_only'. Kept for back-compat. */
   trusted_only?: boolean;
 }
 
@@ -79,10 +91,14 @@ export const searchXLiveTool: AgentTool<Input, Output> = {
       "4 + 7). Use this when you need tweets from the LAST FEW MINUTES " +
       "that may not yet be in our ingested corpus — e.g. checking if " +
       "Halborn/PeckShield/SlowMist has confirmed an exploit, or pulling " +
-      "Wu Blockchain's latest take on a regulatory headline. By default " +
-      "filters to a curated trusted-account whitelist (security firms, " +
-      "WuBlockchain, watcherguru, lookonchain, zachxbt, etc.) so you " +
-      "don't get random KOL chatter.",
+      "Wu Blockchain's latest take on a regulatory headline. Pass " +
+      "ONE keyword (a token, a ticker, a protocol name, or a handle) — " +
+      "the SoSoValue search is substring-based so longer phrases match " +
+      "very little. By default (mode='noise_filter') trusted accounts " +
+      "always pass and untrusted accounts must clear a crypto-relevance " +
+      "regex + an engagement floor (blue OR 10+ likes), so you get " +
+      "actual signal even from accounts not on the trust list. Use " +
+      "mode='trusted_only' for high-stakes exploit verification.",
     input_schema: {
       type: "object",
       required: ["query"],
@@ -96,24 +112,39 @@ export const searchXLiveTool: AgentTool<Input, Output> = {
         max_age_hours: {
           type: "integer",
           description:
-            "Drop tweets older than this. Defaults to 12. Lower (1-3) " +
-            "for live exploit / breaking-news verification.",
+            "Drop tweets older than this. Defaults to 24. Lower (1-3) " +
+            "for live exploit / breaking-news verification; raise (48-72) " +
+            "for slower-moving regulatory / institutional flow stories.",
+        },
+        mode: {
+          type: "string",
+          enum: ["trusted_only", "noise_filter", "all"],
+          description:
+            "trusted_only: only the curated trust list (Halborn, Wu " +
+            "Blockchain, CoinDesk, …). Highest precision, lowest recall. " +
+            "noise_filter (DEFAULT): keyword search + crypto-relevance + " +
+            "engagement floor; trusted accounts always pass. all: no " +
+            "filtering — every tweet matching the keyword, useful for " +
+            "investigating brand-new projects.",
         },
         trusted_only: {
           type: "boolean",
           description:
-            "When true (default), keeps only tweets from the curated " +
-            "trusted-account list. Flip to false to see all results — " +
-            "useful when investigating a brand-new protocol the trust " +
-            "list doesn't cover yet.",
+            "DEPRECATED — use mode='trusted_only' instead. Kept for " +
+            "back-compat: if true, equivalent to mode='trusted_only'.",
         },
       },
     },
   },
   async handle(input) {
-    const maxAgeHours = input.max_age_hours ?? 12;
-    const trustedOnly = input.trusted_only ?? true;
+    const maxAgeHours = input.max_age_hours ?? 24;
+    // Resolve mode: explicit `mode` wins, fall back to legacy
+    // `trusted_only`, otherwise default to the noise-filter middle path.
+    const mode: "trusted_only" | "noise_filter" | "all" =
+      input.mode ??
+      (input.trusted_only === true ? "trusted_only" : "noise_filter");
     const cutoffMs = Date.now() - maxAgeHours * 60 * 60 * 1000;
+    const MIN_LIKES_FOR_UNTRUSTED = 10;
 
     // Build a sequence of progressively-broader queries to try if the
     // original returns 0 tweets. SoSoValue uses substring matching,
@@ -161,9 +192,40 @@ export const searchXLiveTool: AgentTool<Input, Output> = {
         if (Number(it.release_time) < cutoffMs) continue;
         const author = String(it.author ?? "");
         const trusted = isTrustedXAccount(author);
-        if (trustedOnly && !trusted) continue;
         const content = stripHtml(String(it.content ?? ""));
         if (!content) continue;
+
+        // Mode-specific filtering. Trusted authors always pass — their
+        // tweets are by definition signal. Untrusted authors face a
+        // gate that varies by mode.
+        let passes: boolean;
+        if (mode === "all" || trusted) {
+          passes = true;
+        } else if (mode === "trusted_only") {
+          passes = false; // already-trusted handled above
+        } else {
+          // mode === "noise_filter" — the default. Untrusted authors
+          // must clear both bars:
+          //   1. The content mentions a crypto-relevant token /
+          //      protocol / regulator / market event (regex from
+          //      x-tweet-feed.ts — same noise gate the ingest uses).
+          //   2. The post has some broadcast signal: either the
+          //      author is blue-verified or it has ≥10 likes. A
+          //      random anon tweet with 0 engagement that happens to
+          //      mention 'BTC' is the kind of noise we drop.
+          const relevant = isCryptoRelevantText(
+            `${it.title ?? ""}\n${content}`,
+          );
+          if (!relevant) {
+            passes = false;
+          } else {
+            const blue = Boolean(it.is_blue_verified);
+            const likes = Number(it.like_count ?? 0);
+            passes = blue || likes >= MIN_LIKES_FOR_UNTRUSTED;
+          }
+        }
+        if (!passes) continue;
+
         tweets.push({
           released_iso: new Date(Number(it.release_time)).toISOString(),
           author,
@@ -180,18 +242,27 @@ export const searchXLiveTool: AgentTool<Input, Output> = {
     const trustedHits = tweets.filter((t) => t.is_trusted).length;
     let summary: string;
     if (tweets.length === 0) {
+      const modeNote =
+        mode === "trusted_only"
+          ? " from trusted accounts only"
+          : mode === "noise_filter"
+            ? " that cleared the crypto-relevance + engagement gate"
+            : "";
       summary =
         `No matching tweets in the last ${maxAgeHours}h for "${input.query}"` +
         (usedQuery !== input.query ? ` (also tried "${usedQuery}")` : "") +
-        (trustedOnly ? " from trusted accounts" : "") +
-        ". Either the story hasn't hit X yet, or it's outside the trusted-account corpus. Consider " +
-        "(a) re-calling with trusted_only=false, (b) a shorter keyword like a single token / ticker / handle, or (c) wider max_age_hours.";
+        `${modeNote}. Consider widening max_age_hours, ` +
+        `switching mode to "all" if hunting a brand-new project, or ` +
+        `trying a shorter single-word keyword (ticker / handle / token).`;
     } else {
       const authors = [...new Set(tweets.map((t) => `@${t.author}`))].slice(0, 5);
       const broadened = usedQuery !== input.query ? ` (broadened to "${usedQuery}")` : "";
       summary =
         `${tweets.length} tweets in the last ${maxAgeHours}h${broadened} ` +
-        `(${trustedHits} from trusted accounts): ${authors.join(", ")}` +
+        `[mode=${mode}] ` +
+        `(${trustedHits} trusted, ${tweets.length - trustedHits} ` +
+        `${mode === "all" ? "untrusted" : "passed noise gate"}): ` +
+        `${authors.join(", ")}` +
         (tweets.length > authors.length ? ` + ${tweets.length - authors.length} more` : "") +
         `. Most recent: "${tweets[0].content.slice(0, 120)}…"`;
     }

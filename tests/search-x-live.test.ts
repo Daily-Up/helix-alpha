@@ -54,27 +54,60 @@ describe("search_x_live", () => {
     expect(r.results.every((t) => t.author !== "CoinDesk")).toBe(true);
   });
 
-  it("drops untrusted accounts when trusted_only=true (default)", async () => {
+  it("mode='trusted_only' drops untrusted accounts even if content is on-topic", async () => {
     searchNewsSpy.mockResolvedValueOnce({
       list: [
-        tweet({ id: "1", category: 4, author: "anon_kol", content: "shitpost" }),
+        tweet({ id: "1", category: 4, author: "anon_kol", is_blue_verified: true, like_count: 999, content: "Coinbase launches spot ETH ETF" }),
         tweet({ id: "2", category: 7, author: "WuBlockchain", content: "scoop" }),
       ],
     });
-    const r = await searchXLiveTool.handle({ query: "x" });
+    const r = await searchXLiveTool.handle({ query: "x", mode: "trusted_only" });
     expect(r.matched_count).toBe(1);
     expect(r.results[0].author).toBe("WuBlockchain");
   });
 
-  it("includes untrusted authors when trusted_only=false", async () => {
+  it("mode='noise_filter' (default) keeps blue+relevant+engaged untrusted authors", async () => {
+    searchNewsSpy.mockResolvedValueOnce({
+      list: [
+        // Trusted author always passes
+        tweet({ id: "1", category: 7, author: "WuBlockchain", content: "Coinbase scoop" }),
+        // Untrusted but blue + relevant content → passes
+        tweet({ id: "2", category: 4, author: "BlueKOL", is_blue_verified: true, content: "BTC ETF flows hit record" }),
+        // Untrusted, NOT blue, but ≥10 likes + relevant → passes
+        tweet({ id: "3", category: 4, author: "PopularKOL", like_count: 25, content: "MSTR added $2B Bitcoin treasury" }),
+        // Untrusted, 0 engagement, relevant → dropped (no broadcast signal)
+        tweet({ id: "4", category: 4, author: "NoOneRead", like_count: 0, content: "ETH might pump" }),
+        // Untrusted, blue, but off-topic content → dropped (relevance gate)
+        tweet({ id: "5", category: 4, author: "BlueKOL", is_blue_verified: true, content: "I love mondays" }),
+      ],
+    });
+    const r = await searchXLiveTool.handle({ query: "x" });
+    expect(r.matched_count).toBe(3);
+    const authors = r.results.map((t) => t.author).sort();
+    expect(authors).toEqual(["BlueKOL", "PopularKOL", "WuBlockchain"]);
+  });
+
+  it("mode='all' returns every keyword match unfiltered", async () => {
     searchNewsSpy.mockResolvedValueOnce({
       list: [
         tweet({ id: "1", category: 4, author: "anon_kol", content: "shitpost" }),
         tweet({ id: "2", category: 7, author: "WuBlockchain", content: "scoop" }),
       ],
     });
-    const r = await searchXLiveTool.handle({ query: "x", trusted_only: false });
+    const r = await searchXLiveTool.handle({ query: "x", mode: "all" });
     expect(r.matched_count).toBe(2);
+  });
+
+  it("legacy trusted_only=true still works (back-compat with mode='trusted_only')", async () => {
+    searchNewsSpy.mockResolvedValueOnce({
+      list: [
+        tweet({ id: "1", category: 4, author: "anon_kol", is_blue_verified: true, like_count: 100, content: "BTC ETF flows" }),
+        tweet({ id: "2", category: 7, author: "WuBlockchain", content: "scoop" }),
+      ],
+    });
+    const r = await searchXLiveTool.handle({ query: "x", trusted_only: true });
+    expect(r.matched_count).toBe(1);
+    expect(r.results[0].author).toBe("WuBlockchain");
   });
 
   it("drops tweets older than max_age_hours", async () => {
@@ -97,7 +130,7 @@ describe("search_x_live", () => {
     expect(r.summary.toLowerCase()).toContain("failed");
   });
 
-  it("auto-broadens to the first keyword when the full phrase yields 0 trusted tweets", async () => {
+  it("auto-broadens to the first keyword when the full phrase yields 0 matching tweets", async () => {
     // Round 1: agent passes a long phrase, nothing matches the trust list
     searchNewsSpy.mockResolvedValueOnce({
       list: [
@@ -152,7 +185,7 @@ describe("search_x_live", () => {
         tweet({ id: "2", category: 7, author: "anon", content: "untrusted noise" }),
       ],
     });
-    const r = await searchXLiveTool.handle({ query: "x", trusted_only: false });
+    const r = await searchXLiveTool.handle({ query: "x", mode: "all" });
     expect(r.matched_count).toBe(2);
     const wu = r.results.find((t) => t.author === "WuBlockchain");
     const anon = r.results.find((t) => t.author === "anon");

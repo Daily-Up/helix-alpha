@@ -350,6 +350,15 @@ export function isTrustedXAccount(author: string | null | undefined): boolean {
   return isTrustedAccount(author);
 }
 
+/**
+ * Public re-export — same crypto-relevance regex used by the ingest
+ * pipeline. Lives here so the search_x_live agent tool can apply the
+ * same noise filter without re-implementing the patterns.
+ */
+export function isCryptoRelevantText(text: string): boolean {
+  return passesContentRelevance(text);
+}
+
 export const _internals = {
   TRUSTED_X_ACCOUNTS,
   TWEET_CATEGORIES,
