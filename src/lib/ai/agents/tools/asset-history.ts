@@ -36,11 +36,22 @@ interface RecentSignal {
   triggering_event_title: string | null;
 }
 
+interface PriceTrend {
+  last_price: number;
+  last_date: string;
+  pct_change_14d: number | null;
+  pct_change_7d: number | null;
+  pct_change_3d: number | null;
+}
+
 interface Output {
   symbol: string;
   asset_id: string | null;
   days: number;
   recent_signals: RecentSignal[];
+  /** Recent price action from klines_daily. Null when no kline
+   *  coverage for this asset. */
+  price_trend: PriceTrend | null;
   summary: {
     n_signals: number;
     n_long: number;
@@ -95,6 +106,7 @@ export const assetHistoryTool: AgentTool<Input, Output> = {
         asset_id: null,
         days,
         recent_signals: [],
+        price_trend: null,
         summary: {
           n_signals: 0,
           n_long: 0,
@@ -105,6 +117,39 @@ export const assetHistoryTool: AgentTool<Input, Output> = {
           mean_realized_pct: null,
         },
       };
+    }
+
+    // Pull recent price tape from klines_daily so the tool's answer
+    // includes actual chart context, not just past signal history.
+    // For stocks we backfill via scripts/ingest-yahoo-stock-klines.mjs;
+    // for crypto we ingest from Binance public.
+    let price_trend: PriceTrend | null = null;
+    try {
+      const klines = await all<{ date: string; close: number }>(
+        `SELECT date, close FROM klines_daily
+         WHERE asset_id = ?
+         ORDER BY date DESC
+         LIMIT 30`,
+        [asset.id],
+      );
+      if (klines.length > 0) {
+        const last = klines[0];
+        const at = (offset: number) => klines[offset]?.close;
+        const pct = (now: number, ref: number | undefined) =>
+          ref && ref > 0
+            ? Math.round(((now - ref) / ref) * 10000) / 100
+            : null;
+        price_trend = {
+          last_price: last.close,
+          last_date: last.date,
+          pct_change_3d: pct(last.close, at(3)),
+          pct_change_7d: pct(last.close, at(7)),
+          pct_change_14d: pct(last.close, at(14)),
+        };
+      }
+    } catch {
+      // Non-fatal — leave price_trend null and let the agent see
+      // signal history alone.
     }
 
     const rows = await all<{
@@ -167,6 +212,7 @@ export const assetHistoryTool: AgentTool<Input, Output> = {
       asset_id: asset.id,
       days,
       recent_signals,
+      price_trend,
       summary: {
         n_signals: rows.length,
         n_long: nLong,

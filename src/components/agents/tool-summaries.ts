@@ -138,19 +138,35 @@ function summarizeAssetHistory(input: Json, output: Json): ToolSummary {
   const o = asObj(output);
   const symbol = asStr(i.symbol) ?? "?";
   const days = asNum(i.days) ?? 14;
-  const asked = `${symbol} price + news history for the last ${days} ${plural(days, "day")}`;
+  const asked = `${symbol} signal + price history for the last ${days} ${plural(days, "day")}`;
 
-  const lastPrice = asNum(o.last_price);
-  const pctChange = asNum(o.pct_change);
-  const newsCount = asNum(o.news_count);
   const parts: string[] = [];
-  if (lastPrice != null) parts.push(`$${lastPrice.toLocaleString()}`);
-  if (pctChange != null) parts.push(`${fmtMove(pctChange * 100)} over window`);
-  if (newsCount != null)
-    parts.push(`${newsCount} prior ${plural(newsCount, "story", "stories")}`);
+  // Signal history
+  const sum = asObj(o.summary);
+  const nSig = asNum(sum.n_signals);
+  if (nSig != null && nSig > 0) {
+    parts.push(`${nSig} prior ${plural(nSig, "signal")}`);
+    const hit = asNum(sum.hit_rate);
+    if (hit != null) parts.push(`${fmtPct(hit)} hit rate`);
+  }
+  // Price trend (new — populated by klines_daily)
+  const trend = asObj(o.price_trend);
+  const lastPrice = asNum(trend.last_price);
+  if (lastPrice != null) {
+    parts.push(
+      lastPrice >= 1000
+        ? `$${Math.round(lastPrice).toLocaleString()}`
+        : `$${lastPrice.toFixed(2)}`,
+    );
+  }
+  const pct7 = asNum(trend.pct_change_7d);
+  const pct14 = asNum(trend.pct_change_14d);
+  if (pct7 != null) parts.push(`${fmtMove(pct7)} 7d`);
+  else if (pct14 != null) parts.push(`${fmtMove(pct14)} 14d`);
+
   return {
     asked,
-    found: parts.length > 0 ? parts.join(" · ") : "Insufficient data",
+    found: parts.length > 0 ? parts.join(" · ") : "No prior signals, no kline coverage for this asset",
   };
 }
 
