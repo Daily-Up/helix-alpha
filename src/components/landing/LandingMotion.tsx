@@ -57,6 +57,16 @@ function initHero(motion: boolean) {
     );
 
     // "Audited." — letter-by-letter stagger
+    //
+    // IMPORTANT: the line2 parent span carries the `opacity-0` Tailwind
+    // class, which suppresses ALL children regardless of their own
+    // opacity. Animate the parent to opacity 1 FIRST (instant, no
+    // tween) so the per-char stagger below is actually visible. Before
+    // this fix, "Audited." was invisible on every fresh page load
+    // because the parent stayed at opacity:0 even after the hero-char
+    // children animated to 1.
+    gsap.set("[data-hero='line2']", { opacity: 1 });
+
     const line2Chars = document.querySelectorAll("[data-hero='line2'] .hero-char");
     if (line2Chars.length) {
       tl.fromTo(line2Chars,
