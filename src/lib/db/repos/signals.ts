@@ -223,10 +223,21 @@ export async function existsForEventAsset(
   eventId: string,
   assetId: string,
 ): Promise<boolean> {
+  // INTENT: "Did we EVER fire (or even attempt to fire) a signal for this
+  // exact event×asset pair?" If yes, never fire again — same news on the
+  // same asset is by definition a duplicate, regardless of what happened
+  // to the prior signal (it may have expired in the lifecycle sweep,
+  // been dismissed, executed, or blocked at the invariant gate).
+  //
+  // Previous bug: gated on `status IN ('pending', 'executed', 'superseded')`,
+  // which let the same event_id refire after the lifecycle sweeper moved
+  // the prior signal to 'expired' (regulatory_statement signals expire
+  // within ~30 min). Real instance on prod: tok-btc long regulatory event
+  // 20618347 fired 4× in 3.5h on 2026-06-03 because each successor came
+  // after the predecessor had already been swept to 'expired'.
   const r = await get<{ n: number }>(
     `SELECT COUNT(*) AS n FROM signals
-     WHERE triggered_by_event_id = ? AND asset_id = ?
-       AND status IN ('pending', 'executed', 'superseded')`,
+     WHERE triggered_by_event_id = ? AND asset_id = ?`,
     [eventId, assetId],
   );
   return (r?.n ?? 0) > 0;
@@ -238,6 +249,16 @@ export async function existsRecentForAssetDirection(
   eventType: string,
   windowMs: number,
 ): Promise<boolean> {
+  // INTENT: "Within the last `windowMs`, did we already fire any signal
+  // for this (asset, direction, event_type) combination?" Same news cycle
+  // typically produces 5-10 outlets covering the same catalyst within
+  // hours; the first signal is the trade, the rest are noise.
+  //
+  // Status filter REMOVED for the same reason as `existsForEventAsset`:
+  // a signal that fired 1h ago and was swept to 'expired' by the
+  // subtype-aware lifecycle still counts — we already took our shot at
+  // this story. Including 'blocked' too: if the invariant gate rejected
+  // a prior attempt, we shouldn't keep retrying the same idea.
   const cutoff = Date.now() - windowMs;
   const r = await get<{ n: number }>(
     `SELECT COUNT(*) AS n FROM signals s
@@ -245,7 +266,6 @@ export async function existsRecentForAssetDirection(
      WHERE s.asset_id = ?
        AND s.direction = ?
        AND s.fired_at >= ?
-       AND s.status IN ('pending', 'executed')
        AND COALESCE(c.event_type, '') = ?`,
     [assetId, direction, cutoff, eventType],
   );
