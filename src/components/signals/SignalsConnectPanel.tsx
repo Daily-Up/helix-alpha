@@ -30,7 +30,6 @@ import {
   readLocalKey,
   readSafetyLimits,
 } from "@/lib/sodex-onchain/local-keys";
-import { isPublicMode } from "@/lib/public-mode";
 
 type Stage =
   | "loading"
@@ -39,11 +38,14 @@ type Stage =
   | "key-no-disclaimer"
   | "ready";
 
-export function SignalsConnectPanel() {
-  // Hide the panel entirely on the public demo deploy — live execution
-  // isn't reachable there anyway.
-  if (isPublicMode()) return null;
+// NOTE: do NOT gate this panel on `isPublicMode()`. The public production
+// deploy IS where users land — they need to see the "connect your wallet"
+// CTA. The TradeMode badge in the topbar and the /settings/connect-sodex
+// page both render on production, so this panel matches that pattern.
+// (Earlier draft had a public-mode early-return that hid the panel from
+// the only place users would ever see it.)
 
+export function SignalsConnectPanel() {
   const { isConnected, address } = useAccount();
 
   const [stage, setStage] = useState<Stage>("loading");
