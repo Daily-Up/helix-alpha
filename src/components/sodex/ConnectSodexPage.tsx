@@ -62,6 +62,7 @@ import {
   systemKeys as filterSystemKeys,
   userManagedKeys,
 } from "@/lib/sodex-onchain/key-roles";
+import { SodexBalancesTable } from "./SodexBalancesTable";
 
 export function ConnectSodexPage() {
   // Mainnet-only. SoDEX testnet was scoped out — its faucet doesn't
@@ -291,27 +292,9 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
     ],
   );
 
-  const balanceLine = useMemo(() => {
-    if (!accountState?.B || accountState.B.length === 0) return "no balances";
-    return accountState.B.map((b) => `${b.t} ${b.a}`).join(" · ");
-  }, [accountState]);
-
-  // Mirror of `balanceLine` for the perps account. A wallet with no
-  // perps account at all returns aid=0 + empty balances — render
-  // "no perps account" so it's clear *why* the value is blank.
-  const perpsBalanceLine = useMemo(() => {
-    if (!perpsState || perpsState.aid === 0) return "no perps account";
-    if (!perpsState.B || perpsState.B.length === 0) return "no balances";
-    return perpsState.B.map((b) => `${b.t} ${b.a}`).join(" · ");
-  }, [perpsState]);
-
-  // Strip trailing zeros for cleaner display of perps margin fields.
-  const fmtMarginField = (v: string | undefined): string => {
-    if (!v) return "0";
-    const n = Number(v);
-    if (!Number.isFinite(n)) return v;
-    return n.toFixed(4).replace(/\.?0+$/, "") || "0";
-  };
+  // Balance display now lives inside `SodexBalancesTable`, which
+  // renders a SoDEX-style table grouped by coin with spot + futures
+  // sub-rows and live USD valuation for the priced coins.
 
   return (
     <>
@@ -384,77 +367,42 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
               <div className="text-sm text-fg-muted">Loading…</div>
             ) : accountState ? (
               <div className="flex flex-col gap-4">
-                {/* Spot block */}
-                <div>
-                  <div
-                    className="mb-1 text-[10px] uppercase tracking-[0.22em] text-fg-dim"
-                    style={{ fontFamily: "var(--font-jetbrains-mono)" }}
-                  >
-                    Spot
-                  </div>
-                  <div className="grid grid-cols-[100px_1fr] gap-x-3 gap-y-1 font-mono text-xs">
-                    <span className="text-fg-dim">Account ID</span>
-                    <span className="text-fg">{accountState.aid}</span>
-                    <span className="text-fg-dim">Wallet</span>
-                    <span className="break-all text-fg">
-                      {accountState.user}
-                    </span>
-                    <span className="text-fg-dim">Balances</span>
-                    <span className="text-fg">{balanceLine}</span>
-                  </div>
+                {/* Identity strip — Account IDs + wallet — sits above
+                    the balance table so users can verify they're
+                    looking at the right SoDEX account before reading
+                    numbers off the table. */}
+                <div className="grid grid-cols-[140px_1fr] gap-x-3 gap-y-1 font-mono text-xs">
+                  <span className="text-fg-dim">Spot Account ID</span>
+                  <span className="text-fg">{accountState.aid}</span>
+                  <span className="text-fg-dim">Perps Account ID</span>
+                  <span className="text-fg">{perpsState?.aid ?? 0}</span>
+                  <span className="text-fg-dim">Wallet</span>
+                  <span className="break-all text-fg">
+                    {accountState.user}
+                  </span>
                 </div>
 
-                {/* Perps block — always rendered so users see "no perps
-                    account" rather than wondering if it's loading. */}
-                <div className="border-t border-line pt-3">
-                  <div
-                    className="mb-1 text-[10px] uppercase tracking-[0.22em] text-fg-dim"
-                    style={{ fontFamily: "var(--font-jetbrains-mono)" }}
-                  >
-                    Perps
-                  </div>
-                  <div className="grid grid-cols-[100px_1fr] gap-x-3 gap-y-1 font-mono text-xs">
-                    <span className="text-fg-dim">Account ID</span>
-                    <span className="text-fg">{perpsState?.aid ?? 0}</span>
-                    {perpsState && perpsState.aid !== 0 ? (
-                      <>
-                        <span className="text-fg-dim">Account value</span>
-                        <span className="text-fg">
-                          {fmtMarginField(perpsState.av)} USDC
-                        </span>
-                        <span className="text-fg-dim">Available margin</span>
-                        <span className="text-fg">
-                          {fmtMarginField(perpsState.am)} USDC
-                        </span>
-                        <span className="text-fg-dim">Withdrawable</span>
-                        <span className="text-fg">
-                          {fmtMarginField(perpsState.amw)} USDC
-                        </span>
-                        <span className="text-fg-dim">Open positions</span>
-                        <span className="text-fg">
-                          {perpsState.P?.length ?? 0}
-                        </span>
-                      </>
-                    ) : null}
-                    <span className="text-fg-dim">Balances</span>
-                    <span className="text-fg">{perpsBalanceLine}</span>
-                  </div>
-                  {perpsState && perpsState.aid === 0 ? (
-                    <p className="mt-2 text-[11px] text-fg-dim">
-                      No perps account on this wallet — you can still trade
-                      spot. Open a perps account on{" "}
-                      <a
-                        href="https://sodex.com/trade"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="underline decoration-dotted underline-offset-4 hover:text-fg"
-                      >
-                        sodex.com/trade
-                      </a>{" "}
-                      by depositing into the perps gateway.
-                    </p>
-                  ) : null}
-                </div>
+                <SodexBalancesTable
+                  network={network}
+                  spotState={accountState}
+                  perpsState={perpsState}
+                />
+
+                {perpsState && perpsState.aid === 0 ? (
+                  <p className="text-[11px] text-fg-dim">
+                    No perps account on this wallet — you can still trade
+                    spot. Open a perps account on{" "}
+                    <a
+                      href="https://sodex.com/trade"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline decoration-dotted underline-offset-4 hover:text-fg"
+                    >
+                      sodex.com/trade
+                    </a>{" "}
+                    by depositing into the perps gateway.
+                  </p>
+                ) : null}
               </div>
             ) : (
               <div className="text-sm text-fg-muted">
