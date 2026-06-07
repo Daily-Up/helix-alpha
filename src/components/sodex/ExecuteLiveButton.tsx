@@ -97,12 +97,21 @@ export function ExecuteLiveButton({ signal }: Props) {
       return;
     }
     const limits = readSafetyLimits(network);
-    const sizeUsd = Math.min(
-      signal.suggested_size_usd,
-      limits.maxPositionUsd,
-    );
-    if (sizeUsd <= 0) {
-      setMsg("Position size cap is 0 — edit your safety limits.");
+    // TEMP: hardcode every live order to 11 USDC for the buildathon.
+    //
+    // SoDEX's minNotional varies per pair — vBTC_vUSDC's is $5, but
+    // some pairs sit at $10, and a 10 USDC order can fail with
+    // "quantity is invalid" when the derived qty rounds below
+    // marketMinQuantity. 11 USDC gives us a safety margin above the
+    // documented minimums while still being a token-size sanity test.
+    //
+    // We still respect the user's per-trade max — if they capped at
+    // <$11, refuse rather than silently overspend.
+    const sizeUsd = 11;
+    if (limits.maxPositionUsd < sizeUsd) {
+      setMsg(
+        `Your per-trade max ($${limits.maxPositionUsd}) is below the live floor ($${sizeUsd}). Raise it on /settings/connect-sodex.`,
+      );
       return;
     }
     setBusy(true);
@@ -164,11 +173,37 @@ export function ExecuteLiveButton({ signal }: Props) {
           `Generated clOrdID "${clOrdID}" doesn't match SoDEX format. Refresh and try again.`,
         );
       }
-      // Market BUY → use SoDEX `funds` (USD spend). Market SELL needs
-      // a base-asset `quantity`; derive from the signal's reference
-      // price when present.
+      // Earlier this code sent { quantity: "0", funds: <usd> } on
+      // market BUYs, expecting SoDEX to compute the size from funds.
+      // The gateway rejects that with "quantity is invalid" because
+      // every spot symbol has a `marketMinQuantity` (≥ 0.00001 on
+      // every market we've seen) and "0" is below the floor.
+      //
+      // The robust fix is to compute the size client-side from the
+      // signal's reference price, round to a precision that comfortably
+      // satisfies stepSize for the common spot pairs, and send BOTH
+      // `quantity` and (for buys) `funds`. SoDEX accepts the order;
+      // if the realised fill differs from `funds` because of slippage,
+      // the matched leg respects whichever side of the order book is
+      // valid.
+      //
+      // Precision: vBTC has quantityPrecision=5 (stepSize 0.00001),
+      // vETH=5, vSOL=4. We use 5 decimals universally — under-rounds
+      // for SOL but well above the floor; for the larger-cap pairs
+      // it matches the spec.
       const isBuy = signal.side === "buy";
       const referencePrice = signal.price_usd > 0 ? signal.price_usd : 0;
+      if (referencePrice <= 0) {
+        throw new Error(
+          "Signal has no reference price — can't compute order quantity safely.",
+        );
+      }
+      const qty = (sizeUsd / referencePrice).toFixed(5);
+      if (Number(qty) <= 0) {
+        throw new Error(
+          `Computed quantity ${qty} is zero — increase position size or check the price feed.`,
+        );
+      }
       const order: SodexNewOrderEntry = isBuy
         ? {
             symbolID: symbolId,
@@ -176,7 +211,7 @@ export function ExecuteLiveButton({ signal }: Props) {
             side: SodexSide.BUY,
             type: SodexOrderType.MARKET,
             timeInForce: SodexTimeInForce.IOC,
-            quantity: "0",
+            quantity: qty,
             funds: sizeUsd.toString(),
           }
         : {
@@ -185,10 +220,7 @@ export function ExecuteLiveButton({ signal }: Props) {
             side: SodexSide.SELL,
             type: SodexOrderType.MARKET,
             timeInForce: SodexTimeInForce.IOC,
-            quantity:
-              referencePrice > 0
-                ? (sizeUsd / referencePrice).toFixed(6)
-                : "0.0001",
+            quantity: qty,
           };
 
       const sodexResp = await placeOrderBatch({

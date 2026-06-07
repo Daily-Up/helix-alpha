@@ -109,8 +109,11 @@ export interface SafetyLimits {
   acceptedDisclaimer: boolean;
 }
 
+// Default per-trade max sits comfortably above the buildathon's
+// hardcoded $11 live-order size so a fresh user doesn't immediately
+// hit "Your per-trade max is below the live floor".
 const DEFAULT_LIMITS: SafetyLimits = {
-  maxPositionUsd: 10,
+  maxPositionUsd: 25,
   maxDailyTrades: 3,
   acceptedDisclaimer: false,
 };
