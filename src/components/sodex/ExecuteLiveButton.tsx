@@ -18,6 +18,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { useAccount } from "wagmi";
 import {
   SODEX_NETWORKS,
   type SodexNetwork,
@@ -30,6 +31,7 @@ import {
 import {
   readLocalKey,
   readSafetyLimits,
+  writeLocalKey,
 } from "@/lib/sodex-onchain/local-keys";
 import {
   SodexOrderType,
@@ -60,6 +62,13 @@ export function ExecuteLiveButton({ signal }: Props) {
   // Mainnet only — testnet was scoped out.
   const network: SodexNetwork = "mainnet";
 
+  // Wagmi-connected master wallet. We use it for two things:
+  //   1. Self-heal legacy stored keys that don't carry `masterAddress`
+  //      yet (everyone created before the storage change).
+  //   2. Fall back at trade time if the stored key still has no master
+  //      recorded (e.g. user wiped their key on another machine).
+  const { address: connectedMaster } = useAccount();
+
   // ── Readiness ──
   const [ready, setReady] = useState(false);
   const [identityAddress, setIdentityAddress] = useState<
@@ -67,10 +76,16 @@ export function ExecuteLiveButton({ signal }: Props) {
   >(null);
   useEffect(() => {
     const key = readLocalKey(network);
+    // Migrate legacy localStorage rows: when the stored key has no
+    // masterAddress and the user has a wallet connected, persist the
+    // master so future Execute Live clicks work without a re-create.
+    if (key && !key.masterAddress && connectedMaster) {
+      writeLocalKey(network, { ...key, masterAddress: connectedMaster });
+    }
     const limits = readSafetyLimits(network);
     setReady(!!key && limits.acceptedDisclaimer);
     setIdentityAddress(key?.address ?? null);
-  }, [network]);
+  }, [network, connectedMaster]);
 
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -93,7 +108,31 @@ export function ExecuteLiveButton({ signal }: Props) {
     setBusy(true);
     setMsg(null);
     try {
-      const state = await getAccountState(network, key.address);
+      // SoDEX accounts live on the MASTER wallet that signed addAPIKey,
+      // not on the API-key address. Priority for the lookup address:
+      //   1. key.masterAddress (recorded at create time)
+      //   2. wagmi's currently-connected master (live fallback)
+      //   3. key.address (burner-wallet path: the key IS the account)
+      // For mainnet master+API-key flow the master is required, or
+      // SoDEX rejects the order with
+      //   "Field validation for 'AccountID' failed on the 'required' tag"
+      // because state.aid resolves to 0 for an unregistered address.
+      const accountLookupAddress =
+        key.masterAddress ?? connectedMaster ?? key.address;
+      const state = await getAccountState(network, accountLookupAddress);
+      if (!state.aid) {
+        throw new Error(
+          "SoDEX account not found for this wallet. Connect your master wallet (the one you used on /settings/connect-sodex) — Helix will self-heal and you can click Execute again.",
+        );
+      }
+      // If we resolved via the live wagmi address (legacy path), persist
+      // it onto the key so future trades skip the wallet dependency.
+      if (!key.masterAddress && accountLookupAddress !== key.address) {
+        writeLocalKey(network, {
+          ...key,
+          masterAddress: accountLookupAddress,
+        });
+      }
       let symbolId = signal.symbol_id;
       if (symbolId == null) {
         symbolId = await getSymbolId(network, signal.symbol);

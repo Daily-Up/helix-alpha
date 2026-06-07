@@ -200,6 +200,12 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
     setActionMsg(null);
     try {
       const next = mintNewApiKey(suggestKeyName());
+      // Remember the master wallet that signed addAPIKey. ExecuteLive
+      // needs this to look up the SoDEX account (`aid`) at trade time
+      // — the API key's own address has no account and would return
+      // aid=0, which causes "AccountID failed on the required tag" at
+      // the order endpoint.
+      next.masterAddress = address;
       await sodexAddApiKey({
         network,
         provider,

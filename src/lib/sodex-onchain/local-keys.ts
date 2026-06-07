@@ -36,8 +36,17 @@ export interface StoredApiKey {
   name: string;
   /** secp256k1 private key. Secret — never sent to Helix's server. */
   privateKey: Hex;
-  /** Public address derived from the private key. */
+  /** Public address derived from the private key. The API key's OWN
+   *  address — SoDEX uses this to verify order signatures, but it
+   *  doesn't own a SoDEX account itself. */
   address: `0x${string}`;
+  /** Master wallet that signed addAPIKey — the address that actually
+   *  owns the SoDEX account whose `aid` we trade against. Optional on
+   *  legacy keys (burner flow had no master); when absent the order
+   *  flow falls back to the API-key address (works for burner only).
+   *  NEVER write the master's PRIVATE key here; we only need the
+   *  public address for account-state lookups. */
+  masterAddress?: `0x${string}`;
   /** Local timestamp of creation. */
   createdAt: number;
 }
