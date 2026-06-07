@@ -142,7 +142,28 @@ export function ExecuteLiveButton({ signal }: Props) {
           `Symbol ${signal.symbol} not listed on ${SODEX_NETWORKS[network].label}.`,
         );
       }
-      const clOrdID = `helix-${signal.signal_id}-${Date.now()}`;
+      // SoDEX validates clOrdID against ^[0-9a-zA-Z_-]{1,36}$ and
+      // requires uniqueness across an account's OPEN orders. Our
+      // previous format `helix-${signal_uuid}-${ms_epoch}` was 56
+      // chars (UUID alone is 36) and SoDEX rejected with
+      // "clOrdID is invalid". Pack it tighter:
+      //   helix-{first 8 of signal_id, hyphens stripped}-{base36 ms}
+      //         6+1                 +8               +1 +~8  = ~24
+      // The base36 timestamp suffix guarantees per-tick uniqueness; a
+      // user double-clicking inside the same millisecond would still
+      // collide, so we belt-and-suspenders with a 4-char random tail.
+      const sigSlug = signal.signal_id.replace(/-/g, "").slice(0, 8);
+      const tsB36 = Date.now().toString(36);
+      const rnd = Math.random().toString(36).slice(2, 6);
+      const clOrdID = `helix-${sigSlug}-${tsB36}${rnd}`.slice(0, 36);
+      // Last-line sanity check — if any of the inputs ever produce a
+      // bad char, fail in our code rather than at the gateway with a
+      // generic "invalid" message.
+      if (!/^[0-9a-zA-Z_-]{1,36}$/.test(clOrdID)) {
+        throw new Error(
+          `Generated clOrdID "${clOrdID}" doesn't match SoDEX format. Refresh and try again.`,
+        );
+      }
       // Market BUY → use SoDEX `funds` (USD spend). Market SELL needs
       // a base-asset `quantity`; derive from the signal's reference
       // price when present.
