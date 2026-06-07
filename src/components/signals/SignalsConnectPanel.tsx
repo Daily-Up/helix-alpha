@@ -30,10 +30,12 @@ import {
   readLocalKey,
   readSafetyLimits,
 } from "@/lib/sodex-onchain/local-keys";
+import { getAccountState } from "@/lib/sodex-onchain/client";
 
 type Stage =
   | "loading"
   | "no-wallet"
+  | "wallet-no-account"
   | "wallet-no-key"
   | "key-no-disclaimer"
   | "ready";
@@ -53,30 +55,54 @@ export function SignalsConnectPanel() {
 
   // Re-check localStorage every 5s + on storage events so that finishing
   // the connect-sodex flow in another tab updates this panel without
-  // requiring a refresh.
+  // requiring a refresh. When the wallet is connected but no key is
+  // stored, also probe SoDEX for the account state — aid=0 means the
+  // wallet was never deposited and addAPIKey would fail, so we show
+  // a "bootstrap on sodex.com first" message instead of the generic
+  // create-key prompt.
   useEffect(() => {
-    const refresh = () => {
+    let cancelled = false;
+
+    const refresh = async () => {
       const localKey = readLocalKey("mainnet");
       const limits = readSafetyLimits("mainnet");
-      if (!isConnected) {
-        setStage("no-wallet");
+      if (!isConnected || !address) {
+        if (!cancelled) setStage("no-wallet");
         return;
       }
-      if (!localKey) {
-        setStage("wallet-no-key");
+      if (localKey) {
+        if (cancelled) return;
+        setKeyName(localKey.name || "(burner)");
+        setStage(limits.acceptedDisclaimer ? "ready" : "key-no-disclaimer");
         return;
       }
-      setKeyName(localKey.name || "(burner)");
-      setStage(limits.acceptedDisclaimer ? "ready" : "key-no-disclaimer");
+      // Wallet connected, no local key — distinguish "no SoDEX account
+      // yet" from "account exists but no Helix key". Cheap one-shot
+      // call to SoDEX; we don't poll it every 5s.
+      try {
+        const state = await getAccountState("mainnet", address);
+        if (cancelled) return;
+        const noAccount =
+          state.aid === 0 ||
+          String(state.aid) === "0" ||
+          state.user === "0x0000000000000000000000000000000000000000";
+        setStage(noAccount ? "wallet-no-account" : "wallet-no-key");
+      } catch {
+        // SoDEX gateway hiccup — fall back to the generic prompt so the
+        // user can still click through to /settings/connect-sodex.
+        if (!cancelled) setStage("wallet-no-key");
+      }
     };
+
     refresh();
-    const t = setInterval(refresh, 5_000);
+    const t = setInterval(refresh, 8_000);
     window.addEventListener("storage", refresh);
     return () => {
+      cancelled = true;
       clearInterval(t);
       window.removeEventListener("storage", refresh);
     };
-  }, [isConnected]);
+  }, [isConnected, address]);
 
   const shortAddr = useMemo(() => {
     if (!address) return "";
@@ -124,6 +150,37 @@ export function SignalsConnectPanel() {
               className="text-[11px] text-fg-dim underline decoration-dotted underline-offset-4 hover:text-fg"
             >
               How it works →
+            </Link>
+          </div>
+        </>
+      )}
+
+      {stage === "wallet-no-account" && (
+        <>
+          <h3 className="text-sm font-medium text-fg">
+            Set up your SoDEX account first
+          </h3>
+          <p className="text-xs leading-relaxed text-fg-muted">
+            Wallet{" "}
+            <span className="font-mono text-fg">{shortAddr}</span>{" "}
+            isn&apos;t registered on SoDEX yet. Bridge any token into
+            SoDEX (their UI does this in one step) — that provisions
+            your account. Then come back here.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <a
+              href="https://sodex.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 rounded border border-accent/50 bg-accent/15 px-3 py-1.5 text-xs font-medium text-accent-2 hover:bg-accent/25"
+            >
+              Open SoDEX ↗
+            </a>
+            <Link
+              href="/settings/connect-sodex"
+              className="inline-flex items-center text-[11px] text-fg-dim underline decoration-dotted underline-offset-4 hover:text-fg"
+            >
+              Full setup steps →
             </Link>
           </div>
         </>
@@ -199,13 +256,17 @@ function StageDot({ stage }: { stage: Stage }) {
       ? "#34c39a"
       : stage === "no-wallet"
         ? "#cca15a"
-        : "#7a86ff"; // wallet-no-key / key-no-disclaimer — accent
+        : stage === "wallet-no-account"
+          ? "#e2a85a" // amber — extra step required outside Helix
+          : "#7a86ff"; // wallet-no-key / key-no-disclaimer — accent
   const label =
     stage === "ready"
       ? "ready"
       : stage === "no-wallet"
         ? "demo"
-        : "setup";
+        : stage === "wallet-no-account"
+          ? "bootstrap"
+          : "setup";
   return (
     <span className="inline-flex items-center gap-1.5">
       <span

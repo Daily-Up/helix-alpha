@@ -159,6 +159,19 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
     setLocalKey(readLocalKey(network));
   }, [network, remoteKeys]);
 
+  // True when the connected wallet has no SoDEX account yet (aid=0 +
+  // zero user address). SoDEX returns a default empty state for
+  // unknown wallets — the addAPIKey call would fail at the gateway
+  // with "accountID is required" because aid=0 isn't a real account.
+  // The user has to bootstrap an account on sodex.com (a deposit
+  // auto-creates one) before Helix can register a trading key.
+  const isUnregistered = !!(
+    accountState &&
+    (accountState.aid === 0 ||
+      String(accountState.aid) === "0" ||
+      accountState.user === "0x0000000000000000000000000000000000000000")
+  );
+
   const onGenerateKey = useCallback(async () => {
     if (!isConnected || !address) {
       setError("Wallet not connected — click Connect Wallet first.");
@@ -167,6 +180,12 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
     if (!accountState) {
       setError(
         "SoDEX account state not loaded yet. Hit Refresh and try again.",
+      );
+      return;
+    }
+    if (isUnregistered) {
+      setError(
+        "This wallet has no SoDEX account yet. Open sodex.com → connect the same wallet → deposit any amount (auto-creates your account) → come back here and refresh.",
       );
       return;
     }
@@ -347,7 +366,92 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
         </Card>
       ) : null}
 
-      {isConnected && accountState ? (
+      {/* Unregistered → bootstrap flow. SoDEX returns aid=0 for any
+          wallet that never deposited, so `addAPIKey` would fail with
+          "accountID is required". Direct the user to sodex.com to
+          create the account via a deposit; come back, refresh, and
+          the regular Generate flow takes over. */}
+      {isConnected && accountState && isUnregistered ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>4. Create your SoDEX account first</CardTitle>
+            <span className="text-[11px] text-fg-dim">
+              one-time bootstrap — Helix can&apos;t register a key until
+              SoDEX recognises your wallet
+            </span>
+          </CardHeader>
+          <CardBody>
+            <div className="flex flex-col gap-3">
+              <p className="text-sm text-fg">
+                Wallet{" "}
+                <span className="font-mono text-fg">
+                  {address?.slice(0, 6)}…{address?.slice(-4)}
+                </span>{" "}
+                isn&apos;t registered on{" "}
+                {SODEX_NETWORKS[network].label} yet (account ID is{" "}
+                <span className="font-mono">0</span>). That&apos;s why
+                you saw{" "}
+                <span className="font-mono text-fg-muted">
+                  &quot;accountID is required&quot;
+                </span>{" "}
+                when generating an API key.
+              </p>
+
+              <ol className="ml-5 list-decimal space-y-1.5 text-xs text-fg-muted">
+                <li>
+                  Open{" "}
+                  <a
+                    href="https://sodex.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-accent-2 underline decoration-dotted underline-offset-4 hover:text-accent"
+                  >
+                    sodex.com
+                  </a>
+                  {" "}and connect the same wallet.
+                </li>
+                <li>
+                  Deposit any token via the SoDEX UI (their bridge from
+                  Base / Ethereum / etc). SoDEX provisions your account
+                  on the first deposit.
+                </li>
+                <li>
+                  Come back here and hit{" "}
+                  <strong className="text-fg">Refresh</strong>. Your
+                  Account ID should change from{" "}
+                  <span className="font-mono">0</span> to a real number
+                  — at that point Helix can register a trading key with
+                  one MetaMask click.
+                </li>
+              </ol>
+
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <a
+                  href="https://sodex.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 rounded border border-accent/50 bg-accent/15 px-3 py-1.5 text-xs font-medium text-accent-2 transition-colors hover:border-accent/70 hover:bg-accent/25"
+                >
+                  Open SoDEX ↗
+                </a>
+                <button
+                  onClick={refreshAccount}
+                  disabled={loading}
+                  className="rounded border border-line bg-surface px-3 py-1.5 text-xs text-fg-muted hover:border-line-2 hover:text-fg"
+                >
+                  {loading ? "Refreshing…" : "↻ Refresh account state"}
+                </button>
+                <span className="text-[11px] text-fg-dim">
+                  No deposit-bridge UI in Helix yet — keeps signing
+                  surface minimal.
+                </span>
+              </div>
+            </div>
+          </CardBody>
+        </Card>
+      ) : null}
+
+      {isConnected && accountState && !isUnregistered ? (
         <Card>
           <CardHeader>
             <CardTitle>4. Helix API keys</CardTitle>
