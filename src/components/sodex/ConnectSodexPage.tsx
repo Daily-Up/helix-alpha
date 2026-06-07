@@ -37,6 +37,7 @@ import {
 import {
   addApiKey as sodexAddApiKey,
   getAccountState,
+  getPerpsAccountState,
   listApiKeys,
   revokeApiKey as sodexRevokeApiKey,
 } from "@/lib/sodex-onchain/client";
@@ -54,6 +55,7 @@ import {
 import type {
   SodexAccountState,
   SodexApiKeyRow,
+  SodexPerpsAccountState,
 } from "@/lib/sodex-onchain/types";
 import {
   isHelixManagedKey,
@@ -122,6 +124,13 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
   const [accountState, setAccountState] = useState<SodexAccountState | null>(
     null,
   );
+  // Perps account state is fetched in parallel with spot. A wallet
+  // that only ever traded spot will get a zero-state envelope (aid=0,
+  // empty balances) — we surface "no perps account" in the UI rather
+  // than treating it as an error.
+  const [perpsState, setPerpsState] = useState<SodexPerpsAccountState | null>(
+    null,
+  );
   const [remoteKeys, setRemoteKeys] = useState<SodexApiKeyRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -131,20 +140,28 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
   const refreshAccount = useCallback(async () => {
     if (!isConnected || !address) {
       setAccountState(null);
+      setPerpsState(null);
       setRemoteKeys([]);
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      const [state, keys] = await Promise.all([
+      // Fetch all three in parallel — independent, ~50ms each on
+      // mainnet-gw. Failures on perps fall through silently so a
+      // perps outage doesn't block the spot setup flow.
+      const [spotRes, perpsRes, keysRes] = await Promise.allSettled([
         getAccountState(network, address),
+        getPerpsAccountState(network, address),
         listApiKeys(network, address),
       ]);
-      setAccountState(state);
-      setRemoteKeys(keys);
-    } catch (err) {
-      setError((err as Error).message);
+      if (spotRes.status === "fulfilled") setAccountState(spotRes.value);
+      if (perpsRes.status === "fulfilled") setPerpsState(perpsRes.value);
+      else setPerpsState(null);
+      if (keysRes.status === "fulfilled") setRemoteKeys(keysRes.value);
+      if (spotRes.status === "rejected") {
+        setError((spotRes.reason as Error).message);
+      }
     } finally {
       setLoading(false);
     }
@@ -279,6 +296,23 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
     return accountState.B.map((b) => `${b.t} ${b.a}`).join(" · ");
   }, [accountState]);
 
+  // Mirror of `balanceLine` for the perps account. A wallet with no
+  // perps account at all returns aid=0 + empty balances — render
+  // "no perps account" so it's clear *why* the value is blank.
+  const perpsBalanceLine = useMemo(() => {
+    if (!perpsState || perpsState.aid === 0) return "no perps account";
+    if (!perpsState.B || perpsState.B.length === 0) return "no balances";
+    return perpsState.B.map((b) => `${b.t} ${b.a}`).join(" · ");
+  }, [perpsState]);
+
+  // Strip trailing zeros for cleaner display of perps margin fields.
+  const fmtMarginField = (v: string | undefined): string => {
+    if (!v) return "0";
+    const n = Number(v);
+    if (!Number.isFinite(n)) return v;
+    return n.toFixed(4).replace(/\.?0+$/, "") || "0";
+  };
+
   return (
     <>
       {/* Already-connected banner — when there's a stored API key, the
@@ -349,13 +383,78 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
             {loading ? (
               <div className="text-sm text-fg-muted">Loading…</div>
             ) : accountState ? (
-              <div className="grid grid-cols-[100px_1fr] gap-x-3 gap-y-1 font-mono text-xs">
-                <span className="text-fg-dim">Account ID</span>
-                <span className="text-fg">{accountState.aid}</span>
-                <span className="text-fg-dim">Wallet</span>
-                <span className="break-all text-fg">{accountState.user}</span>
-                <span className="text-fg-dim">Balances</span>
-                <span className="text-fg">{balanceLine}</span>
+              <div className="flex flex-col gap-4">
+                {/* Spot block */}
+                <div>
+                  <div
+                    className="mb-1 text-[10px] uppercase tracking-[0.22em] text-fg-dim"
+                    style={{ fontFamily: "var(--font-jetbrains-mono)" }}
+                  >
+                    Spot
+                  </div>
+                  <div className="grid grid-cols-[100px_1fr] gap-x-3 gap-y-1 font-mono text-xs">
+                    <span className="text-fg-dim">Account ID</span>
+                    <span className="text-fg">{accountState.aid}</span>
+                    <span className="text-fg-dim">Wallet</span>
+                    <span className="break-all text-fg">
+                      {accountState.user}
+                    </span>
+                    <span className="text-fg-dim">Balances</span>
+                    <span className="text-fg">{balanceLine}</span>
+                  </div>
+                </div>
+
+                {/* Perps block — always rendered so users see "no perps
+                    account" rather than wondering if it's loading. */}
+                <div className="border-t border-line pt-3">
+                  <div
+                    className="mb-1 text-[10px] uppercase tracking-[0.22em] text-fg-dim"
+                    style={{ fontFamily: "var(--font-jetbrains-mono)" }}
+                  >
+                    Perps
+                  </div>
+                  <div className="grid grid-cols-[100px_1fr] gap-x-3 gap-y-1 font-mono text-xs">
+                    <span className="text-fg-dim">Account ID</span>
+                    <span className="text-fg">{perpsState?.aid ?? 0}</span>
+                    {perpsState && perpsState.aid !== 0 ? (
+                      <>
+                        <span className="text-fg-dim">Account value</span>
+                        <span className="text-fg">
+                          {fmtMarginField(perpsState.av)} USDC
+                        </span>
+                        <span className="text-fg-dim">Available margin</span>
+                        <span className="text-fg">
+                          {fmtMarginField(perpsState.am)} USDC
+                        </span>
+                        <span className="text-fg-dim">Withdrawable</span>
+                        <span className="text-fg">
+                          {fmtMarginField(perpsState.amw)} USDC
+                        </span>
+                        <span className="text-fg-dim">Open positions</span>
+                        <span className="text-fg">
+                          {perpsState.P?.length ?? 0}
+                        </span>
+                      </>
+                    ) : null}
+                    <span className="text-fg-dim">Balances</span>
+                    <span className="text-fg">{perpsBalanceLine}</span>
+                  </div>
+                  {perpsState && perpsState.aid === 0 ? (
+                    <p className="mt-2 text-[11px] text-fg-dim">
+                      No perps account on this wallet — you can still trade
+                      spot. Open a perps account on{" "}
+                      <a
+                        href="https://sodex.com/trade"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline decoration-dotted underline-offset-4 hover:text-fg"
+                      >
+                        sodex.com/trade
+                      </a>{" "}
+                      by depositing into the perps gateway.
+                    </p>
+                  ) : null}
+                </div>
               </div>
             ) : (
               <div className="text-sm text-fg-muted">

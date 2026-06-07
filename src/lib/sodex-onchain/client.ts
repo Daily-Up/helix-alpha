@@ -175,7 +175,7 @@ async function handle<T>(res: Response): Promise<T> {
   return json.data;
 }
 
-/** GET /accounts/{address}/state — returns account ID + balances. */
+/** GET /spot/accounts/{address}/state — returns account ID + balances. */
 export async function getAccountState(
   network: SodexNetwork,
   address: `0x${string}`,
@@ -183,6 +183,24 @@ export async function getAccountState(
   const { spotEndpoint } = SODEX_NETWORKS[network];
   const res = await fetch(`${spotEndpoint}/accounts/${address}/state`);
   return handle<SodexAccountState>(res);
+}
+
+/**
+ * GET /perps/accounts/{address}/state — returns the perps account
+ * envelope (aid + margin breakdown + balances + positions + orders).
+ *
+ * A wallet that's only ever traded spot will get an `aid:0` zero-state
+ * response here. The current Helix execution path is spot-only, so
+ * this is informational for the UI ("you also have $X on perps");
+ * we don't sign perps orders from this codebase yet.
+ */
+export async function getPerpsAccountState(
+  network: SodexNetwork,
+  address: `0x${string}`,
+): Promise<import("./types").SodexPerpsAccountState> {
+  const { perpsEndpoint } = SODEX_NETWORKS[network];
+  const res = await fetch(`${perpsEndpoint}/accounts/${address}/state`);
+  return handle<import("./types").SodexPerpsAccountState>(res);
 }
 
 /** GET /accounts/{address}/api-keys — returns rows we already know. */

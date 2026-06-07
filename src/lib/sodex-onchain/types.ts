@@ -43,7 +43,7 @@ export interface SodexApiKeyRow {
   expiresAt: number;
 }
 
-/** Account state, as returned by GET /accounts/{address}/state. */
+/** Spot account state, as returned by GET /spot/accounts/{address}/state. */
 export interface SodexAccountState {
   user: `0x${string}`;
   /** Account ID — required as `accountID` in every signed action. */
@@ -53,6 +53,42 @@ export interface SodexAccountState {
   B: Array<{ i: number; a: string; t: string; l: string }>;
   /** Open orders summary — null if none. */
   O: unknown;
+}
+
+/**
+ * Perps account state, as returned by GET /perps/accounts/{address}/state.
+ *
+ * Carries the same identity fields as spot (`aid`, `uid`, `user`) plus
+ * margin / position bookkeeping that doesn't exist on spot. The wallet
+ * may have a spot account but no perps account (or vice versa); when
+ * absent the gateway returns the zero-state envelope (`aid:0`,
+ * `user:0x00…00`, empty arrays) — same convention as spot.
+ */
+export interface SodexPerpsAccountState {
+  user: `0x${string}`;
+  aid: number;
+  uid: number;
+  /** Account value — collateral + unrealised PnL on open positions. */
+  av: string;
+  /** Available margin (free collateral after open positions + orders). */
+  am: string;
+  /** Initial margin held against open positions. */
+  ami: string;
+  /** Withdrawable margin. */
+  amw: string;
+  /** Initial / current / open-order margin breakdown. */
+  im: string;
+  cm: string;
+  oim: string;
+  ocm: string;
+  /** Balances. */
+  B: Array<{ i: number; a: string; t: string; l: string }>;
+  /** Open positions. */
+  P: unknown[];
+  /** Open orders. */
+  O: unknown[];
+  /** Subaccounts. */
+  S: unknown[];
 }
 
 /** One outgoing order entry on a batch order placement. */
