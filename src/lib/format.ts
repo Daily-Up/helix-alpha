@@ -85,6 +85,17 @@ export function fmtSodexSymbol(s: string | null | undefined): string {
     .join("/");
 }
 
+/**
+ * Strip the SoDEX-internal `v` prefix from a single coin name
+ * (vUSDC → USDC, vBTC → BTC). Used by the balances table where rows
+ * are per-coin rather than per-pair. Pass-through for already-clean
+ * names like USDC.
+ */
+export function fmtSodexCoin(c: string | null | undefined): string {
+  if (!c) return "";
+  return c.length > 1 && /^v[A-Z0-9]/.test(c) ? c.slice(1) : c;
+}
+
 /** "$1.23B", "$45.6M", "$789K", "$12.34". */
 export function fmtUsd(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—";

@@ -34,6 +34,7 @@ import {
   readSafetyLimits,
   writeLocalKey,
 } from "@/lib/sodex-onchain/local-keys";
+import { fmtSodexSymbol } from "@/lib/format";
 import {
   SodexOrderType,
   SodexSide,
@@ -149,7 +150,7 @@ export function ExecuteLiveButton({ signal }: Props) {
       }
       if (symbolId == null) {
         throw new Error(
-          `Symbol ${signal.symbol} not listed on ${SODEX_NETWORKS[network].label}.`,
+          `Symbol ${fmtSodexSymbol(signal.symbol)} not listed on ${SODEX_NETWORKS[network].label}.`,
         );
       }
       // SoDEX validates clOrdID against ^[0-9a-zA-Z_-]{1,36}$ and
@@ -205,7 +206,7 @@ export function ExecuteLiveButton({ signal }: Props) {
       }
       if (!referencePrice || referencePrice <= 0) {
         throw new Error(
-          `Couldn't fetch a live price for ${signal.symbol} from SoDEX. Try again in a moment.`,
+          `Couldn't fetch a live price for ${fmtSodexSymbol(signal.symbol)} from SoDEX. Try again in a moment.`,
         );
       }
       const qty = (sizeUsd / referencePrice).toFixed(5);
@@ -268,7 +269,7 @@ export function ExecuteLiveButton({ signal }: Props) {
       });
 
       setMsg(
-        `✓ Order placed — ${signal.side.toUpperCase()} ~$${sizeUsd.toFixed(0)} ${signal.symbol} on ${SODEX_NETWORKS[network].label}`,
+        `✓ Order placed — ${signal.side.toUpperCase()} ~$${sizeUsd.toFixed(0)} ${fmtSodexSymbol(signal.symbol)} on ${SODEX_NETWORKS[network].label}`,
       );
     } catch (err) {
       const errMsg = (err as Error).message;
@@ -335,7 +336,7 @@ export function ExecuteLiveButton({ signal }: Props) {
             ? "cursor-wait border-line bg-surface-2 text-fg-dim"
             : "border-accent/40 bg-accent/15 text-accent-2 hover:bg-accent/25",
         )}
-        title={`${SODEX_NETWORKS[network].label} · ${signal.side.toUpperCase()} ~$${signal.suggested_size_usd.toFixed(0)} ${signal.symbol}`}
+        title={`${SODEX_NETWORKS[network].label} · ${signal.side.toUpperCase()} ~$${signal.suggested_size_usd.toFixed(0)} ${fmtSodexSymbol(signal.symbol)}`}
       >
         {busy
           ? "Signing…"

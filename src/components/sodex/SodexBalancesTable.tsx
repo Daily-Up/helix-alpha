@@ -31,6 +31,7 @@ import {
 } from "@/lib/sodex-onchain/types";
 import { getLivePrice } from "@/lib/sodex-onchain/client";
 import { type SodexNetwork } from "@/lib/sodex-onchain/chains";
+import { fmtSodexCoin as displayCoin } from "@/lib/format";
 
 interface BalanceRow {
   coin: string;
@@ -238,12 +239,6 @@ export function SodexBalancesTable({ network, spotState, perpsState }: Props) {
       </table>
     </div>
   );
-}
-
-// Strip the SoDEX-internal `v` prefix on display (vUSDC → USDC) so the
-// table looks like the public SoDEX wallet view.
-function displayCoin(c: string): string {
-  return c.startsWith("v") && c.length > 1 ? c.slice(1) : c;
 }
 
 function venueLabel(v: "spot" | "futures"): string {
