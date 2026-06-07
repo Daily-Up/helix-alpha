@@ -193,13 +193,27 @@ export function ExecuteLiveButton({ signal }: Props) {
   }, [network, signal, identityAddress]);
 
   if (!ready) {
+    // Two failure modes lead here:
+    //   1. No SoDEX trading key in this browser → user needs to create
+    //      one (the dominant case for new visitors).
+    //   2. Key exists but they haven't ticked the safety-limits
+    //      disclaimer.
+    // We frame the CTA toward the dominant path because the connect
+    // page handles either case once they land on it.
+    const hasKey = identityAddress != null;
     return (
       <a
         href="/settings/connect-sodex"
-        className="inline-flex items-center gap-2 rounded border border-line bg-surface px-2.5 py-1 text-xs text-fg-muted transition-colors hover:border-accent/40 hover:text-accent-2"
-        title="Set up a burner wallet (testnet) or connect a master wallet (mainnet) to enable live execution."
+        className="inline-flex items-center gap-2 rounded border border-accent/40 bg-accent/10 px-2.5 py-1 text-xs text-accent-2 transition-colors hover:border-accent/60 hover:bg-accent/20"
+        title={
+          hasKey
+            ? "You have a key but haven't accepted the safety-limits disclaimer yet — click to finish setup."
+            : "Connect your wallet on SoDEX mainnet and generate a Helix-scoped API key. Your master wallet signs once; the trading key lives only in this browser."
+        }
       >
-        Connect SoDEX to execute live →
+        {hasKey
+          ? "Accept disclaimer to execute live →"
+          : "→ Create SoDEX API key to execute live"}
       </a>
     );
   }

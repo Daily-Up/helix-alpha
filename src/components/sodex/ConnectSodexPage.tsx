@@ -55,6 +55,11 @@ import type {
   SodexAccountState,
   SodexApiKeyRow,
 } from "@/lib/sodex-onchain/types";
+import {
+  isHelixManagedKey,
+  systemKeys as filterSystemKeys,
+  userManagedKeys,
+} from "@/lib/sodex-onchain/key-roles";
 
 export function ConnectSodexPage() {
   // Mainnet-only. SoDEX testnet was scoped out — its faucet doesn't
@@ -351,85 +356,119 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
             </span>
           </CardHeader>
           <CardBody className="!p-0">
-            {remoteKeys.length === 0 ? (
-              <div className="p-4 text-sm text-fg-muted">
-                No API keys registered yet — generate one to enable live
-                execution.
-              </div>
-            ) : (
-              <ul className="divide-y divide-line">
-                {remoteKeys.map((k) => {
-                  const isLocal = localKey?.name === k.name;
-                  const isDefault = k.name === "default";
-                  const isHelix = k.name.startsWith("helix-");
-                  return (
-                    <li
-                      key={k.name}
-                      className="grid grid-cols-[1fr_120px_120px] items-center gap-3 px-4 py-2 text-xs"
-                    >
-                      <div className="flex flex-col">
-                        <span className="font-mono font-medium text-fg">
-                          {k.name}
-                        </span>
-                        <span className="font-mono text-[10px] text-fg-dim">
-                          {k.publicKey.slice(0, 10)}…{k.publicKey.slice(-6)}
-                        </span>
-                      </div>
-                      <div className="flex flex-col items-start gap-0.5">
-                        {isDefault ? (
-                          <Badge tone="neutral">master key</Badge>
-                        ) : isHelix ? (
-                          <Badge tone="positive">helix</Badge>
-                        ) : (
-                          <Badge tone="neutral">external</Badge>
-                        )}
-                        {isLocal ? (
-                          <span className="text-[10px] text-fg-dim">
-                            ✓ secret in this browser
-                          </span>
-                        ) : null}
-                      </div>
-                      <div className="text-right">
-                        {!isDefault ? (
-                          <button
-                            onClick={() => onRevokeKey(k.name)}
-                            disabled={!!busy}
-                            className="rounded border border-line px-2 py-0.5 text-[10px] text-fg-muted hover:border-negative/40 hover:text-negative"
-                          >
-                            {busy === `revoke:${k.name}`
-                              ? "Revoking…"
-                              : "Revoke"}
-                          </button>
-                        ) : (
-                          <span className="text-[10px] text-fg-dim">
-                            cannot revoke
-                          </span>
-                        )}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
+            {(() => {
+              // Split keys: anything Helix-managed or third-party gets
+              // shown to the user; SoDEX system keys (`default`,
+              // `web`) are hidden from the main list and surfaced as
+              // a small note so users still understand the 5-cap.
+              const userKeys = userManagedKeys(remoteKeys);
+              const sysKeys = filterSystemKeys(remoteKeys);
+              const hasHelixUsable = userKeys.some((k) =>
+                isHelixManagedKey(k.name),
+              );
 
-            <div className="flex items-center justify-between gap-3 border-t border-line p-3">
-              <span className="text-[11px] text-fg-dim">
-                MetaMask opens once to sign addAPIKey. The new private
-                key stays in your browser only.
-              </span>
-              <button
-                onClick={onGenerateKey}
-                disabled={!!busy || remoteKeys.length >= 5}
-                className={cn(
-                  "rounded border px-3 py-1.5 text-xs font-medium transition-colors",
-                  busy === "generate"
-                    ? "cursor-wait border-line bg-surface-2 text-fg-dim"
-                    : "border-accent/40 bg-accent/15 text-accent-2 hover:bg-accent/25",
-                )}
-              >
-                {busy === "generate" ? "Generating…" : "+ Generate new key"}
-              </button>
-            </div>
+              return (
+                <>
+                  {userKeys.length === 0 ? (
+                    <div className="flex flex-col gap-2 p-4 text-sm">
+                      <span className="text-fg">
+                        No Helix API key on this account yet.
+                      </span>
+                      <span className="text-fg-muted text-xs">
+                        Click <strong>+ Generate new key</strong> below.
+                        Your master wallet signs once; the new key&apos;s
+                        secret lives only in this browser. Required to
+                        enable the <strong>▶ Execute live</strong>
+                        {" "}button on signal cards.
+                      </span>
+                    </div>
+                  ) : (
+                    <ul className="divide-y divide-line">
+                      {userKeys.map((k) => {
+                        const isLocal = localKey?.name === k.name;
+                        const isHelix = isHelixManagedKey(k.name);
+                        return (
+                          <li
+                            key={k.name}
+                            className="grid grid-cols-[1fr_120px_120px] items-center gap-3 px-4 py-2 text-xs"
+                          >
+                            <div className="flex flex-col">
+                              <span className="font-mono font-medium text-fg">
+                                {k.name}
+                              </span>
+                              <span className="font-mono text-[10px] text-fg-dim">
+                                {k.publicKey.slice(0, 10)}…{k.publicKey.slice(-6)}
+                              </span>
+                            </div>
+                            <div className="flex flex-col items-start gap-0.5">
+                              {isHelix ? (
+                                <Badge tone="positive">helix</Badge>
+                              ) : (
+                                <Badge tone="neutral">external</Badge>
+                              )}
+                              {isLocal ? (
+                                <span className="text-[10px] text-fg-dim">
+                                  ✓ secret in this browser
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="text-right">
+                              <button
+                                onClick={() => onRevokeKey(k.name)}
+                                disabled={!!busy}
+                                className="rounded border border-line px-2 py-0.5 text-[10px] text-fg-muted hover:border-negative/40 hover:text-negative"
+                              >
+                                {busy === `revoke:${k.name}`
+                                  ? "Revoking…"
+                                  : "Revoke"}
+                              </button>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+
+                  {sysKeys.length > 0 ? (
+                    <div className="border-t border-line bg-surface-2 px-4 py-2 text-[10px] text-fg-dim">
+                      SoDEX system keys (hidden from list, ignored for
+                      Helix execution):{" "}
+                      <span className="font-mono">
+                        {sysKeys.map((k) => k.name).join(", ")}
+                      </span>
+                      . They count toward SoDEX&apos;s 5-key cap but
+                      cannot be used to sign Helix trades.
+                    </div>
+                  ) : null}
+
+                  <div className="flex items-center justify-between gap-3 border-t border-line p-3">
+                    <span className="text-[11px] text-fg-dim">
+                      {hasHelixUsable
+                        ? "Rotate the existing key, or add a second one."
+                        : "MetaMask opens once to sign addAPIKey. The new private key stays in your browser only."}
+                    </span>
+                    <button
+                      onClick={onGenerateKey}
+                      disabled={!!busy || remoteKeys.length >= 5}
+                      className={cn(
+                        "rounded border px-3 py-1.5 text-xs font-medium transition-colors",
+                        busy === "generate"
+                          ? "cursor-wait border-line bg-surface-2 text-fg-dim"
+                          : hasHelixUsable
+                            ? "border-line bg-surface text-fg-muted hover:border-accent/40 hover:text-accent-2"
+                            : "border-accent/50 bg-accent/20 text-accent-2 hover:bg-accent/30",
+                      )}
+                    >
+                      {busy === "generate"
+                        ? "Generating…"
+                        : hasHelixUsable
+                          ? "+ Generate new key"
+                          : "+ Create your first Helix API key"}
+                    </button>
+                  </div>
+                </>
+              );
+            })()}
           </CardBody>
         </Card>
       ) : null}
