@@ -292,7 +292,12 @@ export async function signWithMasterWallet(opts: {
     params: [opts.account, JSON.stringify(typedData)],
   })) as Hex;
 
-  const apiSign = ("0x01" + signature.slice(2)) as Hex;
+  // Use wrapUniversalSignature so v gets normalised 27/28 → 0/1. The
+  // earlier `"0x01" + sig.slice(2)` path skipped that and SoDEX
+  // failed ecrecover with "Failed to recover signer: Invalid
+  // recovery ID: bad recovery id" — eth_signTypedData_v4 returns
+  // the legacy 27/28 form, but the gateway expects 0/1.
+  const apiSign = wrapUniversalSignature(signature, 0x01);
   return { apiSign, nonce };
 }
 
@@ -324,7 +329,9 @@ export async function signWithApiKey(opts: {
     message: { payloadHash, nonce },
   });
 
-  const apiSign = ("0x01" + signature.slice(2)) as Hex;
+  // Same v normalisation as signWithMasterWallet — viem's
+  // signTypedData also returns legacy 27/28, and SoDEX wants 0/1.
+  const apiSign = wrapUniversalSignature(signature, 0x01);
   return { apiSign, nonce };
 }
 
