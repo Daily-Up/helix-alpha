@@ -327,8 +327,18 @@ export async function placeOrderBatch(opts: {
   const { network, apiKeyName, privateKey, batch } = opts;
   const { chainId, spotEndpoint } = SODEX_NETWORKS[network];
 
+  // Action type MUST be "batchNewOrder" for the /trade/orders/batch
+  // endpoint — not "newOrder". Reverse-engineered from sodex.com's
+  // bundle (features-DstP3doC.js, see `vE` action builder):
+  //   var fE = "batchNewOrder"; var pE = "batchCancelOrder";
+  //   function vE(e) { return { type: fE, params: {...} }; }
+  // The docs say "newOrder" but that's the SINGLE-order action; batch
+  // uses the dedicated batch* type. Sending "newOrder" through the
+  // batch endpoint produces a payloadHash that doesn't match what the
+  // gateway computes, so the recovered signer differs from the
+  // registered public key and the gateway returns "API key not found".
   const action: SodexAction<SodexNewOrderBatch> = {
-    type: "newOrder",
+    type: "batchNewOrder",
     params: batch,
   };
 
