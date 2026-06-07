@@ -7,6 +7,7 @@ import { HeroStat, SubStat } from "@/components/ui/HeroStat";
 import { StatSkeleton, PanelSkeleton } from "@/components/ui/Skeleton";
 import { useBulkMountReveal } from "@/hooks/useMountReveal";
 import { SignalCard, type SignalCardData } from "./SignalCard";
+import { SignalsConnectPanel } from "./SignalsConnectPanel";
 import { cn } from "@/components/ui/cn";
 import { isPublicMode } from "@/lib/public-mode";
 
@@ -190,36 +191,39 @@ export function SignalsDashboard() {
 
   return (
     <div ref={revealRef} className="dash-crossfade-enter flex flex-col gap-4">
-      {/* Headline: active signals count. Supporting stats sit as a
-          thin row beneath the hero — the landing's stats-strip
-          pattern, scaled down. Cleaner than fighting for horizontal
-          space on the same row. */}
-      <div className="mt-2 flex flex-col gap-6">
-        <HeroStat
-          label="Active signals"
-          value={String(statusCounts.active)}
-          change={`${statusCounts.executed} executed`}
-          changeTone={statusCounts.executed > 0 ? "positive" : "neutral"}
-          sub={`${signals.filter((s) => s.status === "pending" && s.tier === "auto").length} auto · ${signals.filter((s) => s.status === "pending" && s.tier === "review").length} review · ${signals.filter((s) => s.status === "pending" && s.tier === "info").length} info pending`}
-        />
-        <div className="grid grid-cols-3 gap-x-10 md:max-w-[640px]">
-          <SubStat
-            label="Auto Trade"
-            value={autoTrade == null ? "—" : autoTrade ? "ON" : "OFF"}
-            sub={autoTrade ? "Tier-1 signals fire" : "manual review only"}
-            tone={autoTrade ? "positive" : "neutral"}
+      {/* Headline row: active-signals hero + substats on the LEFT,
+          live-trading setup panel on the RIGHT. The empty whitespace
+          to the right of the stats was begging for the connect-wallet
+          CTA — the top-bar badge alone is too easy to miss. */}
+      <div className="mt-2 flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
+        <div className="flex flex-col gap-6">
+          <HeroStat
+            label="Active signals"
+            value={String(statusCounts.active)}
+            change={`${statusCounts.executed} executed`}
+            changeTone={statusCounts.executed > 0 ? "positive" : "neutral"}
+            sub={`${signals.filter((s) => s.status === "pending" && s.tier === "auto").length} auto · ${signals.filter((s) => s.status === "pending" && s.tier === "review").length} review · ${signals.filter((s) => s.status === "pending" && s.tier === "info").length} info pending`}
           />
-          <SubStat
-            label="Total Signals"
-            value={String(statusCounts.all)}
-            sub={`${statusCounts.expired} expired`}
-          />
-          <SubStat
-            label="Dismissed"
-            value={String(statusCounts.dismissed)}
-            sub="user / gate"
-          />
+          <div className="grid grid-cols-3 gap-x-10 md:max-w-[640px]">
+            <SubStat
+              label="Auto Trade"
+              value={autoTrade == null ? "—" : autoTrade ? "ON" : "OFF"}
+              sub={autoTrade ? "Tier-1 signals fire" : "manual review only"}
+              tone={autoTrade ? "positive" : "neutral"}
+            />
+            <SubStat
+              label="Total Signals"
+              value={String(statusCounts.all)}
+              sub={`${statusCounts.expired} expired`}
+            />
+            <SubStat
+              label="Dismissed"
+              value={String(statusCounts.dismissed)}
+              sub="user / gate"
+            />
+          </div>
         </div>
+        <SignalsConnectPanel />
       </div>
 
       {/* Action bar */}
