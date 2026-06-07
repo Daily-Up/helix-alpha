@@ -36,14 +36,20 @@ import { classifyAssetClass } from "../pipeline/base-rates";
 
 // Threshold constants — exported for visibility and testability.
 export const CLASSIFY_THRESHOLD = 0.3;
-export const FLAG_WEAK_THRESHOLD = 0.15;
-// When the headline mentions zero asset_classes that the corpus covers,
-// scale the cosine score down hard. Empirically the BoW embedding has a
-// noise floor of ~0.4 for generic crypto-twitter language ("partnership",
-// "announce", "moon") — without the asset-class penalty those would all
-// score above the 0.15 drop threshold. A 0.3 multiplier pushes them to
-// ~0.12 where they correctly drop.
-export const NO_CORPUS_CLASS_PENALTY = 0.3;
+// Drop threshold relaxed 0.15 → 0.08 because the original setting was
+// silently rejecting real signals — borderline catalysts (whale flows,
+// exploits with off-corpus asset names, macro prints) were scoring
+// ~0.13-0.14 just under the bar and never reaching Claude. Production
+// audit: 594 articles in 5 days were dropped, /signals went empty.
+// 0.08 lets the borderline-but-plausible catalysts through while
+// still rejecting pure noise.
+export const FLAG_WEAK_THRESHOLD = 0.08;
+// Penalty multiplier applied when the headline mentions zero asset
+// classes the corpus covers. Was 0.3 (too aggressive — collapsed raw
+// cosines of ~0.45 to ~0.13, below even the relaxed 0.08 floor for
+// some real signals). 0.5 keeps the asset-class signal but doesn't
+// bury genuine catalysts whose phrasing the corpus hasn't memorised.
+export const NO_CORPUS_CLASS_PENALTY = 0.5;
 // Signal-verb boost — additive bump applied when the title contains a
 // strong factual verb that mirrors a corpus event shape (exploit, sanction,
 // approve, acquire, etc.). Catches the false-negative case where a real
