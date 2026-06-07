@@ -27,6 +27,7 @@ import {
   placeOrderBatch,
   getAccountState,
   getSymbolId,
+  getLivePrice,
 } from "@/lib/sodex-onchain/client";
 import {
   readLocalKey,
@@ -192,10 +193,19 @@ export function ExecuteLiveButton({ signal }: Props) {
       // for SOL but well above the floor; for the larger-cap pairs
       // it matches the spec.
       const isBuy = signal.side === "buy";
-      const referencePrice = signal.price_usd > 0 ? signal.price_usd : 0;
-      if (referencePrice <= 0) {
+      // SignalCard passes price_usd=0 — it's a market order, the price
+      // is resolved at click time from SoDEX's live ticker. Use the
+      // best ask for BUY (you cross up) and best bid for SELL (you
+      // cross down); fall back to lastPx if either side is empty.
+      // signal.price_usd is honoured as a last-ditch fallback so a
+      // future signal that DOES carry a price still works.
+      let referencePrice = await getLivePrice(network, signal.symbol, signal.side);
+      if (!referencePrice && signal.price_usd > 0) {
+        referencePrice = signal.price_usd;
+      }
+      if (!referencePrice || referencePrice <= 0) {
         throw new Error(
-          "Signal has no reference price — can't compute order quantity safely.",
+          `Couldn't fetch a live price for ${signal.symbol} from SoDEX. Try again in a moment.`,
         );
       }
       const qty = (sizeUsd / referencePrice).toFixed(5);

@@ -101,6 +101,63 @@ export async function getSymbolId(
   return map.get(norm);
 }
 
+/**
+ * Live ticker for a SoDEX spot symbol.
+ *
+ * Used by ExecuteLiveButton to convert a USD spend into a base-asset
+ * quantity at click time (signals don't carry a live price). Returns
+ * the best-ask for BUY-side conversion, best-bid for SELL-side. Falls
+ * back to lastPx if either side of the book is empty.
+ *
+ * SoDEX exposes only an "all tickers" snapshot — there's no per-symbol
+ * endpoint — so we fetch once and pick the entry by name. The payload
+ * is ~30 markets so the bandwidth cost is fine even at click latency.
+ */
+export interface SodexTicker {
+  symbol: string;
+  lastPx: string;
+  askPx?: string;
+  bidPx?: string;
+}
+export async function getTicker(
+  network: SodexNetwork,
+  symbolName: string,
+): Promise<SodexTicker | undefined> {
+  const { spotEndpoint } = SODEX_NETWORKS[network];
+  const res = await fetch(`${spotEndpoint}/markets/tickers`);
+  const json = (await res.json()) as {
+    code: number;
+    data?: Array<SodexTicker>;
+  };
+  if (json.code !== 0 || !json.data) return undefined;
+  // SoDEX returns symbols in mixed conventions (vBTC_vUSDC vs vBTCssi);
+  // compare case-insensitively.
+  const want = symbolName.toUpperCase();
+  return json.data.find((t) => (t.symbol ?? "").toUpperCase() === want);
+}
+
+/**
+ * Best-effort live mid price for converting USD-size to base-asset
+ * quantity. Returns the side of the book the BUY/SELL would consume —
+ * bestAsk for BUY (you cross the spread up), bestBid for SELL (you
+ * cross the spread down). Falls back to lastPx, then null.
+ */
+export async function getLivePrice(
+  network: SodexNetwork,
+  symbolName: string,
+  side: "buy" | "sell",
+): Promise<number | null> {
+  const t = await getTicker(network, symbolName);
+  if (!t) return null;
+  const pick = side === "buy" ? t.askPx : t.bidPx;
+  const candidates = [pick, t.lastPx].filter(Boolean) as string[];
+  for (const v of candidates) {
+    const n = parseFloat(v);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return null;
+}
+
 async function handle<T>(res: Response): Promise<T> {
   const json = (await res.json()) as SodexResponse<T>;
   if (json.code !== 0) {
