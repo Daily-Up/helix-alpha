@@ -214,6 +214,11 @@ export function ExecuteLiveButton({ signal }: Props) {
           `Computed quantity ${qty} is zero — increase position size or check the price feed.`,
         );
       }
+      // SoDEX market orders accept EXACTLY ONE of {quantity, funds}:
+      //   BUY  — `funds` (USD spend); gateway derives quantity at fill
+      //   SELL — `quantity` (base-asset size)
+      // Sending both → "quantity and funds cannot be set at the same time".
+      // Sending neither, or `quantity: "0"`, → "quantity is invalid".
       const order: SodexNewOrderEntry = isBuy
         ? {
             symbolID: symbolId,
@@ -221,7 +226,6 @@ export function ExecuteLiveButton({ signal }: Props) {
             side: SodexSide.BUY,
             type: SodexOrderType.MARKET,
             timeInForce: SodexTimeInForce.IOC,
-            quantity: qty,
             funds: sizeUsd.toString(),
           }
         : {

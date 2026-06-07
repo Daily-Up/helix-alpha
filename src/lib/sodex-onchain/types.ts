@@ -64,9 +64,12 @@ export interface SodexNewOrderEntry {
   timeInForce: SodexTifValue;
   /** DecimalString — always a string, not a number. */
   price?: string;
-  /** DecimalString. */
-  quantity: string;
-  /** DecimalString — for MARKET orders specifying spend instead of size. */
+  /** DecimalString. Exactly one of {quantity, funds} on MARKET orders;
+   *  SoDEX rejects with "quantity and funds cannot be set at the
+   *  same time" if both are present. */
+  quantity?: string;
+  /** DecimalString — for MARKET BUY orders specifying USD spend
+   *  instead of base-asset size. Mutually exclusive with `quantity`. */
   funds?: string;
   /** Required on perps; optional/ignored on spot. */
   modifier?: number;
