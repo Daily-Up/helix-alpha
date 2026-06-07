@@ -43,7 +43,22 @@ interface SodexResponse<T> {
  *
  * SoDEX assigns each market a numeric ID; the trading API expects
  * that integer, not the human-readable symbol. We fetch the catalog
- * once from /trade/symbols and memoize per network.
+ * once from /markets/symbols and memoize per network.
+ *
+ * Earlier this code hit `/trade/symbols` which 404s; the empty cache
+ * caused every ExecuteLive click to fail with
+ *   "Symbol vBTC_vUSDC not listed on SoDEX Mainnet."
+ * even though the symbol format was correct.
+ *
+ * Canonical endpoint shape (verified against mainnet-gw on 2026-06-07):
+ *   GET /markets/symbols  →  { code, timestamp, data: [
+ *     { id: 1, name: "vBTC_vUSDC", displayName: "BTC/USDC", … },
+ *     { id: 2, name: "vETH_vUSDC", displayName: "ETH/USDC", … },
+ *     …
+ *   ]}
+ * The symbol identifier we send to /trade/place lives in `name`. The
+ * legacy `symbol` field doesn't exist on this endpoint, but we accept
+ * both shapes so callers passing either format still resolve.
  */
 const _symbolMapCache = new Map<SodexNetwork, Map<string, number>>();
 export async function getSymbolId(
@@ -56,16 +71,26 @@ export async function getSymbolId(
     map = new Map();
     try {
       const { spotEndpoint } = SODEX_NETWORKS[network];
-      const res = await fetch(`${spotEndpoint}/trade/symbols`);
+      const res = await fetch(`${spotEndpoint}/markets/symbols`);
       const json = (await res.json()) as {
         code: number;
-        data?: Array<{ id?: number; symbol?: string; name?: string }>;
+        data?: Array<{
+          id?: number;
+          name?: string;
+          symbol?: string;
+          displayName?: string;
+        }>;
       };
       if (json.code === 0 && json.data) {
         for (const s of json.data) {
           const id = s.id;
-          const key = (s.symbol ?? s.name ?? "").toUpperCase();
-          if (id != null && key) map.set(key, id);
+          if (id == null) continue;
+          // Index under `name` (canonical), `symbol` (legacy fallback)
+          // and `displayName` so a caller can search by "BTC/USDC" too.
+          for (const key of [s.name, s.symbol, s.displayName]) {
+            const k = (key ?? "").toUpperCase();
+            if (k) map.set(k, id);
+          }
         }
       }
     } catch {
