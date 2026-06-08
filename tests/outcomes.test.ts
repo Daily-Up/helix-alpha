@@ -52,7 +52,7 @@ function klines(
 }
 
 describe("Part 1 — resolveOutcome (pure)", () => {
-  it("LONG: high crosses target before stop → target_hit, realized ≈ +target_pct", () => {
+  it("LONG: high touches target → target_hit label, realized = close-to-close ROI at expiry", () => {
     const r = resolveOutcome({
       signal: syntheticSignal(),
       klines: klines(NOW - 24 * 3600 * 1000, [
@@ -62,11 +62,12 @@ describe("Part 1 — resolveOutcome (pure)", () => {
       now: NOW + 49 * 3600 * 1000,
     });
     expect(r.outcome).toBe("target_hit");
-    expect(r.realized_pct).toBeCloseTo(5, 1);
-    expect(r.price_at_outcome).toBeCloseTo(105, 1);
+    // Realized is the actual expiry-day close (105.5), NOT the +5% target.
+    expect(r.realized_pct).toBeCloseTo(5.5, 1);
+    expect(r.price_at_outcome).toBeCloseTo(105.5, 1);
   });
 
-  it("LONG: low crosses stop before target → stop_hit, realized ≈ -stop_pct", () => {
+  it("LONG: low touches stop → stop_hit label, realized = close-to-close ROI at expiry", () => {
     const r = resolveOutcome({
       signal: syntheticSignal(),
       klines: klines(NOW - 24 * 3600 * 1000, [
@@ -75,10 +76,12 @@ describe("Part 1 — resolveOutcome (pure)", () => {
       now: NOW + 49 * 3600 * 1000,
     });
     expect(r.outcome).toBe("stop_hit");
-    expect(r.realized_pct).toBeCloseTo(-3, 1);
+    // Touched the stop intraday but closed at 98 → realized is -2%, not -3%.
+    expect(r.realized_pct).toBeCloseTo(-2, 1);
+    expect(r.price_at_outcome).toBeCloseTo(98, 1);
   });
 
-  it("LONG: both hit same day → pessimistic stop_hit", () => {
+  it("LONG: both touched same day → pessimistic stop_hit label, realized from close", () => {
     const r = resolveOutcome({
       signal: syntheticSignal(),
       klines: klines(NOW - 24 * 3600 * 1000, [
@@ -87,6 +90,8 @@ describe("Part 1 — resolveOutcome (pure)", () => {
       now: NOW + 49 * 3600 * 1000,
     });
     expect(r.outcome).toBe("stop_hit");
+    // Both levels touched, but it closed at 102 → realized is +2%.
+    expect(r.realized_pct).toBeCloseTo(2, 1);
   });
 
   it("LONG: neither hit, expiry passed → flat", () => {
@@ -116,7 +121,7 @@ describe("Part 1 — resolveOutcome (pure)", () => {
     expect(r.outcome).toBeNull();
   });
 
-  it("SHORT: low crosses target → target_hit", () => {
+  it("SHORT: low touches target → target_hit label, realized from close-to-close ROI", () => {
     const r = resolveOutcome({
       signal: syntheticSignal({ direction: "short" }),
       klines: klines(NOW - 24 * 3600 * 1000, [
@@ -125,10 +130,11 @@ describe("Part 1 — resolveOutcome (pure)", () => {
       now: NOW + 49 * 3600 * 1000,
     });
     expect(r.outcome).toBe("target_hit");
-    expect(r.realized_pct).toBeCloseTo(5, 1);
+    // Short closed at 96 from 100 → +4% directional, not the +5% target.
+    expect(r.realized_pct).toBeCloseTo(4, 1);
   });
 
-  it("SHORT: high crosses stop → stop_hit", () => {
+  it("SHORT: high touches stop → stop_hit label, realized from close-to-close ROI", () => {
     const r = resolveOutcome({
       signal: syntheticSignal({ direction: "short" }),
       klines: klines(NOW - 24 * 3600 * 1000, [
@@ -137,7 +143,8 @@ describe("Part 1 — resolveOutcome (pure)", () => {
       now: NOW + 49 * 3600 * 1000,
     });
     expect(r.outcome).toBe("stop_hit");
-    expect(r.realized_pct).toBeCloseTo(-3, 1);
+    // Short closed at 103.5 from 100 → -3.5% directional, not the -3% stop.
+    expect(r.realized_pct).toBeCloseTo(-3.5, 1);
   });
 
   it("Empty kline series with horizon expired → flat with realized_pct = 0", () => {

@@ -1,18 +1,30 @@
 /**
  * Pure outcome-resolution logic — Part 1.
  *
- * Walks a chronological daily-kline series for the asset between
- * `signal.generated_at` and `min(now, signal.expires_at)` and decides:
+ * Resolution is measured AT EXPIRY. We only return a terminal verdict
+ * once `now > expires_at`; before that the signal is still `pending`
+ * (the resolution job retries later). This matters because the realized
+ * number is the *expiry-time* ROI, which can't be known until the
+ * horizon has actually elapsed.
  *
- *   target_hit  — high crossed target_price (long) or low crossed target_price (short)
- *   stop_hit    — low crossed stop_price (long) or high crossed stop_price (short)
- *   flat        — neither hit AND now > expires_at; realized_pct from final close
- *   pending     — neither hit AND now ≤ expires_at; resolution job retries later
+ * Two distinct things come out of a resolved signal:
  *
- * Same-day collision rule: if a single bar's range contains BOTH target
- * and stop, we mark it `stop_hit`. Pessimistic / walk-forward-defensive —
- * matches how a real fill engine would size the loss before chasing the
- * upside.
+ *   1. `outcome` — a LABEL describing what happened during the holding
+ *      window between `generated_at` and `expires_at`:
+ *        target_hit  — price touched the target level intraday
+ *        stop_hit    — price touched the stop level intraday
+ *        flat        — neither level was touched
+ *      Same-day collision rule: if a single bar's range contains BOTH
+ *      target and stop, we label it `stop_hit` (pessimistic /
+ *      walk-forward-defensive — a real fill engine sizes the loss before
+ *      chasing the upside).
+ *
+ *   2. `realized_pct` / `price_at_outcome` — the ACTUAL return you'd be
+ *      holding at expiry. This is ALWAYS the directional close-to-close
+ *      ROI from `price_at_generation` to the close on the expiry day (or
+ *      the last available bar in the window), regardless of the label.
+ *      It is NOT the fixed `target_pct` / `-stop_pct` we set up front —
+ *      touching a level intraday does not mean we exited there.
  *
  * Companion tests: tests/outcomes.test.ts.
  *
@@ -74,17 +86,11 @@ export function resolveOutcome(input: ResolveInput): ResolutionResult {
   const now = input.now ?? Date.now();
   const { direction, price_at_generation, target_pct, stop_pct } = signal;
 
-  // Without an anchor price we can't compute target/stop levels. We can
-  // still mark `flat` once horizon expires (realized_pct = 0).
-  if (price_at_generation == null || price_at_generation <= 0) {
-    if (now > signal.expires_at) {
-      return {
-        outcome: "flat",
-        outcome_at_ms: signal.expires_at,
-        price_at_outcome: null,
-        realized_pct: 0,
-      };
-    }
+  // Realized ROI is an expiry-time measurement: stay pending until the
+  // horizon has actually elapsed. We never resolve early on an intraday
+  // touch, because touching a level isn't an exit — the position rides
+  // to expiry and the realized number is whatever it closes at then.
+  if (now <= signal.expires_at) {
     return {
       outcome: null,
       outcome_at_ms: null,
@@ -93,7 +99,18 @@ export function resolveOutcome(input: ResolveInput): ResolutionResult {
     };
   }
 
-  // Concrete price levels.
+  // Without an anchor price we can't compute levels or ROI. Expiry has
+  // passed → flat with no PnL info.
+  if (price_at_generation == null || price_at_generation <= 0) {
+    return {
+      outcome: "flat",
+      outcome_at_ms: signal.expires_at,
+      price_at_outcome: null,
+      realized_pct: 0,
+    };
+  }
+
+  // Concrete price levels — used ONLY to label the outcome.
   const targetPrice =
     direction === "long"
       ? price_at_generation * (1 + target_pct / 100)
@@ -103,76 +120,56 @@ export function resolveOutcome(input: ResolveInput): ResolutionResult {
       ? price_at_generation * (1 - stop_pct / 100)
       : price_at_generation * (1 + stop_pct / 100);
 
-  // Filter to bars in the window [generated_at, min(now, expires_at)].
-  const upperBound = Math.min(now, signal.expires_at);
+  // Bars inside the holding window [generated_at, expires_at].
   const inWindow = klines
-    .filter((k) => k.ts_ms >= signal.generated_at && k.ts_ms <= upperBound)
+    .filter((k) => k.ts_ms >= signal.generated_at && k.ts_ms <= signal.expires_at)
     .sort((a, b) => a.ts_ms - b.ts_ms);
 
+  // ── 1. Label: did price touch target/stop during the window? ────────
+  let outcome: ResolutionOutcome = "flat";
+  let labelTs: number | null = null;
   for (const bar of inWindow) {
     const targetHit =
       direction === "long" ? bar.high >= targetPrice : bar.low <= targetPrice;
     const stopHit =
       direction === "long" ? bar.low <= stopPrice : bar.high >= stopPrice;
 
-    if (targetHit && stopHit) {
-      // Pessimistic: assume stop fired first.
-      return {
-        outcome: "stop_hit",
-        outcome_at_ms: bar.ts_ms,
-        price_at_outcome: stopPrice,
-        realized_pct: -stop_pct,
-      };
+    if (stopHit) {
+      // Pessimistic: if both touched the same day, the stop wins.
+      outcome = "stop_hit";
+      labelTs = bar.ts_ms;
+      break;
     }
     if (targetHit) {
-      return {
-        outcome: "target_hit",
-        outcome_at_ms: bar.ts_ms,
-        price_at_outcome: targetPrice,
-        realized_pct: target_pct,
-      };
-    }
-    if (stopHit) {
-      return {
-        outcome: "stop_hit",
-        outcome_at_ms: bar.ts_ms,
-        price_at_outcome: stopPrice,
-        realized_pct: -stop_pct,
-      };
+      outcome = "target_hit";
+      labelTs = bar.ts_ms;
+      break;
     }
   }
 
-  // No hit yet — flat if expiry passed, otherwise still pending.
-  if (now > signal.expires_at) {
-    const lastBar =
-      inWindow.length > 0
-        ? inWindow[inWindow.length - 1]
-        : klines[klines.length - 1];
-    if (!lastBar) {
-      // No price data and expiry passed → flat with no PnL info.
-      return {
-        outcome: "flat",
-        outcome_at_ms: signal.expires_at,
-        price_at_outcome: null,
-        realized_pct: 0,
-      };
-    }
-    const finalPx = lastBar.close;
-    const rawMove =
-      ((finalPx - price_at_generation) / price_at_generation) * 100;
-    const directional = direction === "long" ? rawMove : -rawMove;
+  // ── 2. Realized: ALWAYS close-to-close ROI at expiry ────────────────
+  const lastBar =
+    inWindow.length > 0
+      ? inWindow[inWindow.length - 1]
+      : klines[klines.length - 1];
+  if (!lastBar) {
+    // No price data at all but expiry passed → keep the label, no PnL.
     return {
-      outcome: "flat",
+      outcome,
       outcome_at_ms: signal.expires_at,
-      price_at_outcome: finalPx,
-      realized_pct: Number(directional.toFixed(2)),
+      price_at_outcome: null,
+      realized_pct: 0,
     };
   }
-
+  const finalPx = lastBar.close;
+  const rawMove =
+    ((finalPx - price_at_generation) / price_at_generation) * 100;
+  const directional = direction === "long" ? rawMove : -rawMove;
   return {
-    outcome: null,
-    outcome_at_ms: null,
-    price_at_outcome: null,
-    realized_pct: null,
+    outcome,
+    // When a level was touched, surface the touch day; otherwise expiry.
+    outcome_at_ms: outcome === "flat" ? signal.expires_at : labelTs,
+    price_at_outcome: finalPx,
+    realized_pct: Number(directional.toFixed(2)),
   };
 }

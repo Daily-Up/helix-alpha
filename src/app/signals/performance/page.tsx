@@ -175,6 +175,12 @@ async function loadTotals() {
     target_hits: number;
     stop_hits: number;
     flats: number;
+    // Realized-ROI-based win accounting. A "win" is a signal that
+    // actually closed positive at expiry (realized_pct > 0), NOT one
+    // that merely touched its target level intraday. `priced_resolved`
+    // excludes rows we couldn't price (no kline at expiry).
+    realized_wins: number;
+    priced_resolved: number;
   }>(`
     WITH ${CANONICAL}
     SELECT COUNT(*) AS total,
@@ -185,7 +191,14 @@ async function loadTotals() {
                   THEN realized_pct END) AS avg_pct,
            SUM(CASE WHEN outcome = 'target_hit' THEN 1 ELSE 0 END) AS target_hits,
            SUM(CASE WHEN outcome = 'stop_hit' THEN 1 ELSE 0 END) AS stop_hits,
-           SUM(CASE WHEN outcome = 'flat' THEN 1 ELSE 0 END) AS flats
+           SUM(CASE WHEN outcome = 'flat' THEN 1 ELSE 0 END) AS flats,
+           SUM(CASE WHEN (outcome IN ('target_hit','stop_hit')
+                          OR (outcome = 'flat' AND price_at_outcome IS NOT NULL))
+                         AND realized_pct > 0
+                    THEN 1 ELSE 0 END) AS realized_wins,
+           SUM(CASE WHEN outcome IN ('target_hit','stop_hit')
+                  OR (outcome = 'flat' AND price_at_outcome IS NOT NULL)
+                  THEN 1 ELSE 0 END) AS priced_resolved
     FROM signal_outcomes_canonical
   `);
   return r;
@@ -243,9 +256,12 @@ export default async function PerformancePage() {
     loadRecent(),
   ]);
 
+  // Win rate keys off the ACTUAL realized ROI at expiry (close-to-close),
+  // not whether a target/stop level was touched intraday. A signal that
+  // dipped to its stop but recovered to close green counts as a win.
   const winRate =
-    totals && (totals.target_hits + totals.stop_hits) > 0
-      ? totals.target_hits / (totals.target_hits + totals.stop_hits)
+    totals && totals.priced_resolved > 0
+      ? totals.realized_wins / totals.priced_resolved
       : null;
 
   return (
@@ -253,7 +269,7 @@ export default async function PerformancePage() {
       <HairlineHeader
         kicker="Signal Performance"
         headline="What happened to the signals we fired"
-        note="Honest accounting. Includes everything Helix ever proposed — AUTO, REVIEW, INFO. We score against the suggested target / stop. Flat = neither target nor stop was hit before the signal expired. Blocked = the pre-save invariant gate refused the signal at fire time. Dismissed = the lifecycle sweeper closed it."
+        note="Honest accounting. Includes everything Helix ever proposed — AUTO, REVIEW, INFO. Realized return is the actual close-to-close ROI at the signal's expiry — not the target/stop we set up front. The Target / Stop / Flat label only marks which level (if any) price touched intraday; a signal can touch its stop and still close green. Win rate = share of priced signals that closed positive at expiry. Blocked = the pre-save invariant gate refused the signal at fire time. Dismissed = the lifecycle sweeper closed it."
       />
 
       {/* Top-line totals */}
@@ -266,7 +282,7 @@ export default async function PerformancePage() {
         <Stat
           kicker="Win rate"
           value={winRate == null ? "—" : `${Math.round(winRate * 100)}%`}
-          note={`${totals?.target_hits ?? 0} target hits / ${totals?.stop_hits ?? 0} stops`}
+          note={`${totals?.realized_wins ?? 0} closed up / ${totals?.priced_resolved ?? 0} priced at expiry`}
           color={winRate == null ? COLORS.text : winRate > 0.5 ? COLORS.pos : COLORS.neg}
         />
         <Stat
