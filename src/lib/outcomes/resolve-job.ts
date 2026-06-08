@@ -21,12 +21,31 @@ export interface ResolutionJobResult {
    *  because the original resolution ran while klines_daily was stale
    *  (price_at_outcome was NULL). */
   flats_repriced: number;
+  /** Signals that had no signal_outcomes row at all (slipped through
+   *  the insertOutcomeFromSignal wiring at fire time) and were
+   *  backfilled in this run. */
+  stragglers_backfilled: number;
 }
 
 export async function runResolutionJob(
   opts: { now?: number } = {},
 ): Promise<ResolutionJobResult> {
   const now = opts.now ?? Date.now();
+
+  // Pass 0: catch signals whose insertOutcomeFromSignal call failed at
+  // fire time (transient DB hiccup, etc.) — they wouldn't appear in
+  // listPendingOutcomes because there's no row at all. Run the
+  // backfill first so the rest of the resolver sees them.
+  let stragglersBackfilled = 0;
+  try {
+    const r = await backfillOutcomesForExistingSignals();
+    stragglersBackfilled = r.inserted;
+  } catch (err) {
+    console.warn(
+      `[resolve-job] straggler backfill failed: ${(err as Error).message}`,
+    );
+  }
+
   const pending = await Outcomes.listPendingOutcomes();
   const result: ResolutionJobResult = {
     pending_before: pending.length,
@@ -37,6 +56,7 @@ export async function runResolutionJob(
     skipped_no_prices: 0,
     errors: 0,
     flats_repriced: 0,
+    stragglers_backfilled: stragglersBackfilled,
   };
 
   for (const row of pending) {
