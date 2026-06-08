@@ -79,8 +79,12 @@ interface RecentRow {
  * Companion one-off purges: scripts/dedupe-signal-outcomes.mjs and
  * scripts/backfill-june-outcomes.mjs.
  */
-// 2026-06-01 00:00 UTC.
-const JUNE_2026_EPOCH_MS = 1780056000000;
+// 2026-06-01 00:00 UTC = Date.UTC(2026, 5, 1). The earlier literal
+// here was 1780056000000 which is actually 2026-05-29 12:00 UTC and
+// was leaking late-May signals into the June window. Hard-set to
+// the correct value so a future fingers-on-the-keyboard miscalc
+// can't reintroduce the slip.
+const JUNE_2026_EPOCH_MS = 1780272000000;
 
 const CANONICAL = `signal_outcomes_canonical AS (
   SELECT o.*
