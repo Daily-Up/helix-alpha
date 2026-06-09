@@ -62,8 +62,10 @@ describe("Part 1 — resolveOutcome (pure)", () => {
       now: NOW + 49 * 3600 * 1000,
     });
     expect(r.outcome).toBe("target_hit");
-    // Realized is the actual expiry-day close (105.5), NOT the +5% target.
-    expect(r.realized_pct).toBeCloseTo(5.5, 1);
+    // Close-to-close is +5.5%, but realized is clamped to the +5% target
+    // (the take-profit would have filled there). price_at_outcome keeps
+    // the raw close for transparency.
+    expect(r.realized_pct).toBeCloseTo(5, 1);
     expect(r.price_at_outcome).toBeCloseTo(105.5, 1);
   });
 
@@ -143,8 +145,9 @@ describe("Part 1 — resolveOutcome (pure)", () => {
       now: NOW + 49 * 3600 * 1000,
     });
     expect(r.outcome).toBe("stop_hit");
-    // Short closed at 103.5 from 100 → -3.5% directional, not the -3% stop.
-    expect(r.realized_pct).toBeCloseTo(-3.5, 1);
+    // Short closed at 103.5 → -3.5% directional, clamped to the -3% stop
+    // (the stop-loss would have filled there).
+    expect(r.realized_pct).toBeCloseTo(-3, 1);
   });
 
   it("Empty kline series with horizon expired → flat with realized_pct = 0", () => {

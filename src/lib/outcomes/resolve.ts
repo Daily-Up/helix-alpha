@@ -19,12 +19,16 @@
  *      walk-forward-defensive — a real fill engine sizes the loss before
  *      chasing the upside).
  *
- *   2. `realized_pct` / `price_at_outcome` — the ACTUAL return you'd be
- *      holding at expiry. This is ALWAYS the directional close-to-close
- *      ROI from `price_at_generation` to the close on the expiry day (or
- *      the last available bar in the window), regardless of the label.
- *      It is NOT the fixed `target_pct` / `-stop_pct` we set up front —
- *      touching a level intraday does not mean we exited there.
+ *   2. `realized_pct` — the return you'd actually be holding. This is the
+ *      directional close-to-close ROI from `price_at_generation` to the
+ *      expiry-day close, BUT bounded by the bracket: it can never exceed
+ *      `+target_pct` (the take-profit would have filled) nor fall below
+ *      `-stop_pct` (the stop-loss would have filled). So:
+ *        - inside the band  → the real expiry-day ROI (an intermediate
+ *          number, NOT always the fixed target/stop)
+ *        - outside the band → clamped to +target_pct / -stop_pct
+ *      `price_at_outcome` is the raw expiry-day close (pre-clamp) for
+ *      transparency.
  *
  * Companion tests: tests/outcomes.test.ts.
  *
@@ -165,11 +169,14 @@ export function resolveOutcome(input: ResolveInput): ResolutionResult {
   const rawMove =
     ((finalPx - price_at_generation) / price_at_generation) * 100;
   const directional = direction === "long" ? rawMove : -rawMove;
+  // Bracket bound: the position would have exited at the take-profit or
+  // stop-loss, so realized PnL can't surpass +target_pct / -stop_pct.
+  const bounded = Math.min(Math.max(directional, -stop_pct), target_pct);
   return {
     outcome,
     // When a level was touched, surface the touch day; otherwise expiry.
     outcome_at_ms: outcome === "flat" ? signal.expires_at : labelTs,
     price_at_outcome: finalPx,
-    realized_pct: Number(directional.toFixed(2)),
+    realized_pct: Number(bounded.toFixed(2)),
   };
 }

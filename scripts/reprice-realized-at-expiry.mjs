@@ -91,11 +91,13 @@ function resolveAtExpiry(sig, klines) {
   const finalPx = lastBar.close;
   const rawMove = ((finalPx - price_at_generation) / price_at_generation) * 100;
   const directional = direction === "long" ? rawMove : -rawMove;
+  // Bracket bound: realized PnL can't surpass +target_pct / -stop_pct.
+  const bounded = Math.min(Math.max(directional, -stop_pct), target_pct);
   return {
     outcome,
     outcome_at_ms: outcome === "flat" ? expires_at : labelTs,
     price_at_outcome: finalPx,
-    realized_pct: Number(directional.toFixed(2)),
+    realized_pct: Number(bounded.toFixed(2)),
   };
 }
 
