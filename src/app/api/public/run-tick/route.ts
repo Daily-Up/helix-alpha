@@ -32,7 +32,6 @@ export const maxDuration = 60;
 const MIN_INTERVAL_S = Number(
   process.env.PUBLIC_TICK_MIN_INTERVAL_S ?? 2 * 60,
 );
-const SIGNAL_EXPIRE_HOURS = 6;
 
 async function handle(): Promise<NextResponse> {
   const verdict = await checkPublicCronBudget("public_tick", MIN_INTERVAL_S);
@@ -83,12 +82,15 @@ async function handle(): Promise<NextResponse> {
         summary.reconcile = { error: (err as Error).message };
       }
 
-      // 4) Expire stale pending signals
+      // 4) Expire pending signals whose own horizon (expires_at) has
+      //    passed, or that failed corroboration. Horizon-respecting —
+      //    no more flat 6h clock badging still-live signals EXPIRED.
       try {
-        const expiredBySignal = await Signals.expirePendingOlderThan(
-          SIGNAL_EXPIRE_HOURS * 60 * 60 * 1000,
-        );
-        summary.expired = { by_signal_age: expiredBySignal };
+        const swept = await Signals.sweepExpiredSignals();
+        summary.expired = {
+          stale_unexecuted: swept.stale_unexecuted,
+          uncorroborated: swept.uncorroborated,
+        };
       } catch (err) {
         summary.expired = { error: (err as Error).message };
       }

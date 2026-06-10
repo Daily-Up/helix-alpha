@@ -32,8 +32,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const SIGNAL_EXPIRE_HOURS = 6;
-
 async function handle(req: Request): Promise<NextResponse> {
   try {
     assertCronAuth(req);
@@ -98,22 +96,18 @@ async function handle(req: Request): Promise<NextResponse> {
     summary.reconcile = { error: (err as Error).message };
   }
 
-  // 5) Expire stale pending signals — two-pronged:
-  //    a) signal fired_at older than SIGNAL_EXPIRE_HOURS (clock-based)
-  //    b) underlying news older than MAX_NEWS_AGE_HOURS regardless of
-  //       when the signal itself fired (catches "purge+regen revives
-  //       dead alpha" pattern — MSTR/UBS bug)
+  // 5) Expire pending signals whose OWN horizon (expires_at) has passed,
+  //    or that failed corroboration. Horizon-respecting: a 1d signal
+  //    lives 1 day and a 3d signal lives 3 days — we no longer force a
+  //    flat 6h clock that badged still-live signals as EXPIRED while
+  //    their countdown showed time remaining. Stale-news generation is
+  //    already blocked at gen time by the 36h MAX_NEWS_AGE guard, so we
+  //    don't second-guess a live signal by news age here.
   try {
-    const expiredBySignal = await Signals.expirePendingOlderThan(
-      SIGNAL_EXPIRE_HOURS * 60 * 60 * 1000,
-    );
-    const MAX_NEWS_AGE_HOURS = 24;
-    const expiredByNews = await Signals.expirePendingByNewsAge(
-      MAX_NEWS_AGE_HOURS * 60 * 60 * 1000,
-    );
+    const swept = await Signals.sweepExpiredSignals();
     summary.expired = {
-      by_signal_age: expiredBySignal,
-      by_news_age: expiredByNews,
+      stale_unexecuted: swept.stale_unexecuted,
+      uncorroborated: swept.uncorroborated,
     };
   } catch (err) {
     summary.expired = { error: (err as Error).message };
