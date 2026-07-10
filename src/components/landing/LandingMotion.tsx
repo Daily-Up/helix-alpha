@@ -40,145 +40,62 @@ export function LandingMotion() {
 // ─── Hero ────────────────────────────────────────────────────────────────
 
 function initHero(motion: boolean) {
+  // The hero MUST always be visible. A prior bug left it stranded at
+  // opacity:0 whenever this timeline didn't run to completion (it can
+  // stall or the gsap.context can revert). So we NEVER animate opacity
+  // on the hero: (1) reveal everything up front — an inline opacity:1
+  // overrides any Tailwind opacity-0 class — and (2) the intro animates
+  // POSITION only. If the timeline freezes or reverts, content stays put
+  // and visible.
+  const HERO = [
+    "[data-hero='eyebrow']",
+    "[data-hero='line1']",
+    "[data-hero='line2']",
+    "[data-hero='subhead']",
+    "[data-hero='ctas']",
+    "[data-hero='card']",
+    "[data-hero='period']",
+  ];
+  gsap.set(HERO, { opacity: 1 });
+  gsap.set("[data-hero='line2'] .hero-char", { opacity: 1 });
+  gsap.set("[data-card-part]", { opacity: 1 });
+  const period = document.querySelector("[data-hero='period']");
+  if (period) gsap.set(period, { opacity: 1, scale: 1 });
+
+  // Reduced-motion (and no-JS) simply keep the static, visible hero.
+  if (!motion) return;
+
   const tl = gsap.timeline({ defaults: { ease: "power2.out" } });
-
-  if (motion) {
-    // Hero elements are now VISIBLE by default in the server HTML so the
-    // page can never be stranded as a blank void if JS is slow/blocked.
-    // Since JS is here and motion is allowed, hide them first, then the
-    // timeline below fades them in. (Reduced-motion + no-JS keep the
-    // visible server state.)
-    gsap.set(
-      [
-        "[data-hero='eyebrow']",
-        "[data-hero='line1']",
-        "[data-hero='subhead']",
-        "[data-hero='ctas']",
-        "[data-hero='card']",
-        "[data-hero='period']",
-      ],
-      { opacity: 0 },
-    );
-    gsap.set("[data-hero='line2'] .hero-char", { opacity: 0 });
-
-    // Eyebrow
-    tl.fromTo("[data-hero='eyebrow']",
-      { opacity: 0, y: 4 },
-      { opacity: 1, y: 0, duration: 0.4 }
-    );
-
-    // "Event-driven alpha." — single block fade + translate
-    tl.fromTo("[data-hero='line1']",
-      { opacity: 0, y: 8 },
-      { opacity: 1, y: 0, duration: 0.6 },
-      "+=0.1"
-    );
-
-    // "Audited." — letter-by-letter stagger
-    //
-    // IMPORTANT: the line2 parent span carries the `opacity-0` Tailwind
-    // class, which suppresses ALL children regardless of their own
-    // opacity. Animate the parent to opacity 1 FIRST (instant, no
-    // tween) so the per-char stagger below is actually visible. Before
-    // this fix, "Audited." was invisible on every fresh page load
-    // because the parent stayed at opacity:0 even after the hero-char
-    // children animated to 1.
-    gsap.set("[data-hero='line2']", { opacity: 1 });
-
-    const line2Chars = document.querySelectorAll("[data-hero='line2'] .hero-char");
-    if (line2Chars.length) {
-      tl.fromTo(line2Chars,
-        { opacity: 0, y: 8 },
-        { opacity: 1, y: 0, duration: 0.6, stagger: 0.03 },
-        "-=0.4"
-      );
-    } else {
-      tl.fromTo("[data-hero='line2']",
-        { opacity: 0, y: 8 },
-        { opacity: 1, y: 0, duration: 0.6 },
-        "-=0.4"
-      );
-    }
-
-    // Period overshoot
-    const period = document.querySelector("[data-hero='period']");
-    if (period) {
-      tl.fromTo(period,
-        { scale: 0.8, opacity: 0 },
-        { scale: 1, opacity: 1, duration: 0.4, ease: "back.out(2.5)" },
-        "-=0.15"
-      );
-    }
-
-    // Subhead
-    tl.fromTo("[data-hero='subhead']",
-      { opacity: 0 },
-      { opacity: 1, duration: 0.5, ease: "power1.out" },
-      "-=0.2"
-    );
-
-    // CTAs
-    tl.fromTo("[data-hero='ctas']",
-      { opacity: 0 },
-      { opacity: 1, duration: 0.4, ease: "power1.out" },
-      "-=0.2"
-    );
-
-    // Signal card — staggered internals
-    tl.fromTo("[data-hero='card']",
-      { opacity: 0, y: 12 },
-      { opacity: 1, y: 0, duration: 0.6 },
-      0.5
-    );
-
-    // Card internal stagger
-    const cardParts = document.querySelectorAll("[data-card-part]");
-    if (cardParts.length) {
-      tl.fromTo(cardParts,
-        { opacity: 0, y: 4 },
-        { opacity: 1, y: 0, duration: 0.4, stagger: 0.08 },
-        "-=0.3"
-      );
-    }
-
-    // REVIEW badge pulse
-    const badge = document.querySelector("[data-card-badge]");
-    if (badge) {
-      tl.fromTo(badge,
-        { scale: 1 },
-        { scale: 1.04, duration: 0.15, yoyo: true, repeat: 1, ease: "power1.inOut" },
-        "-=0.1"
-      );
-    }
-
-    // Conviction counters in card
-    document.querySelectorAll<HTMLElement>("[data-card-counter]").forEach((el) => {
-      const target = parseFloat(el.dataset.cardCounter!);
-      const obj = { val: 0 };
-      tl.to(obj, {
-        val: target,
-        duration: 0.8,
-        ease: "power2.out",
-        onUpdate: () => {
-          el.textContent = target % 1 === 0
-            ? Math.round(obj.val).toString()
-            : obj.val.toFixed(2);
-        },
-      }, "-=0.6");
-    });
-
-  } else {
-    gsap.set(
-      "[data-hero='eyebrow'], [data-hero='line1'], [data-hero='line2'], [data-hero='subhead'], [data-hero='ctas'], [data-hero='card']",
-      { opacity: 1 }
-    );
-    gsap.set("[data-card-part]", { opacity: 1 });
-    const period = document.querySelector("[data-hero='period']");
-    if (period) gsap.set(period, { opacity: 1, scale: 1 });
-    document.querySelectorAll(".hero-char").forEach(c => {
-      (c as HTMLElement).style.opacity = "1";
-    });
+  tl.from("[data-hero='eyebrow']", { y: 6, duration: 0.4 });
+  tl.from("[data-hero='line1']", { y: 12, duration: 0.6 }, "+=0.05");
+  const line2Chars = document.querySelectorAll("[data-hero='line2'] .hero-char");
+  if (line2Chars.length) {
+    tl.from(line2Chars, { y: 12, duration: 0.5, stagger: 0.03 }, "-=0.35");
   }
+  tl.from("[data-hero='subhead']", { y: 10, duration: 0.45 }, "-=0.2");
+  tl.from("[data-hero='ctas']", { y: 10, duration: 0.4 }, "-=0.2");
+  tl.from("[data-hero='card']", { y: 14, duration: 0.6 }, 0.3);
+  const cardParts = document.querySelectorAll("[data-card-part]");
+  if (cardParts.length) {
+    tl.from(cardParts, { y: 6, duration: 0.4, stagger: 0.08 }, "-=0.3");
+  }
+
+  // Conviction counters in the card (visual flourish only — never hides).
+  document.querySelectorAll<HTMLElement>("[data-card-counter]").forEach((el) => {
+    const target = parseFloat(el.dataset.cardCounter!);
+    if (Number.isNaN(target)) return;
+    const obj = { val: 0 };
+    tl.to(obj, {
+      val: target,
+      duration: 0.8,
+      ease: "power2.out",
+      onUpdate: () => {
+        el.textContent = target % 1 === 0
+          ? Math.round(obj.val).toString()
+          : obj.val.toFixed(2);
+      },
+    }, "-=0.6");
+  });
 }
 
 // ─── Stats ───────────────────────────────────────────────────────────────
