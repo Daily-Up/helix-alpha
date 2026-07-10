@@ -26,11 +26,8 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount } from "wagmi";
-import {
-  readLocalKey,
-  readSafetyLimits,
-} from "@/lib/sodex-onchain/local-keys";
 import { getAccountState } from "@/lib/sodex-onchain/client";
+import { useTradeMode } from "@/lib/sodex-onchain/useTradeMode";
 
 type Stage =
   | "loading"
@@ -48,37 +45,26 @@ type Stage =
 // the only place users would ever see it.)
 
 export function SignalsConnectPanel() {
+  const tm = useTradeMode("mainnet");
   const { isConnected, address } = useAccount();
 
-  const [stage, setStage] = useState<Stage>("loading");
-  const [keyName, setKeyName] = useState<string>("");
+  // Only the PRE-KEY setup stages depend on the wagmi session. Once a
+  // key exists, the stage is decided by useTradeMode — the same
+  // readiness the topbar badge uses — so panel and badge never disagree.
+  const [probeStage, setProbeStage] = useState<
+    "loading" | "no-wallet" | "wallet-no-account" | "wallet-no-key"
+  >("loading");
 
-  // Re-check localStorage every 5s + on storage events so that finishing
-  // the connect-sodex flow in another tab updates this panel without
-  // requiring a refresh. When the wallet is connected but no key is
-  // stored, also probe SoDEX for the account state — aid=0 means the
-  // wallet was never deposited and addAPIKey would fail, so we show
-  // a "bootstrap on sodex.com first" message instead of the generic
-  // create-key prompt.
   useEffect(() => {
+    if (tm.hasKey) return; // stage comes from tm; no account probe needed
     let cancelled = false;
-
-    const refresh = async () => {
-      const localKey = readLocalKey("mainnet");
-      const limits = readSafetyLimits("mainnet");
+    const run = async () => {
       if (!isConnected || !address) {
-        if (!cancelled) setStage("no-wallet");
-        return;
-      }
-      if (localKey) {
-        if (cancelled) return;
-        setKeyName(localKey.name || "(burner)");
-        setStage(limits.acceptedDisclaimer ? "ready" : "key-no-disclaimer");
+        if (!cancelled) setProbeStage("no-wallet");
         return;
       }
       // Wallet connected, no local key — distinguish "no SoDEX account
-      // yet" from "account exists but no Helix key". Cheap one-shot
-      // call to SoDEX; we don't poll it every 5s.
+      // yet" (aid=0, addAPIKey would fail) from "account exists, no key".
       try {
         const state = await getAccountState("mainnet", address);
         if (cancelled) return;
@@ -86,28 +72,37 @@ export function SignalsConnectPanel() {
           state.aid === 0 ||
           String(state.aid) === "0" ||
           state.user === "0x0000000000000000000000000000000000000000";
-        setStage(noAccount ? "wallet-no-account" : "wallet-no-key");
+        setProbeStage(noAccount ? "wallet-no-account" : "wallet-no-key");
       } catch {
-        // SoDEX gateway hiccup — fall back to the generic prompt so the
-        // user can still click through to /settings/connect-sodex.
-        if (!cancelled) setStage("wallet-no-key");
+        if (!cancelled) setProbeStage("wallet-no-key");
       }
     };
-
-    refresh();
-    const t = setInterval(refresh, 8_000);
-    window.addEventListener("storage", refresh);
+    run();
+    const t = setInterval(run, 8_000);
+    window.addEventListener("storage", run);
     return () => {
       cancelled = true;
       clearInterval(t);
-      window.removeEventListener("storage", refresh);
+      window.removeEventListener("storage", run);
     };
-  }, [isConnected, address]);
+  }, [tm.hasKey, isConnected, address]);
 
+  const stage: Stage = tm.loading
+    ? "loading"
+    : tm.hasKey
+      ? tm.acceptedDisclaimer
+        ? "ready"
+        : "key-no-disclaimer"
+      : probeStage;
+
+  const keyName = tm.keyName ?? "";
+  // Pre-key stages show the connected wagmi wallet; once keyed, show the
+  // key's own master/identity address (wagmi may be disconnected).
   const shortAddr = useMemo(() => {
-    if (!address) return "";
-    return `${address.slice(0, 6)}…${address.slice(-4)}`;
-  }, [address]);
+    const a = tm.hasKey ? tm.address : address;
+    if (!a) return "";
+    return `${a.slice(0, 6)}…${a.slice(-4)}`;
+  }, [tm.hasKey, tm.address, address]);
 
   if (stage === "loading") {
     // Reserve the space pre-hydration so the hero row doesn't pop in.

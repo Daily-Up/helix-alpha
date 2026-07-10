@@ -1,20 +1,22 @@
 "use client";
 
 /**
- * Single-click live-execution button for a signal.
+ * Live-execution button for a signal.
  *
  * Renders ONLY when the user has:
- *   1. A trading identity for the active network (either a burner
- *      wallet on testnet, or a Helix API key on mainnet — both stored
- *      in browser localStorage at helix.sodex.identity.<network>).
+ *   1. A Helix-scoped SoDEX API key for mainnet (localStorage).
  *   2. Accepted the safety-limits disclaimer.
  *
- * Click flow:
- *   browser → builds order params → signs with the local private key
- *   → POSTs to SoDEX gateway DIRECTLY → on response, posts the public
- *   outcome to /api/sodex/record-trade for the audit log.
+ * Click flow (TWO explicit steps — this places a REAL mainnet order):
+ *   click "Execute live" → inline confirm shows the exact side / USD /
+ *   symbol / "real funds" → click "Confirm" → browser builds order params
+ *   → signs with the local private key → POSTs to the SoDEX gateway
+ *   directly → records the public outcome to /api/sodex/record-trade.
  *
- * Helix's server is NEVER on the critical path of the trade.
+ * Sizing: the live order size IS the user's per-trade max (`maxPositionUsd`)
+ * — the single size knob on the Connect page. The button, the confirm
+ * panel, and the result toast ALL show this same number, so what's shown
+ * is what's charged. Helix's server is never on the critical path.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -33,6 +35,9 @@ import {
   readLocalKey,
   readSafetyLimits,
   writeLocalKey,
+  readTradesToday,
+  recordTradeToday,
+  SODEX_MIN_NOTIONAL_USD,
 } from "@/lib/sodex-onchain/local-keys";
 import { fmtSodexSymbol } from "@/lib/format";
 import {
@@ -50,7 +55,8 @@ export interface ExecuteLiveSignal {
   /** Optional SoDEX numeric symbolID — resolved at runtime if absent. */
   symbol_id?: number;
   side: "buy" | "sell";
-  /** Suggested size in USD (clamped to user's per-trade max). */
+  /** Suggested size in USD (informational — the LIVE order uses the
+   *  user's configured per-trade size, not this). */
   suggested_size_usd: number;
   /** Current market price used for the optimistic display. */
   price_usd: number;
@@ -64,70 +70,87 @@ export function ExecuteLiveButton({ signal }: Props) {
   // Mainnet only — testnet was scoped out.
   const network: SodexNetwork = "mainnet";
 
-  // Wagmi-connected master wallet. We use it for two things:
-  //   1. Self-heal legacy stored keys that don't carry `masterAddress`
-  //      yet (everyone created before the storage change).
-  //   2. Fall back at trade time if the stored key still has no master
-  //      recorded (e.g. user wiped their key on another machine).
   const { address: connectedMaster } = useAccount();
 
-  // ── Readiness ──
+  // ── Readiness + live params ──
   const [ready, setReady] = useState(false);
   const [identityAddress, setIdentityAddress] = useState<
     `0x${string}` | null
   >(null);
-  useEffect(() => {
+  const [orderSizeUsd, setOrderSizeUsd] = useState(11);
+  const [maxDaily, setMaxDaily] = useState(3);
+  const [tradesToday, setTradesToday] = useState(0);
+
+  const refreshState = useCallback(() => {
     const key = readLocalKey(network);
-    // Migrate legacy localStorage rows: when the stored key has no
-    // masterAddress and the user has a wallet connected, persist the
-    // master so future Execute Live clicks work without a re-create.
     if (key && !key.masterAddress && connectedMaster) {
       writeLocalKey(network, { ...key, masterAddress: connectedMaster });
     }
     const limits = readSafetyLimits(network);
     setReady(!!key && limits.acceptedDisclaimer);
     setIdentityAddress(key?.address ?? null);
+    setOrderSizeUsd(limits.maxPositionUsd);
+    setMaxDaily(limits.maxDailyTrades);
+    setTradesToday(readTradesToday(network));
   }, [network, connectedMaster]);
 
+  useEffect(() => {
+    refreshState();
+  }, [refreshState]);
+
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
-  const onClick = useCallback(async () => {
+  // Step 1 — validate limits, then reveal the confirm panel. No signing
+  // or network call happens here.
+  const requestExecute = useCallback(() => {
+    const limits = readSafetyLimits(network);
+    if (limits.maxPositionUsd < SODEX_MIN_NOTIONAL_USD) {
+      setMsg(
+        `✗ Your live order size ($${limits.maxPositionUsd}) is below SoDEX's ~$${SODEX_MIN_NOTIONAL_USD} minimum. Raise it on /settings/connect-sodex.`,
+      );
+      return;
+    }
+    const used = readTradesToday(network);
+    if (used >= limits.maxDailyTrades) {
+      setMsg(
+        `✗ Daily live-trade limit reached (${used}/${limits.maxDailyTrades}). Resets at 00:00 UTC — or raise it on /settings/connect-sodex.`,
+      );
+      return;
+    }
+    setMsg(null);
+    setOrderSizeUsd(limits.maxPositionUsd);
+    setConfirming(true);
+  }, [network]);
+
+  // Step 2 — the real thing. Signs and submits the order.
+  const execute = useCallback(async () => {
     const key = readLocalKey(network);
     if (!key) {
-      setMsg("Set up a trading identity on /settings/connect-sodex first.");
+      setMsg("✗ Set up a trading identity on /settings/connect-sodex first.");
+      setConfirming(false);
       return;
     }
     const limits = readSafetyLimits(network);
-    // TEMP: hardcode every live order to 11 USDC for the buildathon.
-    //
-    // SoDEX's minNotional varies per pair — vBTC_vUSDC's is $5, but
-    // some pairs sit at $10, and a 10 USDC order can fail with
-    // "quantity is invalid" when the derived qty rounds below
-    // marketMinQuantity. 11 USDC gives us a safety margin above the
-    // documented minimums while still being a token-size sanity test.
-    //
-    // We still respect the user's per-trade max — if they capped at
-    // <$11, refuse rather than silently overspend.
-    const sizeUsd = 11;
-    if (limits.maxPositionUsd < sizeUsd) {
+    // The live order size is the user's configured per-trade size — the
+    // SAME number the button and confirm panel display. No hidden constant.
+    const sizeUsd = limits.maxPositionUsd;
+    if (sizeUsd < SODEX_MIN_NOTIONAL_USD) {
       setMsg(
-        `Your per-trade max ($${limits.maxPositionUsd}) is below the live floor ($${sizeUsd}). Raise it on /settings/connect-sodex.`,
+        `✗ Your live order size ($${sizeUsd}) is below SoDEX's ~$${SODEX_MIN_NOTIONAL_USD} minimum.`,
       );
+      setConfirming(false);
+      return;
+    }
+    if (readTradesToday(network) >= limits.maxDailyTrades) {
+      setMsg(`✗ Daily live-trade limit reached (${limits.maxDailyTrades}).`);
+      setConfirming(false);
       return;
     }
     setBusy(true);
     setMsg(null);
     try {
-      // SoDEX accounts live on the MASTER wallet that signed addAPIKey,
-      // not on the API-key address. Priority for the lookup address:
-      //   1. key.masterAddress (recorded at create time)
-      //   2. wagmi's currently-connected master (live fallback)
-      //   3. key.address (burner-wallet path: the key IS the account)
-      // For mainnet master+API-key flow the master is required, or
-      // SoDEX rejects the order with
-      //   "Field validation for 'AccountID' failed on the 'required' tag"
-      // because state.aid resolves to 0 for an unregistered address.
       const accountLookupAddress =
         key.masterAddress ?? connectedMaster ?? key.address;
       const state = await getAccountState(network, accountLookupAddress);
@@ -136,8 +159,6 @@ export function ExecuteLiveButton({ signal }: Props) {
           "SoDEX account not found for this wallet. Connect your master wallet (the one you used on /settings/connect-sodex) — Helix will self-heal and you can click Execute again.",
         );
       }
-      // If we resolved via the live wagmi address (legacy path), persist
-      // it onto the key so future trades skip the wallet dependency.
       if (!key.masterAddress && accountLookupAddress !== key.address) {
         writeLocalKey(network, {
           ...key,
@@ -153,53 +174,21 @@ export function ExecuteLiveButton({ signal }: Props) {
           `Symbol ${fmtSodexSymbol(signal.symbol)} not listed on ${SODEX_NETWORKS[network].label}.`,
         );
       }
-      // SoDEX validates clOrdID against ^[0-9a-zA-Z_-]{1,36}$ and
-      // requires uniqueness across an account's OPEN orders. Our
-      // previous format `helix-${signal_uuid}-${ms_epoch}` was 56
-      // chars (UUID alone is 36) and SoDEX rejected with
-      // "clOrdID is invalid". Pack it tighter:
-      //   helix-{first 8 of signal_id, hyphens stripped}-{base36 ms}
-      //         6+1                 +8               +1 +~8  = ~24
-      // The base36 timestamp suffix guarantees per-tick uniqueness; a
-      // user double-clicking inside the same millisecond would still
-      // collide, so we belt-and-suspenders with a 4-char random tail.
+      // clOrdID must match ^[0-9a-zA-Z_-]{1,36}$ and be unique across an
+      // account's open orders. Pack: helix-{8 of id}-{base36 ms}{4 rnd}.
       const sigSlug = signal.signal_id.replace(/-/g, "").slice(0, 8);
       const tsB36 = Date.now().toString(36);
       const rnd = Math.random().toString(36).slice(2, 6);
       const clOrdID = `helix-${sigSlug}-${tsB36}${rnd}`.slice(0, 36);
-      // Last-line sanity check — if any of the inputs ever produce a
-      // bad char, fail in our code rather than at the gateway with a
-      // generic "invalid" message.
       if (!/^[0-9a-zA-Z_-]{1,36}$/.test(clOrdID)) {
         throw new Error(
           `Generated clOrdID "${clOrdID}" doesn't match SoDEX format. Refresh and try again.`,
         );
       }
-      // Earlier this code sent { quantity: "0", funds: <usd> } on
-      // market BUYs, expecting SoDEX to compute the size from funds.
-      // The gateway rejects that with "quantity is invalid" because
-      // every spot symbol has a `marketMinQuantity` (≥ 0.00001 on
-      // every market we've seen) and "0" is below the floor.
-      //
-      // The robust fix is to compute the size client-side from the
-      // signal's reference price, round to a precision that comfortably
-      // satisfies stepSize for the common spot pairs, and send BOTH
-      // `quantity` and (for buys) `funds`. SoDEX accepts the order;
-      // if the realised fill differs from `funds` because of slippage,
-      // the matched leg respects whichever side of the order book is
-      // valid.
-      //
-      // Precision: vBTC has quantityPrecision=5 (stepSize 0.00001),
-      // vETH=5, vSOL=4. We use 5 decimals universally — under-rounds
-      // for SOL but well above the floor; for the larger-cap pairs
-      // it matches the spec.
       const isBuy = signal.side === "buy";
-      // SignalCard passes price_usd=0 — it's a market order, the price
-      // is resolved at click time from SoDEX's live ticker. Use the
-      // best ask for BUY (you cross up) and best bid for SELL (you
-      // cross down); fall back to lastPx if either side is empty.
-      // signal.price_usd is honoured as a last-ditch fallback so a
-      // future signal that DOES carry a price still works.
+      // Market order — resolve the reference price from SoDEX's live
+      // ticker (best ask for buys, best bid for sells). signal.price_usd
+      // is a last-ditch fallback.
       let referencePrice = await getLivePrice(network, signal.symbol, signal.side);
       if (!referencePrice && signal.price_usd > 0) {
         referencePrice = signal.price_usd;
@@ -215,11 +204,8 @@ export function ExecuteLiveButton({ signal }: Props) {
           `Computed quantity ${qty} is zero — increase position size or check the price feed.`,
         );
       }
-      // SoDEX market orders accept EXACTLY ONE of {quantity, funds}:
-      //   BUY  — `funds` (USD spend); gateway derives quantity at fill
-      //   SELL — `quantity` (base-asset size)
-      // Sending both → "quantity and funds cannot be set at the same time".
-      // Sending neither, or `quantity: "0"`, → "quantity is invalid".
+      // Market orders accept EXACTLY ONE of {quantity, funds}:
+      //   BUY  → funds (USD spend); SELL → quantity (base size).
       const order: SodexNewOrderEntry = isBuy
         ? {
             symbolID: symbolId,
@@ -240,7 +226,6 @@ export function ExecuteLiveButton({ signal }: Props) {
 
       const sodexResp = await placeOrderBatch({
         network,
-        // Empty name == burner mode (no X-API-Key header).
         apiKeyName: key.name || undefined,
         privateKey: key.privateKey,
         batch: {
@@ -251,6 +236,10 @@ export function ExecuteLiveButton({ signal }: Props) {
 
       const sodexOrderId =
         (sodexResp as { orderID?: string })?.orderID ?? clOrdID;
+
+      // Count the successful submit against the daily cap.
+      const nowCount = recordTradeToday(network);
+      setTradesToday(nowCount);
 
       await fetch("/api/sodex/record-trade", {
         method: "POST",
@@ -269,7 +258,7 @@ export function ExecuteLiveButton({ signal }: Props) {
       });
 
       setMsg(
-        `✓ Order placed — ${signal.side.toUpperCase()} ~$${sizeUsd.toFixed(0)} ${fmtSodexSymbol(signal.symbol)} on ${SODEX_NETWORKS[network].label}`,
+        `✓ Order placed — ${signal.side.toUpperCase()} $${sizeUsd} ${fmtSodexSymbol(signal.symbol)} on ${SODEX_NETWORKS[network].label}`,
       );
     } catch (err) {
       const errMsg = (err as Error).message;
@@ -296,17 +285,11 @@ export function ExecuteLiveButton({ signal }: Props) {
       }
     } finally {
       setBusy(false);
+      setConfirming(false);
     }
-  }, [network, signal, identityAddress]);
+  }, [network, signal, identityAddress, connectedMaster]);
 
   if (!ready) {
-    // Two failure modes lead here:
-    //   1. No SoDEX trading key in this browser → user needs to create
-    //      one (the dominant case for new visitors).
-    //   2. Key exists but they haven't ticked the safety-limits
-    //      disclaimer.
-    // We frame the CTA toward the dominant path because the connect
-    // page handles either case once they land on it.
     const hasKey = identityAddress != null;
     return (
       <a
@@ -325,29 +308,76 @@ export function ExecuteLiveButton({ signal }: Props) {
     );
   }
 
+  const sideLabel = signal.side.toUpperCase();
+  const symLabel = fmtSodexSymbol(signal.symbol);
+
   return (
-    <div className="flex flex-col gap-1">
-      <button
-        onClick={onClick}
-        disabled={busy}
-        className={cn(
-          "inline-flex items-center gap-2 rounded border px-2.5 py-1 text-xs font-medium transition-colors",
-          busy
-            ? "cursor-wait border-line bg-surface-2 text-fg-dim"
-            : "border-accent/40 bg-accent/15 text-accent-2 hover:bg-accent/25",
-        )}
-        title={`${SODEX_NETWORKS[network].label} · ${signal.side.toUpperCase()} ~$${signal.suggested_size_usd.toFixed(0)} ${fmtSodexSymbol(signal.symbol)}`}
-      >
-        {busy
-          ? "Signing…"
-          : `▶ Execute live · ${SODEX_NETWORKS[network].label.replace("SoDEX ", "")}`}
-      </button>
+    <div className="flex flex-col gap-1.5">
+      {confirming ? (
+        // ── Explicit confirmation — a REAL order is one click away ──
+        <div className="rounded border border-accent/40 bg-accent/10 p-2.5 text-xs">
+          <div className="font-medium text-fg">
+            Place a real order?
+          </div>
+          <div className="mt-1 text-fg-muted">
+            <span
+              className={cn(
+                "font-medium",
+                signal.side === "buy" ? "text-positive" : "text-negative",
+              )}
+            >
+              {sideLabel}
+            </span>{" "}
+            <span className="font-medium text-fg">${orderSizeUsd}</span> of{" "}
+            {symLabel} — <span className="text-fg">real funds</span> on{" "}
+            {SODEX_NETWORKS[network].label}.
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              onClick={execute}
+              disabled={busy}
+              className={cn(
+                "rounded border px-2.5 py-1 text-xs font-medium transition-colors",
+                busy
+                  ? "cursor-wait border-line bg-surface-2 text-fg-dim"
+                  : "border-accent bg-accent text-[#0b0b0e] hover:bg-accent-2",
+              )}
+            >
+              {busy ? "Signing…" : `Confirm · $${orderSizeUsd}`}
+            </button>
+            <button
+              onClick={() => setConfirming(false)}
+              disabled={busy}
+              className="rounded border border-line px-2.5 py-1 text-xs text-fg-muted transition-colors hover:border-line-2 hover:text-fg"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={requestExecute}
+          disabled={busy}
+          className={cn(
+            "inline-flex items-center gap-2 rounded border px-2.5 py-1 text-xs font-medium transition-colors",
+            "border-accent/40 bg-accent/15 text-accent-2 hover:bg-accent/25",
+          )}
+          title={`${SODEX_NETWORKS[network].label} · ${sideLabel} $${orderSizeUsd} ${symLabel} (your per-trade size)`}
+        >
+          {`▶ Execute live · $${orderSizeUsd}`}
+        </button>
+      )}
       {msg ? (
         <span
           className="text-[11px]"
           style={{ color: msg.startsWith("✗") ? "#e06c66" : "#5cc97a" }}
         >
           {msg}
+        </span>
+      ) : null}
+      {!confirming && tradesToday > 0 ? (
+        <span className="text-[10px] text-fg-dim">
+          {tradesToday}/{maxDaily} live trades today
         </span>
       ) : null}
     </div>

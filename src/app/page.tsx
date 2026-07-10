@@ -58,7 +58,7 @@ export default function HelixLandingPage() {
           <div className="md:col-span-7 md:pr-8">
             <div
               data-hero="eyebrow"
-              className="font-[var(--font-jetbrains-mono)] text-[11px] uppercase opacity-0"
+              className="font-[var(--font-jetbrains-mono)] text-[11px] uppercase"
               style={{ color: TEXT_MUTED, letterSpacing: "0.1em" }}
             >
               AI TRADING INTELLIGENCE · PAPER-TRADED · OPEN AUDIT
@@ -70,28 +70,28 @@ export default function HelixLandingPage() {
             >
               <span
                 data-hero="line1"
-                className="block font-light opacity-0"
+                className="block font-light"
                 style={{ fontSize: "clamp(56px, 9vw, 132px)" }}
               >
                 Event-driven alpha.
               </span>
               <span
                 data-hero="line2"
-                className="block font-medium opacity-0"
+                className="block font-medium"
                 style={{ fontSize: "clamp(60px, 9.7vw, 142px)" }}
               >
                 {"Audited".split("").map((ch, i) => (
-                  <span key={i} className="hero-char inline-block opacity-0">
+                  <span key={i} className="hero-char inline-block">
                     {ch}
                   </span>
                 ))}
-                <span data-hero="period" className="inline-block opacity-0" style={{ letterSpacing: "0.08em" }}>.</span>
+                <span data-hero="period" className="inline-block" style={{ letterSpacing: "0.08em" }}>.</span>
               </span>
             </h1>
 
             <p
               data-hero="subhead"
-              className="mt-12 max-w-[540px] font-[var(--font-inter)] opacity-0"
+              className="mt-12 max-w-[540px] font-[var(--font-inter)]"
               style={{ fontSize: "22px", lineHeight: "1.65", color: TEXT }}
             >
               Every signal carries its full reasoning chain. Every outcome is
@@ -101,7 +101,7 @@ export default function HelixLandingPage() {
 
             <div
               data-hero="ctas"
-              className="mt-12 flex flex-wrap items-center gap-6 opacity-0"
+              className="mt-12 flex flex-wrap items-center gap-6"
             >
               <Link
                 href="/app"
@@ -120,7 +120,7 @@ export default function HelixLandingPage() {
           </div>
 
           {/* RIGHT — anchor signal card */}
-          <div data-hero="card" className="hidden opacity-0 md:col-span-5 md:block md:pl-4">
+          <div data-hero="card" className="hidden md:col-span-5 md:block md:pl-4">
             <div className="md:sticky md:top-32">
               <HeroSignalCard />
               <div

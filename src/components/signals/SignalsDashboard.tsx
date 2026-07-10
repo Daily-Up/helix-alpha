@@ -260,25 +260,33 @@ export function SignalsDashboard() {
             {autoTrade ? "● Auto-Trade ON" : "○ Enable Auto-Trade"}
           </button>
         ) : null}
-        <button
-          onClick={generateNow}
-          disabled={generatingNow}
-          className={cn(
-            "rounded border px-3 py-1.5 text-xs font-medium transition-colors",
-            generatingNow
-              ? "cursor-wait border-line bg-surface-2 text-fg-dim"
-              : "border-accent/40 bg-accent/15 text-accent-2 hover:bg-accent/25",
-          )}
-        >
-          {generatingNow ? "Generating…" : "▶ Generate Signals Now"}
-        </button>
-        <button
-          onClick={runTick}
-          className="rounded border border-line px-3 py-1.5 text-xs font-medium text-fg-muted transition-colors hover:border-info/40 hover:text-info"
-          title="Run the full pipeline once (ingest → classify → generate → reconcile)."
-        >
-          ⟳ Tick now
-        </button>
+        {/* Pipeline triggers (generate / tick) are operator controls —
+            hide on the public deploy so end users don't fire the
+            ingest→classify→generate pipeline. The GitHub Actions cron
+            drives these in production. */}
+        {!isPublicMode() ? (
+          <>
+            <button
+              onClick={generateNow}
+              disabled={generatingNow}
+              className={cn(
+                "rounded border px-3 py-1.5 text-xs font-medium transition-colors",
+                generatingNow
+                  ? "cursor-wait border-line bg-surface-2 text-fg-dim"
+                  : "border-accent/40 bg-accent/15 text-accent-2 hover:bg-accent/25",
+              )}
+            >
+              {generatingNow ? "Generating…" : "▶ Generate Signals Now"}
+            </button>
+            <button
+              onClick={runTick}
+              className="rounded border border-line px-3 py-1.5 text-xs font-medium text-fg-muted transition-colors hover:border-info/40 hover:text-info"
+              title="Run the full pipeline once (ingest → classify → generate → reconcile)."
+            >
+              ⟳ Tick now
+            </button>
+          </>
+        ) : null}
         {/* Purge pending is destructive — hide on the public deploy. */}
         {!isPublicMode() ? (
           <button
@@ -370,8 +378,18 @@ export function SignalsDashboard() {
       {filtered.length === 0 && !loading ? (
         <Card>
           <CardBody className="py-10 text-center text-sm text-fg-muted">
-            No signals yet. Click <strong>Generate Signals Now</strong> to scan
-            recent classified events for tradable opportunities.
+            {isPublicMode() ? (
+              <>
+                No {statusTab === "all" ? "" : statusTab + " "}signals right now.
+                Helix scans the market continuously — new trade signals appear
+                here automatically as fresh catalysts break.
+              </>
+            ) : (
+              <>
+                No signals yet. Click <strong>Generate Signals Now</strong> to
+                scan recent classified events for tradable opportunities.
+              </>
+            )}
           </CardBody>
         </Card>
       ) : (

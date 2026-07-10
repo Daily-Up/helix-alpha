@@ -33,13 +33,10 @@ export function Topbar() {
         <span className="text-fg-dim">UTC</span>
       </div>
       <div className="flex items-center gap-3">
+        {/* Single trade-mode status — no separate decorative "Live" pill,
+            which contradicted the badge (that pill always said "Live"
+            while the badge could read Demo). */}
         <TradeModeBadge />
-        <span className="flex items-center gap-1.5">
-          <span className="dash-live-dot" aria-hidden />
-          <span className="font-[var(--font-jetbrains-mono)] text-[11px] uppercase text-fg-muted" style={{ letterSpacing: "0.1em" }}>
-            Live
-          </span>
-        </span>
       </div>
     </header>
   );

@@ -2,63 +2,34 @@
 
 /**
  * Trade-mode badge — shows the user whether they're in DEMO mode
- * (paper trades, no real money) or LIVE mode (SoDEX wallet
- * connected, Execute Live works against mainnet).
+ * (paper trades, no real money) or LIVE mode (SoDEX key set up and
+ * disclaimer accepted, Execute Live works against mainnet).
  *
- * State derived from the presence of a locally-stored SoDEX trading
- * identity (private key in browser localStorage). When present →
- * LIVE; when absent → DEMO. The badge links to /settings/connect-
- * sodex so the user can flip modes by connecting or disconnecting
- * a wallet.
+ * State comes from the shared `useTradeMode` hook so this badge and the
+ * /signals connect panel can never disagree. The badge links to
+ * /settings/connect-sodex to manage keys.
  *
  * Demo mode is the safe default — first-time visitors and the
- * buildathon judges see DEMO until they explicitly connect.
+ * buildathon judges see DEMO until they explicitly connect + accept.
  */
-import { useEffect, useState } from "react";
 import Link from "next/link";
-import { readLocalKey } from "@/lib/sodex-onchain/local-keys";
-
-interface ModeInfo {
-  mode: "demo" | "live";
-  address: string | null;
-}
+import { useTradeMode } from "@/lib/sodex-onchain/useTradeMode";
 
 export function TradeModeBadge() {
-  const [info, setInfo] = useState<ModeInfo | null>(null);
+  const tm = useTradeMode("mainnet");
 
-  useEffect(() => {
-    const refresh = () => {
-      const key = readLocalKey("mainnet");
-      setInfo(
-        key
-          ? { mode: "live", address: key.address }
-          : { mode: "demo", address: null },
-      );
-    };
-    refresh();
-    // Re-check on storage events so a connect in another tab updates here.
-    window.addEventListener("storage", refresh);
-    // Also poll every 5s as a belt-and-suspenders for same-tab changes
-    // (storage events don't fire within the same tab).
-    const t = setInterval(refresh, 5000);
-    return () => {
-      window.removeEventListener("storage", refresh);
-      clearInterval(t);
-    };
-  }, []);
-
-  if (!info) {
+  if (tm.loading) {
     // Don't render anything pre-hydration to avoid a flash of the wrong
     // state if the user is connected on reload.
     return <div style={{ width: 110, height: 26 }} aria-hidden />;
   }
 
-  const isLive = info.mode === "live";
+  const isLive = tm.ready;
   const color = isLive ? "#34c39a" : "#cca15a";
   const label = isLive ? "Live" : "Demo";
   const sublabel = isLive
-    ? info.address
-      ? `${info.address.slice(0, 6)}…${info.address.slice(-4)}`
+    ? tm.address
+      ? `${tm.address.slice(0, 6)}…${tm.address.slice(-4)}`
       : "wallet"
     : "paper";
 

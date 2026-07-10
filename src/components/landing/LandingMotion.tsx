@@ -43,6 +43,24 @@ function initHero(motion: boolean) {
   const tl = gsap.timeline({ defaults: { ease: "power2.out" } });
 
   if (motion) {
+    // Hero elements are now VISIBLE by default in the server HTML so the
+    // page can never be stranded as a blank void if JS is slow/blocked.
+    // Since JS is here and motion is allowed, hide them first, then the
+    // timeline below fades them in. (Reduced-motion + no-JS keep the
+    // visible server state.)
+    gsap.set(
+      [
+        "[data-hero='eyebrow']",
+        "[data-hero='line1']",
+        "[data-hero='subhead']",
+        "[data-hero='ctas']",
+        "[data-hero='card']",
+        "[data-hero='period']",
+      ],
+      { opacity: 0 },
+    );
+    gsap.set("[data-hero='line2'] .hero-char", { opacity: 0 });
+
     // Eyebrow
     tl.fromTo("[data-hero='eyebrow']",
       { opacity: 0, y: 4 },
