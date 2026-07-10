@@ -160,18 +160,20 @@ export function IndexDashboard() {
           >
             Shadow framework running in parallel · view comparison →
           </a>
-          <button
-            onClick={rebalance}
-            disabled={busy !== null}
-            className={cn(
-              "dash-btn-primary rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
-              busy === "rebalance"
-                ? "cursor-wait border-line bg-surface-2 text-fg-dim"
-                : "border-accent/40 bg-accent/15 text-accent-2 hover:bg-accent/25",
-            )}
-          >
-            {busy === "rebalance" ? "Rebalancing…" : "▶ Rebalance Now"}
-          </button>
+          {!isPublicMode() ? (
+            <button
+              onClick={rebalance}
+              disabled={busy !== null}
+              className={cn(
+                "dash-btn-primary rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
+                busy === "rebalance"
+                  ? "cursor-wait border-line bg-surface-2 text-fg-dim"
+                  : "border-accent/40 bg-accent/15 text-accent-2 hover:bg-accent/25",
+              )}
+            >
+              {busy === "rebalance" ? "Rebalancing…" : "▶ Rebalance Now"}
+            </button>
+          ) : null}
         </div>
       </div>
 

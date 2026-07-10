@@ -302,8 +302,8 @@ export function SignalsDashboard() {
         </span>
       </div>
 
-      {/* Last tick summary */}
-      {lastTickSummary ? (
+      {/* Last tick summary — operator/dev diagnostic; hidden from users. */}
+      {!isPublicMode() && lastTickSummary ? (
         <div className="rounded border border-line bg-surface-2 px-3 py-1.5 text-[11px] text-fg-muted">
           <span className="text-fg-dim">last tick</span>{" "}
           <span className="tabular text-fg">

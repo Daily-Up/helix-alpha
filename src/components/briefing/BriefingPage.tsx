@@ -12,6 +12,7 @@
 import { useEffect, useState } from "react";
 import { PanelSkeleton } from "@/components/ui/Skeleton";
 import { useBulkMountReveal } from "@/hooks/useMountReveal";
+import { isPublicMode } from "@/lib/public-mode";
 import {
   fmtPrice,
   fmtRelative,
@@ -932,7 +933,9 @@ function BriefingHero({
         <InputsSummary inputs={briefing.inputs_summary} />
       </details>
 
-      {/* Footer — model / cost / regenerate */}
+      {/* Footer — model / cost / regenerate. Operator/dev only; end users
+          don't see the model, token counts, or a manual regenerate. */}
+      {!isPublicMode() ? (
       <div
         className="flex flex-wrap items-center justify-between gap-3"
         style={{
@@ -974,6 +977,7 @@ function BriefingHero({
           {regenerating ? "Regenerating…" : "↻ Regenerate"}
         </button>
       </div>
+      ) : null}
     </article>
   );
 }

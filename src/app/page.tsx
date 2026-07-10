@@ -61,7 +61,7 @@ export default function HelixLandingPage() {
               className="font-[var(--font-jetbrains-mono)] text-[11px] uppercase"
               style={{ color: TEXT_MUTED, letterSpacing: "0.1em" }}
             >
-              AI TRADING INTELLIGENCE · PAPER-TRADED · OPEN AUDIT
+              AI TRADING INTELLIGENCE · LIVE ON SODEX · VERIFIED TRACK RECORD
             </div>
 
             <h1
@@ -147,10 +147,10 @@ export default function HelixLandingPage() {
       {/* ─────────── Section 3: Stats strip ─────────── */}
       <section className="py-24" data-section="stats">
         <div className="mx-auto grid max-w-[1280px] grid-cols-2 px-6 md:grid-cols-4 md:px-12">
-          <Stat n="45" suffix="+" label="INVARIANTS ENFORCED" first />
-          <Stat n="394" suffix="" label="TESTS PASSING" />
-          <Stat n="2" suffix="" label="FRAMEWORKS GRADUATED" />
-          <Stat n="8" suffix="" label="STRESS WINDOWS · INCL −35% BEAR" />
+          <Stat n="3" suffix="" label="AI AGENTS PER SIGNAL · CLASSIFY · VERIFY · DEBATE" first />
+          <Stat n="100" suffix="%" label="SIGNALS SCORED AGAINST OUTCOME" />
+          <Stat n="40" suffix="+" label="ASSETS · CRYPTO · EQUITIES · TREASURIES" />
+          <Stat n="24" suffix="/7" label="CATALYST MONITORING" />
         </div>
       </section>
 

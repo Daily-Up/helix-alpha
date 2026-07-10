@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { EventCard, type EventCardData } from "./EventCard";
 import { EventFilters, type FilterState } from "./EventFilters";
+import { isPublicMode } from "@/lib/public-mode";
 
 /**
  * Live-updating event feed.
@@ -117,30 +118,34 @@ export function EventFeed() {
               newest {newestAgeMin}m ago
             </span>
           ) : null}
-          <button
-            onClick={pullLatest}
-            disabled={pulling}
-            className="rounded border px-2.5 py-1 text-xs font-medium transition-colors"
-            style={{
-              borderColor: stale
-                ? "rgba(217, 119, 87, 0.4)"
-                : "rgba(237, 228, 211, 0.12)",
-              background: stale ? "rgba(217, 119, 87, 0.10)" : "transparent",
-              color: stale ? "#d97757" : "#8a857a",
-              cursor: pulling ? "wait" : "pointer",
-            }}
-            title="Hits the pipeline once: ingest news → classify → generate signals → reconcile."
-          >
-            {pulling ? "Pulling…" : "↻ Pull latest"}
-          </button>
+          {!isPublicMode() ? (
+            <button
+              onClick={pullLatest}
+              disabled={pulling}
+              className="rounded border px-2.5 py-1 text-xs font-medium transition-colors"
+              style={{
+                borderColor: stale
+                  ? "rgba(217, 119, 87, 0.4)"
+                  : "rgba(237, 228, 211, 0.12)",
+                background: stale ? "rgba(217, 119, 87, 0.10)" : "transparent",
+                color: stale ? "#d97757" : "#8a857a",
+                cursor: pulling ? "wait" : "pointer",
+              }}
+              title="Hits the pipeline once: ingest news → classify → generate signals → reconcile."
+            >
+              {pulling ? "Pulling…" : "↻ Pull latest"}
+            </button>
+          ) : null}
           <span className="text-xs text-fg-dim">
             {loading ? "loading..." : `${events.length} events`}
           </span>
         </div>
       </div>
 
-      {/* Stale banner — only shown when the feed has any data AND it's old */}
-      {stale && !pulling ? (
+      {/* Stale banner — operator affordance; the internal pipeline detail
+          and manual pull are hidden from end users (they see auto-updating
+          data, not backend triggers). */}
+      {!isPublicMode() && stale && !pulling ? (
         <div
           className="rounded border px-3 py-2 text-xs"
           style={{

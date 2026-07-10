@@ -9,6 +9,7 @@
 import { useEffect, useState } from "react";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Stat } from "@/components/ui/Stat";
+import { isPublicMode } from "@/lib/public-mode";
 import { Badge } from "@/components/ui/Badge";
 import { cn } from "@/components/ui/cn";
 
@@ -175,13 +176,15 @@ export function MacroDashboard() {
         <span className="text-[11px] text-fg-dim">
           Source: SoSoValue /macro/events + /history
         </span>
-        <button
-          onClick={refresh}
-          disabled={running}
-          className="rounded border border-line px-2.5 py-1 text-xs text-fg-muted transition-colors hover:border-line-2 hover:text-fg disabled:cursor-wait disabled:opacity-50"
-        >
-          {running ? "Refreshing…" : "↻ Refresh from SoSoValue"}
-        </button>
+        {!isPublicMode() ? (
+          <button
+            onClick={refresh}
+            disabled={running}
+            className="rounded border border-line px-2.5 py-1 text-xs text-fg-muted transition-colors hover:border-line-2 hover:text-fg disabled:cursor-wait disabled:opacity-50"
+          >
+            {running ? "Refreshing…" : "↻ Refresh from SoSoValue"}
+          </button>
+        ) : null}
       </div>
       {error ? (
         <div className="rounded border border-negative/40 bg-negative/10 px-3 py-2 text-xs text-negative">

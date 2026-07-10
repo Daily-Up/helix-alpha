@@ -4,57 +4,55 @@ import { isPublicMode } from "@/lib/public-mode";
 interface NavItem {
   href: string;
   label: string;
-  badge?: string;
   /** Hidden from the sidebar when public-mode is on (judges, public viewers). */
   internal?: boolean;
 }
 
+// Trader-facing navigation. Four clear groups, no NEW/SOON/BETA badges.
+// Unfinished stubs (Pattern Library, Learnings, Calibration) and ops
+// surfaces (Agent Activity, Cron & Audit, System Health) are grouped
+// under "internal" and hidden on the public deploy — dev still sees them.
+// Asset Universe is demoted to a footer link (raw reference data).
 const NAV: Array<{ section: string; items: NavItem[] }> = [
   {
-    section: "Overview",
-    items: [{ href: "/app", label: "Home" }],
+    section: "Trade",
+    items: [
+      { href: "/app", label: "Dashboard" },
+      { href: "/signals", label: "Live Signals" },
+      { href: "/briefing", label: "Daily Briefing" },
+      { href: "/signals/performance", label: "Track Record" },
+    ],
   },
   {
-    section: "Intelligence",
+    section: "Portfolio",
+    items: [
+      { href: "/portfolio", label: "Paper Portfolio" },
+      { href: "/index-fund", label: "AlphaIndex" },
+    ],
+  },
+  {
+    section: "Markets",
     items: [
       { href: "/events", label: "Event Stream" },
       { href: "/sectors", label: "Sector Rotation" },
       { href: "/etfs", label: "ETF Flows" },
-      { href: "/treasuries", label: "Treasury Watch", badge: "NEW" },
+      { href: "/treasuries", label: "Treasury Watch" },
       { href: "/macro", label: "Macro Bridge" },
-      { href: "/patterns", label: "Pattern Library" },
     ],
-  },
-  {
-    section: "Action",
-    items: [
-      { href: "/briefing", label: "Daily Briefing", badge: "NEW" },
-      { href: "/signals", label: "Live Signals" },
-      { href: "/signals/performance", label: "Performance", badge: "NEW" },
-      { href: "/portfolio", label: "Paper Portfolio" },
-      { href: "/index-fund", label: "AlphaIndex", badge: "NEW" },
-      { href: "/learnings", label: "Learnings", badge: "NEW" },
-      { href: "/calibration", label: "Calibration", badge: "SOON" },
-    ],
-  },
-  {
-    section: "Agents",
-    items: [{ href: "/agents", label: "Agent Activity", badge: "NEW" }],
   },
   {
     section: "Live Trading",
-    items: [
-      { href: "/settings/connect-sodex", label: "Connect SoDEX", badge: "BETA" },
-    ],
+    items: [{ href: "/settings/connect-sodex", label: "Connect SoDEX" }],
   },
   {
-    section: "System",
+    section: "Internal",
     items: [
-      // Cron & Audit and System Health are internal monitoring surfaces.
-      // Public viewers don't need them — gated to dev only via internal=true.
+      { href: "/patterns", label: "Pattern Library", internal: true },
+      { href: "/learnings", label: "Learnings", internal: true },
+      { href: "/calibration", label: "Calibration", internal: true },
+      { href: "/agents", label: "Agent Activity", internal: true },
       { href: "/jobs", label: "Cron & Audit", internal: true },
-      { href: "/system-health", label: "System Health", badge: "NEW", internal: true },
-      { href: "/universe", label: "Asset Universe" },
+      { href: "/system-health", label: "System Health", internal: true },
     ],
   },
 ];
@@ -91,14 +89,9 @@ export function Sidebar() {
                 <li key={item.href}>
                   <Link
                     href={item.href}
-                    className="flex items-center justify-between rounded px-2 py-1.5 text-sm text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg"
+                    className="flex items-center rounded px-2 py-1.5 text-sm text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg"
                   >
                     <span>{item.label}</span>
-                    {item.badge ? (
-                      <span className="rounded bg-accent/20 px-1.5 py-0.5 text-[10px] font-medium text-accent-2">
-                        {item.badge}
-                      </span>
-                    ) : null}
                   </Link>
                 </li>
               ))}
@@ -107,8 +100,14 @@ export function Sidebar() {
         ))}
       </nav>
 
-      <div className="border-t border-line px-3 py-2 text-[10px] text-fg-dim">
-        Data: SoSoValue · AI: Claude
+      <div className="border-t border-line px-3 py-2">
+        <Link
+          href="/universe"
+          className="block pb-1.5 text-[11px] text-fg-muted transition-colors hover:text-fg"
+        >
+          Asset Universe →
+        </Link>
+        <div className="text-[10px] text-fg-dim">Data: SoSoValue · AI: Claude</div>
       </div>
     </aside>
   );

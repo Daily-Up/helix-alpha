@@ -1,19 +1,7 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono, Fraunces, Inter, JetBrains_Mono } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import { Fraunces, Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { Web3Provider } from "@/components/providers/Web3Provider";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-  display: "swap",
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-  display: "swap",
-});
 
 // Brand fonts — Fraunces for serif page titles (landing + dashboard h1s),
 // Inter for body, JetBrains Mono for technical labels.
@@ -37,10 +25,15 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Helix — Event-driven alpha. Audited.",
+  title: "Helix — AI trading signals you can verify",
   description:
-    "Every signal carries its full reasoning chain. Every outcome is tracked. Every framework is stress-tested. Trade what you can verify.",
+    "Helix reads the market's catalysts, calls the trade with clear risk levels, and tracks every outcome — so you can see the record before you trust it. Execute live on SoDEX.",
+};
+
+export const viewport: Viewport = {
   themeColor: "#0b0b0e",
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({
@@ -49,7 +42,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} ${fraunces.variable} ${inter.variable} ${jetbrainsMono.variable} h-full antialiased`}
+      className={`${fraunces.variable} ${inter.variable} ${jetbrainsMono.variable} h-full antialiased`}
       style={{ colorScheme: "dark" }}
     >
       <body className="min-h-full">

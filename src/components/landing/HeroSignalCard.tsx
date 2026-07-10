@@ -2,14 +2,13 @@
 
 /**
  * Hero anchor — a representative signal card rendered in the landing
- * page hero. Mirrors the structure of the live signal feed cards
- * (RELEV / CORR / SRC tier badges, conviction breakdown, asset
- * relevance) so the abstract "audited signals" claim becomes concrete
- * in 3 seconds.
+ * page hero: asset + direction, the catalyst, a confidence read, and the
+ * risk bracket, so the abstract "verifiable signals" claim becomes
+ * concrete in 3 seconds. Plain-language — no internal scoring/invariant
+ * codes (this is a marketing surface, not the ops view).
  *
- * Static content — this is a marketing surface, not a live data tap.
- * Clicking the card deep-links to `/signals` (the live feed) for any
- * visitor curious enough to inspect a real one.
+ * Static content. Clicking the card deep-links to `/signals` (the live
+ * feed) for any visitor curious enough to inspect a real one.
  */
 
 import Link from "next/link";
@@ -49,7 +48,7 @@ export function HeroSignalCard() {
               className="font-[var(--font-jetbrains-mono)] uppercase"
               style={{ fontSize: "10px", color: TEXT_MUTED, letterSpacing: "0.06em" }}
             >
-              ETF FLOW · LARGE_CAP_CRYPTO
+              ETF INFLOW
             </span>
           </div>
           <span
@@ -86,26 +85,28 @@ export function HeroSignalCard() {
           single-day intake since the post-halving cycle.
         </p>
 
-        {/* Conviction breakdown */}
+        {/* Confidence */}
         <div
           data-card-part
           className="mt-5 border-t pt-4"
           style={{ borderColor: `${TEXT}20` }}
         >
           <div
-            className="font-[var(--font-jetbrains-mono)] uppercase"
-            style={{
-              fontSize: "10px",
-              color: TEXT_MUTED,
-              letterSpacing: "0.08em",
-            }}
+            className="flex items-center justify-between font-[var(--font-jetbrains-mono)] uppercase"
+            style={{ fontSize: "10px", color: TEXT_MUTED, letterSpacing: "0.08em" }}
           >
-            CONVICTION <span data-card-counter="0.68" className="tabular-nums">0.68</span> · BREAKDOWN
+            <span>Confidence</span>
+            <span className="tabular-nums" style={{ color: TEXT }}>
+              <span data-card-counter="68">68</span>%
+            </span>
           </div>
-          <div className="mt-3 grid grid-cols-3 gap-3">
-            <BreakdownCell label="RELEV" value="0.92" counter />
-            <BreakdownCell label="CORR" value="0.74" counter />
-            <BreakdownCell label="SRC" value="T1" />
+          <div
+            className="mt-2 h-1 w-full overflow-hidden rounded-full"
+            style={{ background: `${TEXT}18` }}
+          >
+            <div
+              style={{ width: "68%", height: "100%", background: ACCENT, borderRadius: 999 }}
+            />
           </div>
         </div>
 
@@ -122,52 +123,20 @@ export function HeroSignalCard() {
           </div>
         </div>
 
-        {/* Footer — invariant trail */}
+        {/* Footer — human, not internal invariant IDs */}
         <div
-          className="mt-5 border-t pt-3 font-[var(--font-jetbrains-mono)]"
+          className="mt-5 border-t pt-3 font-[var(--font-jetbrains-mono)] uppercase"
           style={{
             borderColor: `${TEXT}20`,
             fontSize: "10px",
             color: TEXT_MUTED,
-            letterSpacing: "0.04em",
+            letterSpacing: "0.06em",
           }}
         >
-          I-05 · I-09 · I-15 · I-21 · I-30
+          Full reasoning chain · outcome-tracked
         </div>
       </div>
     </Link>
-  );
-}
-
-function BreakdownCell({
-  label,
-  value,
-  counter,
-}: {
-  label: string;
-  value: string;
-  counter?: boolean;
-}) {
-  return (
-    <div>
-      <div
-        className="font-[var(--font-jetbrains-mono)] uppercase"
-        style={{
-          fontSize: "10px",
-          color: TEXT_MUTED,
-          letterSpacing: "0.08em",
-        }}
-      >
-        {label}
-      </div>
-      <div
-        className="mt-1 font-[var(--font-jetbrains-mono)] tabular-nums"
-        style={{ fontSize: "16px", color: TEXT }}
-        {...(counter ? { "data-card-counter": value } : {})}
-      >
-        {value}
-      </div>
-    </div>
   );
 }
 
