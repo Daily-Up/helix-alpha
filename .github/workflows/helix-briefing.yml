@@ -1,0 +1,51 @@
+name: Helix daily briefing
+
+# Generates the Daily AI Briefing automatically. Previously this only ran
+# when someone pressed "Regenerate" in the UI — so the briefing went stale
+# (and the button is now hidden from public viewers), leaving no automatic
+# path. This workflow is that path.
+#
+# The endpoint is IDEMPOTENT per UTC date (returns the cached briefing
+# unless ?force=1), so firing several times a day is safe: the first
+# successful run generates the day's briefing and every later run that day
+# is a cheap "cached" no-op. Running multiple times also self-heals — if an
+# early run fails (e.g. API credits momentarily out), a later one retries.
+#
+# GitHub Actions cron is throttled under load, so we stack a few times
+# through the day rather than relying on a single daily fire.
+#
+# Requires the repo secret CRON_SECRET (already used by helix-tick.yml).
+
+on:
+  schedule:
+    - cron: "20 13 * * *" # ~13:20 UTC — the recommended daily slot
+    - cron: "20 17 * * *" # afternoon retry
+    - cron: "20 21 * * *" # evening retry
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Force-regenerate today's briefing (overwrite cached)"
+        required: false
+        default: "false"
+
+jobs:
+  briefing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Generate daily briefing
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          BASE_URL: https://helix-alpha-kappa.vercel.app
+          FORCE: ${{ github.event.inputs.force }}
+        run: |
+          Q=""
+          if [ "$FORCE" = "true" ]; then Q="?force=1"; fi
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Accept: application/json" \
+            --max-time 90 \
+            "$BASE_URL/api/cron/generate-briefing$Q" \
+            | tee response.json
+          echo
+          echo "briefing job complete"
