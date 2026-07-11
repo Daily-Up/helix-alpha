@@ -31,8 +31,12 @@ jobs:
           BASE_URL: https://helix-alpha-kappa.vercel.app
         run: |
           fail=0
-          for ep in ingest-etf ingest-macro ingest-btc-treasuries; do
-            echo "--- $ep ---"
+          # Treasuries defaults to a 600ms pacing delay per company, which
+          # blows past Vercel's 60s function limit; delayMs=100 keeps it
+          # well inside the budget while staying polite to the SoSoValue API.
+          for ep in "ingest-etf" "ingest-macro" "ingest-btc-treasuries?delayMs=100"; do
+            name="${ep%%\?*}"
+            echo "--- $name ---"
             # -sS (not -f) so a non-2xx prints the body instead of aborting
             # the loop; each endpoint is independent.
             code=$(curl -sS -o /tmp/out.json -w "%{http_code}" -X POST \
