@@ -1,0 +1,48 @@
+name: Helix data refresh (ETF / macro / treasuries)
+
+# Refreshes the SoSoValue-sourced datasets that the tick does NOT touch.
+# The tick ingests news + snapshots sectors, and separate crons handle
+# news + klines — but ingest-etf, ingest-macro, and ingest-btc-treasuries
+# had NO schedule at all (not in vercel.json crons, not in any workflow),
+# so ETF Flows / Macro Bridge / Treasury Watch went stale (data frozen
+# around May). This workflow is their scheduler.
+#
+# Scheduled at 11:00 UTC — before the 13:20 briefing — so the Daily
+# Briefing synthesizes against fresh ETF/macro data. A second evening run
+# adds resilience against GitHub Actions cron throttling and transient
+# SoSoValue/API hiccups.
+#
+# Uses the existing CRON_SECRET repo secret (same as tick + briefing).
+
+on:
+  schedule:
+    - cron: "0 11 * * *" # before the daily briefing
+    - cron: "0 23 * * *" # evening refresh
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Refresh SoSoValue-sourced data (ETF, macro, treasuries)
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          BASE_URL: https://helix-alpha-kappa.vercel.app
+        run: |
+          fail=0
+          for ep in ingest-etf ingest-macro ingest-btc-treasuries; do
+            echo "--- $ep ---"
+            # -sS (not -f) so a non-2xx prints the body instead of aborting
+            # the loop; each endpoint is independent.
+            code=$(curl -sS -o /tmp/out.json -w "%{http_code}" -X POST \
+              -H "Authorization: Bearer $CRON_SECRET" \
+              -H "Accept: application/json" \
+              --max-time 90 \
+              "$BASE_URL/api/cron/$ep") || true
+            echo "  HTTP $code"
+            cat /tmp/out.json 2>/dev/null | head -c 400; echo
+            if [ "$code" != "200" ]; then fail=1; fi
+          done
+          echo "data refresh complete"
+          exit $fail
