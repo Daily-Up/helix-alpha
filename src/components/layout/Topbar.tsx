@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { TradeModeBadge } from "./TradeModeBadge";
+import { MobileNav } from "./MobileNav";
 
 /**
  * Top bar — shows the current UTC time + a "live" indicator.
@@ -23,7 +24,8 @@ export function Topbar() {
 
   return (
     <header className="sticky top-0 z-10 flex h-14 items-center justify-between border-b border-line bg-bg/90 px-6 backdrop-blur">
-      <div className="flex items-center gap-2 text-xs text-fg-muted">
+      <div className="flex items-center gap-3 text-xs text-fg-muted">
+        <MobileNav />
         {/* suppressHydrationWarning is belt-and-suspenders: the empty initial
             value means there's nothing to mismatch, but if a future change
             ever inlines `new Date()` again this stops the noisy console. */}

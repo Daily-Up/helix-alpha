@@ -57,16 +57,31 @@ const NAV: Array<{ section: string; items: NavItem[] }> = [
   },
 ];
 
+/** Desktop rail — hidden below md, where MobileNav's drawer takes over. */
 export function Sidebar() {
+  return (
+    <aside className="hidden h-screen w-56 shrink-0 flex-col border-r border-line bg-surface md:flex">
+      <SidebarContent />
+    </aside>
+  );
+}
+
+/**
+ * The nav column itself (logo + sections + footer). Shared by the desktop
+ * rail and the mobile drawer. `onNavigate` lets the drawer close itself
+ * when a link is tapped.
+ */
+export function SidebarContent({ onNavigate }: { onNavigate?: () => void } = {}) {
   const publicMode = isPublicMode();
   const sections = NAV.map((section) => ({
     ...section,
     items: section.items.filter((item) => !(publicMode && item.internal)),
   })).filter((section) => section.items.length > 0);
   return (
-    <aside className="flex h-screen w-56 shrink-0 flex-col border-r border-line bg-surface">
+    <>
       <Link
         href="/"
+        onClick={onNavigate}
         className="flex h-14 items-center gap-2 border-b border-line px-4 transition-colors hover:bg-surface-2"
       >
         <div className="flex h-7 w-7 items-center justify-center rounded bg-accent text-sm font-bold text-bg">
@@ -89,6 +104,7 @@ export function Sidebar() {
                 <li key={item.href}>
                   <Link
                     href={item.href}
+                    onClick={onNavigate}
                     className="flex items-center rounded px-2 py-1.5 text-sm text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg"
                   >
                     <span>{item.label}</span>
@@ -103,12 +119,13 @@ export function Sidebar() {
       <div className="border-t border-line px-3 py-2">
         <Link
           href="/universe"
+          onClick={onNavigate}
           className="block pb-1.5 text-[11px] text-fg-muted transition-colors hover:text-fg"
         >
           Asset Universe →
         </Link>
         <div className="text-[10px] text-fg-dim">Data: SoSoValue · AI: Claude</div>
       </div>
-    </aside>
+    </>
   );
 }

@@ -210,6 +210,27 @@ function fmtPct(x: number | null | undefined, withSign = false): string {
   return `${sign}${x.toFixed(2)}%`;
 }
 
+// Human labels for the internal catalyst-subtype slugs.
+const CATALYST_LABELS: Record<string, string> = {
+  macro_print: "Macro print",
+  treasury_action: "Treasury buy",
+  etf_flow_reaction: "ETF flow",
+  partnership_announcement: "Partnership",
+  tech_update: "Tech / product",
+  whale_flow: "Whale flow",
+  regulatory_statement: "Regulatory",
+  earnings_reaction: "Earnings",
+  listing_event: "Listing",
+  security_incident: "Security",
+};
+function humanCatalyst(s: string | null | undefined): string {
+  if (!s) return "—";
+  return (
+    CATALYST_LABELS[s] ??
+    s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, " ")
+  );
+}
+
 // ─── Design tokens ──
 const COLORS = {
   pos: "#34c39a",
@@ -272,8 +293,8 @@ export default async function PerformancePage() {
         note="Honest accounting. Includes everything Helix ever proposed — AUTO, REVIEW, INFO. Realized return is the actual close-to-close ROI at the signal's expiry — not the target/stop we set up front. The Target / Stop / Flat label only marks which level (if any) price touched intraday; a signal can touch its stop and still close green. Win rate = share of priced signals that closed positive at expiry. Blocked = the pre-save invariant gate refused the signal at fire time. Dismissed = the lifecycle sweeper closed it."
       />
 
-      {/* Top-line totals */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 24, marginBottom: 36 }}>
+      {/* Top-line totals — auto-fit so it drops to 2×2 / 1-col on narrow screens */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 24, marginBottom: 36 }}>
         <Stat
           kicker="Total signals"
           value={String(totals?.total ?? 0)}
@@ -341,9 +362,9 @@ export default async function PerformancePage() {
       {subtypes.length > 0 && (
         <Section title="By catalyst subtype" kicker="What works">
           <SimpleTable
-            head={["Subtype", "n", "Wins", "Losses", "Flat", "Avg realized"]}
+            head={["Catalyst", "n", "Wins", "Losses", "Flat", "Avg realized"]}
             rows={subtypes.map((s) => [
-              s.catalyst_subtype,
+              humanCatalyst(s.catalyst_subtype),
               String(s.n),
               <Cell key="w" v={s.wins} color={COLORS.pos} />,
               <Cell key="l" v={s.losses} color={COLORS.neg} />,
@@ -395,7 +416,7 @@ export default async function PerformancePage() {
               <HeadlineCell
                 key="h"
                 title={r.title}
-                fallback={r.catalyst_subtype}
+                fallback={humanCatalyst(r.catalyst_subtype)}
                 href={`/signal/${r.signal_id}`}
               />,
               <OutcomeBadge key="o" outcome={r.outcome ?? ""} />,
@@ -475,8 +496,10 @@ function Section({ title, kicker, children }: { title: string; kicker?: string; 
 
 function SimpleTable({ head, rows }: { head: string[]; rows: React.ReactNode[][] }) {
   return (
-    <div style={{ borderTop: `1px solid ${COLORS.line}` }}>
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+    // overflow-x wrapper so wide tables scroll inside their own box on
+    // phones instead of forcing the whole page to scroll sideways.
+    <div style={{ borderTop: `1px solid ${COLORS.line}`, overflowX: "auto" }}>
+      <table style={{ width: "100%", minWidth: 520, borderCollapse: "collapse" }}>
         <thead>
           <tr>
             {head.map((h, i) => (
