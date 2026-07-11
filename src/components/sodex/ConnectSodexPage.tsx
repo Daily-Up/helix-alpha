@@ -326,13 +326,18 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
         </div>
       ) : null}
 
+      {/* Wallet card is a required SETUP step when there's no key yet,
+          but only an OPTIONAL "manage keys" affordance once you're live
+          — so it doesn't read as a step you skipped. */}
       <Card>
         <CardHeader>
-          <CardTitle>2. Connect your wallet</CardTitle>
+          <CardTitle>
+            {localKey ? "Manage keys (optional)" : "Connect your wallet"}
+          </CardTitle>
           <span className="text-[11px] text-fg-dim">
-            Master wallet stays cold — only signs setup actions. The
-            wallet&apos;s current chain doesn&apos;t matter; SoDEX
-            verifies the signature, not the network.
+            {localKey
+              ? "You're already live. Reconnect your master wallet only to rotate or revoke your key — it isn't needed to trade."
+              : "Your master wallet stays cold — it only signs the one-time setup. The wallet's current chain doesn't matter; SoDEX verifies the signature, not the network."}
           </span>
         </CardHeader>
         <CardBody>
@@ -349,6 +354,10 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
                   {address?.slice(0, 6)}…{address?.slice(-4)}
                 </span>
               </span>
+            ) : localKey ? (
+              <span className="text-xs text-fg-dim">
+                Not needed unless rotating or revoking.
+              </span>
             ) : null}
           </div>
         </CardBody>
@@ -357,7 +366,7 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
       {isConnected ? (
         <Card>
           <CardHeader>
-            <CardTitle>3. Your SoDEX account</CardTitle>
+            <CardTitle>Your SoDEX account</CardTitle>
             <span className="text-[11px] text-fg-dim">
               live data from {SODEX_NETWORKS[network].label}
             </span>
@@ -427,7 +436,7 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
       {isConnected && accountState && isUnregistered ? (
         <Card>
           <CardHeader>
-            <CardTitle>4. Create your SoDEX account first</CardTitle>
+            <CardTitle>Create your SoDEX account first</CardTitle>
             <span className="text-[11px] text-fg-dim">
               one-time bootstrap — Helix can&apos;t register a key until
               SoDEX recognises your wallet
@@ -507,7 +516,7 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
       {isConnected && accountState && !isUnregistered ? (
         <Card>
           <CardHeader>
-            <CardTitle>4. Helix API keys</CardTitle>
+            <CardTitle>Helix API keys</CardTitle>
             <span className="text-[11px] text-fg-dim">
               SoDEX allows up to 5 keys per account
             </span>
@@ -651,7 +660,7 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
 
 function SafetyLimitsCard({ network }: { network: SodexNetwork }) {
   const [limits, setLimits] = useState<SafetyLimits>({
-    maxPositionUsd: 10,
+    maxPositionUsd: 11,
     maxDailyTrades: 3,
     acceptedDisclaimer: false,
   });
@@ -676,7 +685,7 @@ function SafetyLimitsCard({ network }: { network: SodexNetwork }) {
       <CardBody>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           <label className="flex flex-col gap-1 text-xs">
-            <span className="text-fg-dim">Max position (USD)</span>
+            <span className="text-fg-dim">Live order size (USD)</span>
             <input
               type="number"
               min={1}
@@ -690,6 +699,9 @@ function SafetyLimitsCard({ network }: { network: SodexNetwork }) {
               }
               className="rounded border border-line bg-surface px-2 py-1 font-mono text-fg"
             />
+            <span className="text-[10px] text-fg-dim">
+              Each Execute-live order uses this amount (min ~$10 on SoDEX).
+            </span>
           </label>
           <label className="flex flex-col gap-1 text-xs">
             <span className="text-fg-dim">Max daily trades</span>
