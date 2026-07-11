@@ -530,6 +530,20 @@ function sourceTierScore(
 }
 
 /**
+ * Sponsored / paid-KOL Twitter accounts whose posts are unreliable signal
+ * sources (often sponsored/promoted content). Signals are NOT generated
+ * from these authors — they materially dragged realized track-record
+ * performance. Matched case-insensitively against news_events.author.
+ * Curated from live source analysis; extend as more are identified.
+ */
+const BLOCKED_SOURCES = new Set(["cryptorover", "watcherguru", "coinspace_"]);
+
+export function isBlockedSource(author: string | null | undefined): boolean {
+  const a = (author ?? "").toLowerCase().trim();
+  return a.length > 0 && BLOCKED_SOURCES.has(a);
+}
+
+/**
  * Detect proxy-routing hallucinations on listing events.
  *
  * Real example: "Upbit will list Pharos (PROS) for spot trading on May
@@ -1124,6 +1138,8 @@ export interface SignalGenSummary {
   signals_skipped_multi_asset_narrative: number;
   /** Per-asset skips because reasoning text contradicted the direction. */
   signals_skipped_reasoning_contradiction: number;
+  /** Skips because the source is a blocked sponsored/KOL account. */
+  signals_skipped_blocked_source: number;
   by_tier: Record<"auto" | "review" | "info", number>;
   latency_ms: number;
 }
@@ -1225,10 +1241,18 @@ export async function runSignalGen(
   let skipStaleByDate = 0;
   let skipMultiAssetNarrative = 0;
   let skipReasoningContradiction = 0;
+  let skipBlockedSource = 0;
   const byTier = { auto: 0, review: 0, info: 0 };
 
   for (const r of rows) {
     const affectedIds = JSON.parse(r.affected_asset_ids) as string[];
+
+    // Gate 0: skip sponsored / paid-KOL Twitter sources entirely — their
+    // posts are unreliable and dragged realized performance.
+    if (isBlockedSource(r.author)) {
+      skipBlockedSource += affectedIds.length;
+      continue;
+    }
 
     // Gate 1: skip classifications from before v2 prompt — they don't have
     // actionable/recency info, so we can't tell if they're stale.
@@ -2238,6 +2262,7 @@ export async function runSignalGen(
     signals_skipped_no_classification_v2: skipNoV2,
     signals_skipped_multi_asset_narrative: skipMultiAssetNarrative,
     signals_skipped_reasoning_contradiction: skipReasoningContradiction,
+    signals_skipped_blocked_source: skipBlockedSource,
     by_tier: byTier,
     latency_ms: Date.now() - t0,
   };
