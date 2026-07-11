@@ -520,7 +520,7 @@ function sourceTierScore(
   const knownTier1 = ["bloomberg", "reuters", "wsj", "ft.com", "coinbase", "sec.gov"];
   const knownTier2 = [
     "panews", "chaincatcher", "decrypt", "decrpt", "foresightnews",
-    "theblock", "coindesk", "cointelegraph", "unchained", "techflow",
+    "theblock", "coindesk", "unchained", "techflow",
     "odaily", "benzinga",
   ];
   if (knownTier1.some((t) => a.includes(t))) return 0.95;
@@ -536,7 +536,12 @@ function sourceTierScore(
  * performance. Matched case-insensitively against news_events.author.
  * Curated from live source analysis; extend as more are identified.
  */
-const BLOCKED_SOURCES = new Set(["cryptorover", "watcherguru", "coinspace_"]);
+const BLOCKED_SOURCES = new Set([
+  "cryptorover",
+  "watcherguru",
+  "coinspace_",
+  "cointelegraph",
+]);
 
 export function isBlockedSource(author: string | null | undefined): boolean {
   const a = (author ?? "").toLowerCase().trim();
