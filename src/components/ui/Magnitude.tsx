@@ -31,27 +31,28 @@ export function Magnitude({
   const has = value != null && !Number.isNaN(value);
   const a = has ? Math.abs(value as number) : 0;
   const pct = max > 0 ? Math.min(100, (a / max) * 100) : 0;
+  const negative = has && (value as number) < 0;
   const barTone =
     tone === "auto"
-      ? has && (value as number) < 0
-        ? "bg-negative/20"
-        : "bg-positive/20"
+      ? negative
+        ? "bg-negative/45"
+        : "bg-positive/45"
       : tone === "negative"
-        ? "bg-negative/20"
+        ? "bg-negative/45"
         : tone === "positive"
-          ? "bg-positive/20"
-          : "bg-accent/15";
+          ? "bg-positive/45"
+          : "bg-accent/40";
 
   return (
-    <div className={cn("relative flex items-center justify-end", className)}>
+    <div className={cn("relative flex items-center justify-end px-2", className)}>
       {has && pct > 0 ? (
         <div
           aria-hidden
-          className={cn("absolute inset-y-1 right-0 rounded-sm", barTone)}
+          className={cn("absolute inset-y-[3px] left-0 rounded-[2px]", barTone)}
           style={{ width: `${pct}%` }}
         />
       ) : null}
-      <span className="relative">
+      <span className="relative z-[1]">
         <Num
           value={value}
           unit={unit}

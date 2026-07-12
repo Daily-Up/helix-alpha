@@ -69,9 +69,9 @@ export function DataTable<T>({
               <th
                 key={c.key}
                 className={cn(
-                  "px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-fg-dim",
+                  "px-4 py-2.5 text-[10px] font-medium uppercase tracking-[0.14em] text-fg-dim",
                   alignOf(c) === "right" ? "text-right" : "text-left",
-                  c.role === "context" && "opacity-70",
+                  c.role === "context" && "opacity-60",
                 )}
               >
                 {c.header}
@@ -81,7 +81,10 @@ export function DataTable<T>({
         </thead>
         <tbody>
           {rows.map((r, i) => (
-            <tr key={getKey(r, i)} className="border-b border-line/60">
+            <tr
+              key={getKey(r, i)}
+              className="border-b border-line/50 transition-colors hover:bg-surface-2/50"
+            >
               {columns.map((c) => {
                 const right = alignOf(c) === "right";
                 let cell: ReactNode;
@@ -127,7 +130,16 @@ export function DataTable<T>({
                   cell = null;
                 }
                 return (
-                  <td key={c.key} className={cn("px-3 py-2", right ? "text-right" : "text-left")}>
+                  <td
+                    key={c.key}
+                    className={cn(
+                      "py-3",
+                      // magnitude cells manage their own inner padding so the
+                      // bar can run the width of the column
+                      c.role === "magnitude" ? "px-1.5" : "px-4",
+                      right ? "text-right" : "text-left",
+                    )}
+                  >
                     {cell}
                   </td>
                 );

@@ -4,16 +4,14 @@ import { useCallback, useEffect, useState } from "react";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Stat } from "@/components/ui/Stat";
 import { HeroStat, SubStat } from "@/components/ui/HeroStat";
-import { Badge } from "@/components/ui/Badge";
 import { StatSkeleton, TableSkeleton } from "@/components/ui/Skeleton";
+import { DataTable, type Column } from "@/components/ui/DataTable";
+import { Num } from "@/components/ui/Num";
+import { Timestamp } from "@/components/ui/Timestamp";
+import { Action } from "@/components/ui/Action";
+import { isPublicMode } from "@/lib/public-mode";
 import { useBulkMountReveal } from "@/hooks/useMountReveal";
-import {
-  fmtPct,
-  fmtPrice,
-  fmtRelative,
-  fmtSodexSymbol,
-  fmtUsd,
-} from "@/lib/format";
+import { fmtPct, fmtSodexSymbol, fmtUsd } from "@/lib/format";
 import { cn } from "@/components/ui/cn";
 
 interface Settings {
@@ -182,100 +180,50 @@ export function PortfolioDashboard() {
               No open positions.
             </div>
           ) : (
-            <table className="w-full">
-              <thead className="border-b border-line bg-surface-2">
-                <tr className="text-[10px] uppercase tracking-wider text-fg-dim">
-                  <th className="px-3 py-2 text-left">Asset</th>
-                  <th className="px-3 py-2 text-left">Side</th>
-                  <th className="px-3 py-2 text-right">Size</th>
-                  <th className="px-3 py-2 text-right">Entry</th>
-                  <th className="px-3 py-2 text-right">Current</th>
-                  <th className="px-3 py-2 text-right">Stop</th>
-                  <th className="px-3 py-2 text-right">Target</th>
-                  <th className="px-3 py-2 text-right">P&L</th>
-                  <th className="px-3 py-2 text-right">Age</th>
-                  <th className="px-3 py-2"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line">
-                {open.map((p) => {
-                  const pnl = p.unrealised_pnl_usd;
-                  const pct = p.unrealised_pnl_pct;
-                  return (
-                    <tr
-                      key={p.id}
-                      className="text-xs transition-colors hover:bg-surface-2"
-                    >
-                      <td className="px-3 py-2">
-                        <div
-                          className="font-mono text-fg"
-                          title={p.sodex_symbol}
-                        >
-                          {fmtSodexSymbol(p.sodex_symbol)}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2">
-                        <Badge
-                          tone={p.direction === "long" ? "positive" : "negative"}
-                          mono
-                        >
-                          {p.direction}
-                        </Badge>
-                      </td>
-                      <td className="tabular px-3 py-2 text-right text-fg">
-                        {fmtUsd(p.size_usd)}
-                      </td>
-                      <td className="tabular px-3 py-2 text-right text-fg-muted">
-                        {fmtPrice(p.entry_price)}
-                      </td>
-                      <td className="tabular px-3 py-2 text-right text-fg">
-                        {fmtPrice(p.current_price)}
-                      </td>
-                      <td className="tabular px-3 py-2 text-right text-fg-dim">
-                        {fmtPrice(p.stop_price)}
-                      </td>
-                      <td className="tabular px-3 py-2 text-right text-fg-dim">
-                        {fmtPrice(p.target_price)}
-                      </td>
-                      <td
+            <DataTable<OpenPos>
+              columns={[
+                {
+                  key: "asset",
+                  header: "Asset",
+                  role: "identifier",
+                  render: (p) => (
+                    <span title={p.sodex_symbol}>
+                      {fmtSodexSymbol(p.sodex_symbol)}
+                      <span
                         className={cn(
-                          "tabular px-3 py-2 text-right font-medium",
-                          (pnl ?? 0) > 0
-                            ? "text-positive"
-                            : (pnl ?? 0) < 0
-                              ? "text-negative"
-                              : "text-fg-muted",
+                          "ml-1.5 text-[9px] uppercase tracking-wider",
+                          p.direction === "long" ? "text-positive" : "text-negative",
                         )}
                       >
-                        {pnl != null ? fmtUsd(pnl) : "—"}
-                        {pct != null ? (
-                          <div className="text-[10px] font-normal">
-                            {fmtPct(pct)}
-                          </div>
-                        ) : null}
-                      </td>
-                      <td className="tabular px-3 py-2 text-right text-fg-dim">
-                        {fmtRelative(p.entry_time)}
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        <button
-                          onClick={() => closeTrade(p.id)}
-                          disabled={busyId === p.id}
-                          className={cn(
-                            "rounded border px-2 py-0.5 text-[10px] uppercase tracking-wider",
-                            busyId === p.id
-                              ? "cursor-wait border-line text-fg-dim"
-                              : "border-line text-fg-muted hover:border-negative/40 hover:text-negative",
-                          )}
-                        >
-                          {busyId === p.id ? "Closing…" : "Close"}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                        {p.direction}
+                      </span>
+                    </span>
+                  ),
+                },
+                { key: "size", header: "Size", role: "context", num: (p) => p.size_usd, unit: "$" },
+                { key: "entry", header: "Entry", role: "context", num: (p) => p.entry_price, unit: "$" },
+                { key: "current", header: "Current", role: "context", num: (p) => p.current_price, unit: "$" },
+                { key: "pnl", header: "P&L", role: "magnitude", num: (p) => p.unrealised_pnl_usd, unit: "$", sign: true, tone: "auto" },
+                { key: "age", header: "Age", role: "context", render: (p) => <Timestamp ms={p.entry_time} /> },
+                ...(isPublicMode()
+                  ? []
+                  : [
+                      {
+                        key: "act",
+                        header: "",
+                        role: "action",
+                        render: (p) => (
+                          <Action enabled={busyId !== p.id} tone="danger" onClick={() => closeTrade(p.id)}>
+                            {busyId === p.id ? "Closing…" : "Close"}
+                          </Action>
+                        ),
+                      } as Column<OpenPos>,
+                    ]),
+              ]}
+              rows={open}
+              getKey={(p) => p.id}
+              minWidth={560}
+            />
           )}
         </CardBody>
       </Card>
@@ -292,69 +240,52 @@ export function PortfolioDashboard() {
               No closed trades yet.
             </div>
           ) : (
-            <table className="w-full">
-              <thead className="border-b border-line bg-surface-2">
-                <tr className="text-[10px] uppercase tracking-wider text-fg-dim">
-                  <th className="px-3 py-2 text-left">Asset</th>
-                  <th className="px-3 py-2 text-left">Side</th>
-                  <th className="px-3 py-2 text-right">Size</th>
-                  <th className="px-3 py-2 text-right">Entry → Exit</th>
-                  <th className="px-3 py-2 text-right">P&L</th>
-                  <th className="px-3 py-2 text-left">Reason</th>
-                  <th className="px-3 py-2 text-right">Closed</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line">
-                {closed.map((t) => (
-                  <tr
-                    key={t.id}
-                    className="text-xs transition-colors hover:bg-surface-2"
-                  >
-                    <td
-                      className="px-3 py-2 font-mono text-fg"
-                      title={t.sodex_symbol}
-                    >
+            <DataTable<ClosedTrade>
+              columns={[
+                {
+                  key: "asset",
+                  header: "Asset",
+                  role: "identifier",
+                  render: (t) => (
+                    <span title={t.sodex_symbol}>
                       {fmtSodexSymbol(t.sodex_symbol)}
-                    </td>
-                    <td className="px-3 py-2">
-                      <Badge
-                        tone={t.direction === "long" ? "positive" : "negative"}
-                        mono
+                      <span
+                        className={cn(
+                          "ml-1.5 text-[9px] uppercase tracking-wider",
+                          t.direction === "long" ? "text-positive" : "text-negative",
+                        )}
                       >
                         {t.direction}
-                      </Badge>
-                    </td>
-                    <td className="tabular px-3 py-2 text-right text-fg">
-                      {fmtUsd(t.size_usd)}
-                    </td>
-                    <td className="tabular px-3 py-2 text-right text-fg-muted">
-                      {fmtPrice(t.entry_price)} → {fmtPrice(t.exit_price)}
-                    </td>
-                    <td
-                      className={cn(
-                        "tabular px-3 py-2 text-right font-medium",
-                        t.pnl_usd > 0
-                          ? "text-positive"
-                          : t.pnl_usd < 0
-                            ? "text-negative"
-                            : "text-fg-muted",
-                      )}
-                    >
-                      {fmtUsd(t.pnl_usd)}
-                      <div className="text-[10px] font-normal">
-                        {fmtPct(t.pnl_pct)}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 text-fg-dim">
-                      {t.exit_reason}
-                    </td>
-                    <td className="tabular px-3 py-2 text-right text-fg-dim">
-                      {fmtRelative(t.exit_time)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      </span>
+                    </span>
+                  ),
+                },
+                { key: "size", header: "Size", role: "context", num: (t) => t.size_usd, unit: "$" },
+                {
+                  key: "px",
+                  header: "Entry → Exit",
+                  role: "context",
+                  render: (t) => (
+                    <span className="whitespace-nowrap">
+                      <Num value={t.entry_price} unit="$" tier="context" /> →{" "}
+                      <Num value={t.exit_price} unit="$" tier="context" />
+                    </span>
+                  ),
+                },
+                { key: "pnl", header: "P&L", role: "magnitude", num: (t) => t.pnl_usd, unit: "$", sign: true, tone: "auto" },
+                {
+                  key: "reason",
+                  header: "Reason",
+                  role: "context",
+                  align: "left",
+                  render: (t) => <span className="text-fg-dim">{t.exit_reason}</span>,
+                },
+                { key: "closed", header: "Closed", role: "context", render: (t) => <Timestamp ms={t.exit_time} /> },
+              ]}
+              rows={closed}
+              getKey={(t) => t.id}
+              minWidth={560}
+            />
           )}
         </CardBody>
       </Card>
