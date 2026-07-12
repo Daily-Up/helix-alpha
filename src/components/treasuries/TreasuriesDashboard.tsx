@@ -14,6 +14,7 @@ import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Stat } from "@/components/ui/Stat";
 import { isPublicMode } from "@/lib/public-mode";
 import { Badge } from "@/components/ui/Badge";
+import { DataTable } from "@/components/ui/DataTable";
 
 interface Stats {
   total_companies: number;
@@ -165,43 +166,19 @@ export function TreasuriesDashboard() {
           </span>
         </CardHeader>
         <CardBody className="!p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="border-b border-line bg-surface-2">
-                <tr className="text-[10px] uppercase tracking-wider text-fg-dim">
-                  <th className="px-3 py-2 text-left">#</th>
-                  <th className="px-3 py-2 text-left">Ticker</th>
-                  <th className="px-3 py-2 text-left">Company</th>
-                  <th className="px-3 py-2 text-left">Listed</th>
-                  <th className="px-3 py-2 text-right">BTC held</th>
-                  <th className="px-3 py-2 text-right">Last buy</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line">
-                {data.holders.map((h, i) => (
-                  <tr
-                    key={h.ticker}
-                    className="text-xs transition-colors hover:bg-surface-2"
-                  >
-                    <td className="px-3 py-2 text-fg-dim">{i + 1}</td>
-                    <td className="px-3 py-2 font-mono font-medium text-fg">
-                      {h.ticker}
-                    </td>
-                    <td className="px-3 py-2 text-fg-muted">{h.name}</td>
-                    <td className="px-3 py-2 text-[11px] text-fg-dim">
-                      {h.list_location ?? "—"}
-                    </td>
-                    <td className="tabular px-3 py-2 text-right text-fg">
-                      {fmtBtc(h.btc_holding)}
-                    </td>
-                    <td className="tabular px-3 py-2 text-right text-fg-muted">
-                      {h.last_purchase_date}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable<Holder & { rank: number }>
+            columns={[
+              { key: "rank", header: "#", role: "context", align: "left", render: (h) => h.rank },
+              { key: "ticker", header: "Ticker", role: "identifier", render: (h) => h.ticker },
+              { key: "name", header: "Company", role: "context", align: "left", render: (h) => h.name },
+              { key: "listed", header: "Listed", role: "context", align: "left", render: (h) => h.list_location ?? "—" },
+              { key: "btc", header: "BTC held", role: "magnitude", num: (h) => h.btc_holding, unit: "BTC" },
+              { key: "lastbuy", header: "Last buy", role: "context", render: (h) => h.last_purchase_date },
+            ]}
+            rows={data.holders.map((h, i) => ({ ...h, rank: i + 1 }))}
+            getKey={(h) => h.ticker}
+            minWidth={560}
+          />
         </CardBody>
       </Card>
 

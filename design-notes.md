@@ -38,13 +38,18 @@ testable. Never re-implement it in a component.
 - **HoldingsTable** (/index-fund) — 11 flat columns → 6 role-based (Asset · Weight · Drift · Value · P&L · Why). Weight/Drift/P&L now encode magnitude; Target/Quantity/Avg-Entry/Last-Px/Mkt-column folded. *This was the worst table — the template.*
 - **SodexBalancesTable** (/settings/connect-sodex) — `<Num>` (killed `289.821858`→`289.82`), `<Action>` gates: no Withdraw with 0 available, no Transfer on a 0 balance.
 - **FundLeaderboard** (/etfs) — `<DataTable>` with a **diverging** Daily-Inflow bar; retired the ▲/▼ top-inflow/outflow badges (rule 4).
+- **PortfolioDashboard** (/portfolio) — open + closed tables → `<DataTable>`. P&L encoded as a magnitude bar (green up / red down); Side folded into the Asset cell; Stop/Target dropped; Close gated by `isPublicMode()`; `<Timestamp>` for age/closed.
+- **Signal performance** (/signals/performance) — by-tier, by-subtype, and receipts "Avg realized / Realized" columns now carry a proportional bar scaled to the column max. Rendered in the page's **editorial idiom** (inline `MagBar`, Fraunces/hairlines kept) — encoding without a re-skin.
+- **TreasuriesDashboard** (/treasuries) — Top-holders table → `<DataTable>` with **BTC-held** as a magnitude bar, so MSTR's dominance reads as length. `#` rank kept as context.
+- **Magnitude bar visibility** — bumped from ~15–20% → **45%** opacity, left-anchored proportion fill; `<DataTable>` rows given breathing room (taller, wider padding, row hover). The bars were technically present before but invisible; this is the change that made the pass *look* like a change.
 
 ### Still on the API-shape default (next passes, same recipe)
-PortfolioDashboard (open/closed tables — fold Stop/Target, encode P&L), performance
-receipts + by-tier/by-subtype (encode realized), SignalCard trade figures (lead =
-conviction), macro/treasuries/sectors tables, and the equal-weight stat rows on
-/app, /portfolio, /index-fund, /signals (apply the LEAD/SECONDARY/CONTEXT scale —
-one lead each). Ops/stub screens (/agents, /jobs, /system-health, /patterns,
+SignalCard trade figures (lead = conviction), macro/sectors returns tables
+(heterogeneous units — encode per-column or leave as coloured numbers), the
+treasuries *recent-purchases* table, and the equal-weight stat rows where a single
+lead is defensible. Note: several stat rows (home "Live snapshot", events StatsBar)
+are genuinely co-equal KPIs — forcing a hero there would be arbitrary, so they stay
+flat by design. Ops/stub screens (/agents, /jobs, /system-health, /patterns,
 /learnings, /calibration) are gated internal — migrate last.
 
 ## Make it stick
