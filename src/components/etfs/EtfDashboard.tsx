@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
-import { Stat } from "@/components/ui/Stat";
+import { HeroStat, SubStat } from "@/components/ui/HeroStat";
 import { fmtUsd } from "@/lib/format";
 import { cn } from "@/components/ui/cn";
 import { AumChart, type AumChartRow } from "./AumChart";
@@ -81,32 +81,34 @@ export function EtfDashboard() {
         </span>
       </div>
 
-      {/* Top stats */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat
+      {/* Headline: Daily Net Flow — the "what happened today" number. Others demoted below. */}
+      <div className="mt-2 flex flex-col gap-6">
+        <HeroStat
           label={`${symbol} Daily Net Flow`}
           value={fmtUsd(totals?.total_net_inflow)}
-          sub={totals?.date}
-          tone={
+          change={totals?.date}
+          changeTone={
             (totals?.total_net_inflow ?? 0) >= 0 ? "positive" : "negative"
           }
+          sub="net creations − redemptions today"
         />
-        <Stat
-          label={`${symbol} ETF AUM`}
-          value={fmtUsd(totals?.total_net_assets)}
-          sub="all funds combined"
-          tone="accent"
-        />
-        <Stat
-          label="Cum Net Inflow"
-          value={fmtUsd(totals?.cum_net_inflow)}
-          sub="since launch"
-        />
-        <Stat
-          label="Daily Volume Traded"
-          value={fmtUsd(totals?.total_value_traded)}
-          sub={totals?.date}
-        />
+        <div className="grid grid-cols-2 gap-x-10 md:grid-cols-3">
+          <SubStat
+            label={`${symbol} ETF AUM`}
+            value={fmtUsd(totals?.total_net_assets)}
+            sub="all funds combined"
+          />
+          <SubStat
+            label="Cum Net Inflow"
+            value={fmtUsd(totals?.cum_net_inflow)}
+            sub="since launch"
+          />
+          <SubStat
+            label="Daily Volume Traded"
+            value={fmtUsd(totals?.total_value_traded)}
+            sub={totals?.date}
+          />
+        </div>
       </div>
 
       {/* Charts */}

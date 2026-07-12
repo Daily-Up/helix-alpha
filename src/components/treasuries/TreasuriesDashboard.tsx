@@ -11,9 +11,8 @@
 
 import { useEffect, useState } from "react";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
-import { Stat } from "@/components/ui/Stat";
+import { HeroStat, SubStat } from "@/components/ui/HeroStat";
 import { isPublicMode } from "@/lib/public-mode";
-import { Badge } from "@/components/ui/Badge";
 import { DataTable } from "@/components/ui/DataTable";
 
 interface Stats {
@@ -104,36 +103,35 @@ export function TreasuriesDashboard() {
 
   return (
     <div className="flex flex-col gap-5">
-      {/* Stats */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat
-          label="Tracked treasuries"
-          value={data.stats.total_companies}
-          sub="public companies holding BTC"
-        />
-        <Stat
-          label="Acquired BTC (30d)"
-          value={fmtBtc(data.stats.net_btc_acquired_30d)}
-          sub={`across ${data.stats.acquiring_companies_30d} companies`}
-          tone={data.stats.net_btc_acquired_30d > 0 ? "positive" : "default"}
-        />
-        <Stat
-          label="USD spent (30d, disclosed)"
-          value={
-            data.stats.total_acq_cost_30d_usd != null
-              ? fmtUsdCompact(data.stats.total_acq_cost_30d_usd)
-              : "—"
-          }
-          sub="some treasuries don't disclose cost"
-          tone={
-            (data.stats.total_acq_cost_30d_usd ?? 0) > 0 ? "accent" : "default"
-          }
-        />
-        <Stat
+      {/* Stats — headline: Total BTC held; the rest demoted to supporting. */}
+      <div className="mt-2 flex flex-col gap-6">
+        <HeroStat
           label="Total BTC held"
           value={fmtBtc(data.stats.total_btc_held_latest)}
-          sub="aggregate latest snapshot"
+          sub={`aggregate across ${data.stats.total_companies} tracked public companies`}
         />
+        <div className="grid grid-cols-2 gap-x-10 md:max-w-[620px] md:grid-cols-3">
+          <SubStat
+            label="Acquired BTC (30d)"
+            value={fmtBtc(data.stats.net_btc_acquired_30d)}
+            sub={`across ${data.stats.acquiring_companies_30d} companies`}
+            tone={data.stats.net_btc_acquired_30d > 0 ? "positive" : "neutral"}
+          />
+          <SubStat
+            label="USD spent (30d)"
+            value={
+              data.stats.total_acq_cost_30d_usd != null
+                ? fmtUsdCompact(data.stats.total_acq_cost_30d_usd)
+                : "—"
+            }
+            sub="disclosed cost only"
+          />
+          <SubStat
+            label="Tracked treasuries"
+            value={String(data.stats.total_companies)}
+            sub="public companies holding BTC"
+          />
+        </div>
       </div>
 
       {/* Refresh */}
@@ -191,68 +189,19 @@ export function TreasuriesDashboard() {
           </span>
         </CardHeader>
         <CardBody className="!p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="border-b border-line bg-surface-2">
-                <tr className="text-[10px] uppercase tracking-wider text-fg-dim">
-                  <th className="px-3 py-2 text-left">Date</th>
-                  <th className="px-3 py-2 text-left">Ticker</th>
-                  <th className="px-3 py-2 text-left">Company</th>
-                  <th className="px-3 py-2 text-right">BTC bought</th>
-                  <th className="px-3 py-2 text-right">Holdings after</th>
-                  <th className="px-3 py-2 text-right">Cost (USD)</th>
-                  <th className="px-3 py-2 text-right">$/BTC</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line">
-                {data.recent.map((p, i) => (
-                  <tr
-                    key={`${p.ticker}-${p.date}-${i}`}
-                    className="text-xs transition-colors hover:bg-surface-2"
-                  >
-                    <td className="px-3 py-2 text-fg-muted whitespace-nowrap">
-                      {p.date}
-                    </td>
-                    <td className="px-3 py-2 font-mono font-medium text-fg">
-                      {p.ticker}
-                    </td>
-                    <td className="px-3 py-2 text-fg-muted">
-                      {p.company_name}
-                    </td>
-                    <td className="tabular px-3 py-2 text-right">
-                      <span
-                        className={
-                          p.btc_acq > 0
-                            ? "text-positive"
-                            : p.btc_acq < 0
-                              ? "text-negative"
-                              : "text-fg-muted"
-                        }
-                      >
-                        {p.btc_acq > 0 ? "+" : ""}
-                        {fmtBtc(p.btc_acq)}
-                      </span>
-                    </td>
-                    <td className="tabular px-3 py-2 text-right text-fg">
-                      {fmtBtc(p.btc_holding)}
-                    </td>
-                    <td className="tabular px-3 py-2 text-right text-fg-muted">
-                      {p.acq_cost_usd != null ? (
-                        fmtUsdCompact(p.acq_cost_usd)
-                      ) : (
-                        <Badge tone="default">undisclosed</Badge>
-                      )}
-                    </td>
-                    <td className="tabular px-3 py-2 text-right text-fg-muted">
-                      {p.avg_btc_cost_usd != null
-                        ? `$${Math.round(p.avg_btc_cost_usd).toLocaleString()}`
-                        : "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable<Purchase>
+            columns={[
+              { key: "date", header: "Date", role: "context", align: "left", render: (p) => p.date },
+              { key: "ticker", header: "Ticker", role: "identifier", render: (p) => p.ticker },
+              { key: "company", header: "Company", role: "context", align: "left", render: (p) => p.company_name },
+              { key: "btc", header: "BTC bought", role: "magnitude", num: (p) => p.btc_acq, unit: "BTC", sign: true, tone: "auto" },
+              { key: "held", header: "Holdings after", role: "context", num: (p) => p.btc_holding, unit: "BTC" },
+              { key: "cost", header: "Cost", role: "context", num: (p) => p.acq_cost_usd, unit: "$" },
+            ]}
+            rows={data.recent}
+            getKey={(p, i) => `${p.ticker}-${p.date}-${i}`}
+            minWidth={640}
+          />
         </CardBody>
       </Card>
     </div>

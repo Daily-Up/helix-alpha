@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
-import { fmtFracPct, fmtRelative } from "@/lib/format";
-import { cn } from "@/components/ui/cn";
+import { fmtRelative } from "@/lib/format";
+import { DataTable, type Column } from "@/components/ui/DataTable";
 
 interface SectorRow {
   snapshot_at: number;
@@ -95,57 +95,41 @@ function SectorDominance({ sectors }: { sectors: SectorRow[] }) {
   const sorted = [...sectors].sort(
     (a, b) => (b.marketcap_dom ?? 0) - (a.marketcap_dom ?? 0),
   );
-  const maxDom = Math.max(...sorted.map((s) => s.marketcap_dom ?? 0), 0.01);
+
+  const columns: Column<SectorRow>[] = [
+    {
+      key: "sector",
+      header: "Sector",
+      role: "identifier",
+      align: "left",
+      render: (s) => s.sector_name,
+    },
+    {
+      key: "dom",
+      header: "Mkt Dominance",
+      role: "magnitude",
+      num: (s) => (s.marketcap_dom == null ? null : s.marketcap_dom * 100),
+      unit: "%",
+      dp: 2,
+    },
+    {
+      key: "chg",
+      header: "24h",
+      role: "context",
+      num: (s) => (s.change_pct_24h == null ? null : s.change_pct_24h * 100),
+      unit: "%",
+      sign: true,
+      tone: "auto",
+    },
+  ];
 
   return (
-    <div className="flex flex-col gap-1.5">
-      {sorted.map((s) => {
-        const dom = s.marketcap_dom ?? 0;
-        const widthPct = (dom / maxDom) * 100;
-        const change = s.change_pct_24h ?? 0;
-        const tone =
-          change > 0.005
-            ? "bg-positive/40"
-            : change < -0.005
-              ? "bg-negative/40"
-              : "bg-line-2";
-        return (
-          <div
-            key={s.sector_name}
-            className="grid grid-cols-[100px_1fr_70px_70px] items-center gap-3 text-xs"
-          >
-            <span className="font-medium text-fg">{s.sector_name}</span>
-            <div className="relative h-5 overflow-hidden rounded bg-surface-2">
-              <div
-                className={cn("h-full rounded transition-all", tone)}
-                style={{ width: `${widthPct}%` }}
-              />
-            </div>
-            <span className="tabular text-right text-fg-muted">
-              {(dom * 100).toFixed(2)}%
-            </span>
-            <span
-              className={cn(
-                "tabular text-right tabular-nums",
-                change > 0
-                  ? "text-positive"
-                  : change < 0
-                    ? "text-negative"
-                    : "text-fg-muted",
-              )}
-            >
-              {fmtFracPct(change)}
-            </span>
-          </div>
-        );
-      })}
-      <div className="mt-2 grid grid-cols-[100px_1fr_70px_70px] gap-3 px-0.5 text-[10px] uppercase tracking-wider text-fg-dim">
-        <span>Sector</span>
-        <span>Dominance</span>
-        <span className="text-right">Mkt Dom</span>
-        <span className="text-right">24h</span>
-      </div>
-    </div>
+    <DataTable
+      columns={columns}
+      rows={sorted}
+      getKey={(s) => s.sector_name}
+      minWidth={420}
+    />
   );
 }
 
@@ -164,80 +148,87 @@ function IndexMomentumTable({ indices }: { indices: IndexRow[] }) {
     (a, b) => (b.roi_7d ?? -Infinity) - (a.roi_7d ?? -Infinity),
   );
 
-  return (
-    <div className="overflow-hidden">
-      <table className="w-full">
-        <thead className="border-b border-line bg-surface-2">
-          <tr className="text-[10px] uppercase tracking-wider text-fg-dim">
-            <th className="px-3 py-2 text-left">Index</th>
-            <th className="px-3 py-2 text-right">Price</th>
-            <th className="px-3 py-2 text-right">24h</th>
-            <th className="px-3 py-2 text-right">7d</th>
-            <th className="px-3 py-2 text-right">1m</th>
-            <th className="px-3 py-2 text-right">3m</th>
-            <th className="px-3 py-2 text-right">1y</th>
-            <th className="px-3 py-2 text-right">YTD</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-line">
-          {sorted.map((row, idx) => (
-            <tr
-              key={row.ticker}
-              className="text-xs transition-colors hover:bg-surface-2"
-            >
-              <td className="px-3 py-2">
-                <div className="flex items-baseline gap-2">
-                  <span className="tabular text-fg-dim">{idx + 1}</span>
-                  <span className="font-mono font-medium text-fg">
-                    {row.ticker.toLowerCase().startsWith("ssi")
-                      ? `${row.ticker.slice(3).toUpperCase()}.ssi`
-                      : row.ticker}
-                  </span>
-                </div>
-                <div className="text-[10px] text-fg-dim">{row.name}</div>
-              </td>
-              <td className="tabular px-3 py-2 text-right text-fg">
-                {row.price != null ? `$${row.price.toFixed(2)}` : "—"}
-              </td>
-              <PctCell value={row.change_pct_24h} />
-              <PctCell value={row.roi_7d} highlight />
-              <PctCell value={row.roi_1m} />
-              <PctCell value={row.roi_3m} />
-              <PctCell value={row.roi_1y} />
-              <PctCell value={row.ytd} />
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
+  const columns: Column<IndexRow>[] = [
+    {
+      key: "index",
+      header: "Index",
+      role: "identifier",
+      align: "left",
+      render: (r) => (
+        <div className="flex flex-col leading-tight">
+          <span className="font-medium text-fg">
+            {r.ticker.toLowerCase().startsWith("ssi")
+              ? `${r.ticker.slice(3).toUpperCase()}.ssi`
+              : r.ticker}
+          </span>
+          <span className="text-[10px] text-fg-dim">{r.name}</span>
+        </div>
+      ),
+    },
+    { key: "price", header: "Price", role: "context", num: (r) => r.price, unit: "$", dp: 2 },
+    {
+      key: "d7",
+      header: "7d",
+      role: "magnitude",
+      num: (r) => (r.roi_7d == null ? null : r.roi_7d * 100),
+      unit: "%",
+      sign: true,
+      tone: "auto",
+    },
+    {
+      key: "d24h",
+      header: "24h",
+      role: "context",
+      num: (r) => (r.change_pct_24h == null ? null : r.change_pct_24h * 100),
+      unit: "%",
+      sign: true,
+      tone: "auto",
+    },
+    {
+      key: "m1",
+      header: "1m",
+      role: "context",
+      num: (r) => (r.roi_1m == null ? null : r.roi_1m * 100),
+      unit: "%",
+      sign: true,
+      tone: "auto",
+    },
+    {
+      key: "m3",
+      header: "3m",
+      role: "context",
+      num: (r) => (r.roi_3m == null ? null : r.roi_3m * 100),
+      unit: "%",
+      sign: true,
+      tone: "auto",
+    },
+    {
+      key: "y1",
+      header: "1y",
+      role: "context",
+      num: (r) => (r.roi_1y == null ? null : r.roi_1y * 100),
+      unit: "%",
+      sign: true,
+      tone: "auto",
+    },
+    {
+      key: "ytd",
+      header: "YTD",
+      role: "context",
+      num: (r) => (r.ytd == null ? null : r.ytd * 100),
+      unit: "%",
+      sign: true,
+      tone: "auto",
+    },
+  ];
 
-function PctCell({
-  value,
-  highlight = false,
-}: {
-  value: number | null;
-  highlight?: boolean;
-}) {
-  const tone =
-    value == null
-      ? "text-fg-dim"
-      : value > 0
-        ? "text-positive"
-        : value < 0
-          ? "text-negative"
-          : "text-fg-muted";
   return (
-    <td
-      className={cn(
-        "tabular px-3 py-2 text-right",
-        tone,
-        highlight && "font-medium",
-      )}
-    >
-      {value == null ? "—" : fmtFracPct(value)}
-    </td>
+    <DataTable
+      columns={columns}
+      rows={sorted}
+      getKey={(r) => r.ticker}
+      minWidth={640}
+    />
   );
 }
 

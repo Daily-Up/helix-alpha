@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Stat } from "@/components/ui/Stat";
 import { HeroStat, SubStat } from "@/components/ui/HeroStat";
+import { Num } from "@/components/ui/Num";
 import { StatSkeleton, ChartSkeleton, PanelSkeleton } from "@/components/ui/Skeleton";
 import { useBulkMountReveal } from "@/hooks/useMountReveal";
 import { fmtPct, fmtUsd } from "@/lib/format";
@@ -327,71 +328,38 @@ export function IndexDashboard() {
           <CardBody className="grid grid-cols-2 gap-2 text-xs">
             <RiskRow
               label="Return"
-              value={fmtPct(data.risk.return_pct ?? 0)}
-              tone={
-                (data.risk.return_pct ?? 0) > 0
-                  ? "positive"
-                  : (data.risk.return_pct ?? 0) < 0
-                    ? "negative"
-                    : "default"
+              value={
+                <Num value={data.risk.return_pct} unit="%" sign dp={1} tone="auto" />
               }
             />
             <RiskRow
               label="vs BTC"
-              value={fmtPct(data.risk.alpha_vs_btc_pct ?? 0)}
-              sub={`BTC ${fmtPct(data.risk.btc_return_pct ?? 0)}`}
-              tone={
-                (data.risk.alpha_vs_btc_pct ?? 0) > 0
-                  ? "positive"
-                  : (data.risk.alpha_vs_btc_pct ?? 0) < 0
-                    ? "negative"
-                    : "default"
+              value={
+                <Num value={data.risk.alpha_vs_btc_pct} unit="%" sign dp={1} tone="auto" />
               }
+              sub={`BTC ${fmtPct(data.risk.btc_return_pct ?? 0)}`}
             />
             <RiskRow
               label="Max drawdown"
               value={
-                data.risk.max_drawdown_pct != null
-                  ? `${data.risk.max_drawdown_pct.toFixed(1)}%`
-                  : "—"
+                <Num value={data.risk.max_drawdown_pct} unit="%" dp={1} tone="negative" />
               }
-              tone="negative"
             />
             <RiskRow
               label="Current DD"
               value={
-                data.risk.current_drawdown_pct != null
-                  ? `${data.risk.current_drawdown_pct.toFixed(1)}%`
-                  : "—"
-              }
-              tone={
-                (data.risk.current_drawdown_pct ?? 0) < -1
-                  ? "negative"
-                  : "default"
+                <Num value={data.risk.current_drawdown_pct} unit="%" dp={1} tone="auto" />
               }
             />
             <RiskRow
               label="Vol (30d ann.)"
               value={
-                data.risk.vol_30d_annualized_pct != null
-                  ? `${data.risk.vol_30d_annualized_pct.toFixed(1)}%`
-                  : "—"
+                <Num value={data.risk.vol_30d_annualized_pct} unit="%" dp={1} />
               }
             />
             <RiskRow
               label="Sharpe (rf=0)"
-              value={
-                data.risk.sharpe != null
-                  ? data.risk.sharpe.toFixed(2)
-                  : "—"
-              }
-              tone={
-                (data.risk.sharpe ?? 0) > 1
-                  ? "positive"
-                  : (data.risk.sharpe ?? 0) < 0
-                    ? "negative"
-                    : "default"
-              }
+              value={<Num value={data.risk.sharpe} dp={2} tone="auto" />}
             />
           </CardBody>
         </Card>
@@ -455,34 +423,25 @@ export function IndexDashboard() {
 }
 
 /**
- * One row in the Risk &amp; performance card. Two-line layout: big number
- * with optional small sub-text. Tone tints the value (green/red/neutral).
+ * One row in the Risk &amp; performance card. Two-line layout: number
+ * (routed through <Num>, which owns its own tone) with optional small
+ * sub-text.
  */
 function RiskRow({
   label,
   value,
   sub,
-  tone = "default",
 }: {
   label: string;
-  value: string;
+  value: ReactNode;
   sub?: string;
-  tone?: "positive" | "negative" | "default";
 }) {
-  const valueClass =
-    tone === "positive"
-      ? "text-positive"
-      : tone === "negative"
-        ? "text-negative"
-        : "text-fg";
   return (
     <div className="flex flex-col gap-0.5">
       <span className="text-[10px] uppercase tracking-wider text-fg-dim">
         {label}
       </span>
-      <span className={cn("tabular text-sm font-semibold", valueClass)}>
-        {value}
-      </span>
+      <span className="tabular text-sm font-semibold">{value}</span>
       {sub ? <span className="text-[10px] text-fg-dim">{sub}</span> : null}
     </div>
   );

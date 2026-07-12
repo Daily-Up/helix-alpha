@@ -8,11 +8,13 @@
  * drill into any individual agent decision.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { fmtRelative } from "@/lib/format";
+import { Num } from "@/components/ui/Num";
+import { DataTable } from "@/components/ui/DataTable";
+import { Timestamp } from "@/components/ui/Timestamp";
 import { BuildathonModeCard } from "./BuildathonModeCard";
 
 interface ToolFreq {
@@ -97,18 +99,28 @@ export function AgentsDashboard() {
 
       {/* 24h overview */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-        <Stat label="Runs (24h)" value={data.totals_24h.runs.toString()} />
+        <Stat
+          label="Runs (24h)"
+          value={<Num value={data.totals_24h.runs} tier="lead" />}
+        />
         <Stat
           label="Successful"
-          value={data.per_agent_24h
-            .reduce((acc, a) => acc + a.ok, 0)
-            .toString()}
+          value={
+            <Num
+              value={data.per_agent_24h.reduce((acc, a) => acc + a.ok, 0)}
+              tier="secondary"
+            />
+          }
         />
         <Stat
           label="Errored"
-          value={data.per_agent_24h
-            .reduce((acc, a) => acc + a.errored, 0)
-            .toString()}
+          value={
+            <Num
+              value={data.per_agent_24h.reduce((acc, a) => acc + a.errored, 0)}
+              tier="secondary"
+              tone="negative"
+            />
+          }
         />
       </div>
 
@@ -123,25 +135,40 @@ export function AgentsDashboard() {
               No agent runs in the last 24 hours yet.
             </div>
           ) : (
-            <ul className="divide-y divide-line">
-              {data.per_agent_24h.map((a) => (
-                <li
-                  key={a.agent_name}
-                  className="grid grid-cols-[1fr_80px_80px_80px] items-center gap-3 px-4 py-2 text-xs"
-                >
-                  <span className="font-mono font-medium text-fg">
-                    {a.agent_name}
-                  </span>
-                  <span className="text-fg-muted">
-                    {a.runs} run{a.runs === 1 ? "" : "s"}
-                  </span>
-                  <span className="text-positive">{a.ok} ok</span>
-                  <span className={a.errored > 0 ? "text-negative" : "text-fg-dim"}>
-                    {a.errored} error{a.errored === 1 ? "" : "s"}
-                  </span>
-                </li>
-              ))}
-            </ul>
+            <DataTable<AgentSummary>
+              rows={data.per_agent_24h}
+              getKey={(a) => a.agent_name}
+              minWidth={420}
+              columns={[
+                {
+                  key: "agent",
+                  header: "Agent",
+                  role: "identifier",
+                  render: (a) => a.agent_name,
+                },
+                {
+                  key: "runs",
+                  header: "Runs",
+                  role: "magnitude",
+                  num: (a) => a.runs,
+                },
+                {
+                  key: "errored",
+                  header: "Errors",
+                  role: "context",
+                  num: (a) => a.errored,
+                  tone: "negative",
+                },
+                {
+                  key: "cost",
+                  header: "Cost",
+                  role: "context",
+                  num: (a) => a.total_cost_usd,
+                  unit: "$",
+                  dp: 2,
+                },
+              ]}
+            />
           )}
         </CardBody>
       </Card>
@@ -170,7 +197,7 @@ export function AgentsDashboard() {
                       <span className="text-fg-muted">
                         {TOOL_LABEL[t.tool] ?? t.tool}
                       </span>
-                      <span className="font-mono text-fg-dim">{t.calls}</span>
+                      <Num value={t.calls} tier="context" />
                     </div>
                     <div className="h-1.5 overflow-hidden rounded bg-surface-2">
                       <div
@@ -207,10 +234,10 @@ export function AgentsDashboard() {
                   : t.event_id
                     ? null
                     : null;
-                const duration =
+                const durationSec =
                   t.finished_at != null
-                    ? `${((t.finished_at - t.started_at) / 1000).toFixed(1)}s`
-                    : "—";
+                    ? (t.finished_at - t.started_at) / 1000
+                    : null;
                 const toolCalls = t.steps.filter(
                   (s) => s.type === "tool_call",
                 ).length;
@@ -223,11 +250,19 @@ export function AgentsDashboard() {
                     <span className="truncate font-mono text-fg-dim" title={t.id}>
                       {t.event_id ? `event ${shortId(t.event_id)}` : t.id.slice(0, 8)}
                     </span>
-                    <span className="tabular text-right text-fg-muted">
-                      {toolCalls} call{toolCalls === 1 ? "" : "s"}
+                    <span className="text-right text-fg-muted">
+                      <Num value={toolCalls} tier="context" /> call
+                      {toolCalls === 1 ? "" : "s"}
                     </span>
                     <span className="tabular text-right text-fg-dim">
-                      {fmtRelative(t.started_at)} · {duration}
+                      <Timestamp ms={t.started_at} mode="relative" /> ·{" "}
+                      {durationSec != null ? (
+                        <>
+                          <Num value={durationSec} dp={1} tier="context" />s
+                        </>
+                      ) : (
+                        "—"
+                      )}
                     </span>
                   </div>
                 );
@@ -254,16 +289,14 @@ export function AgentsDashboard() {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value }: { label: string; value: ReactNode }) {
   return (
     <Card>
       <CardBody>
         <div className="text-[10px] uppercase tracking-wider text-fg-dim">
           {label}
         </div>
-        <div className="mt-1 font-mono text-2xl font-semibold text-fg">
-          {value}
-        </div>
+        <div className="mt-1">{value}</div>
       </CardBody>
     </Card>
   );

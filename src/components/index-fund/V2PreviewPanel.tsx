@@ -11,7 +11,7 @@
  * "ACCEPTANCE: FAILED — see details" and v2 cannot graduate to live.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   CartesianGrid,
   Line,
@@ -24,6 +24,8 @@ import {
 } from "recharts";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { cn } from "@/components/ui/cn";
+import { Num } from "@/components/ui/Num";
+import { DataTable } from "@/components/ui/DataTable";
 
 interface Criterion {
   key: string;
@@ -326,9 +328,9 @@ export function V2PreviewPanel() {
                   </span>
                 </div>
                 <div className="mt-1 text-fg-muted">
-                  observed <span className="tabular text-fg">{c.observed}</span>
+                  observed <Num value={c.observed} dp={2} tier="secondary" />
                   {" · "}threshold{" "}
-                  <span className="tabular text-fg">{c.threshold}</span>
+                  <Num value={c.threshold} dp={2} tier="secondary" />
                 </div>
                 <div className="mt-0.5 text-[11px] text-fg-dim">{c.detail}</div>
                 {c.marginal_note ? (
@@ -408,16 +410,12 @@ export function V2PreviewPanel() {
             </div>
             {data.live_summary ? (
               <div className="mt-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-3">
-                <Stat label="v2 return" value={fmtPct(data.live_summary.v2_return_pct)} tone={data.live_summary.v2_return_pct >= 0 ? "positive" : "negative"} />
-                <Stat label="v2 max DD" value={`${data.live_summary.v2_max_dd_pct.toFixed(1)}%`} tone="negative" />
-                <Stat label="v2 Sharpe" value={data.live_summary.v2_sharpe?.toFixed(2) ?? "—"} />
-                {data.live_summary.btc_return_pct != null ? (
-                  <Stat label="BTC return" value={fmtPct(data.live_summary.btc_return_pct)} tone={data.live_summary.btc_return_pct >= 0 ? "positive" : "negative"} />
-                ) : null}
-                {data.live_summary.btc_max_dd_pct != null ? (
-                  <Stat label="BTC max DD" value={`${data.live_summary.btc_max_dd_pct.toFixed(1)}%`} tone="negative" />
-                ) : null}
-                <Stat label="naive ret (ctx)" value={fmtPct(data.live_summary.naive_return_pct)} tone={data.live_summary.naive_return_pct >= 0 ? "positive" : "negative"} />
+                <Stat label="v2 return" value={<Num value={data.live_summary.v2_return_pct} unit="%" sign dp={1} tone="auto" />} />
+                <Stat label="v2 max DD" value={<Num value={data.live_summary.v2_max_dd_pct} unit="%" dp={1} tone="negative" />} />
+                <Stat label="v2 Sharpe" value={<Num value={data.live_summary.v2_sharpe} dp={2} tone="auto" />} />
+                <Stat label="BTC return" value={<Num value={data.live_summary.btc_return_pct} unit="%" sign dp={1} tone="auto" />} />
+                <Stat label="BTC max DD" value={<Num value={data.live_summary.btc_max_dd_pct} unit="%" dp={1} tone="negative" />} />
+                <Stat label="naive ret (ctx)" value={<Num value={data.live_summary.naive_return_pct} unit="%" sign dp={1} tone="auto" tier="context" />} />
               </div>
             ) : null}
           </CardBody>
@@ -434,65 +432,64 @@ export function V2PreviewPanel() {
             </span>
           </CardHeader>
           <CardBody className="!p-0">
-            <table className="w-full text-xs">
-              <thead className="border-b border-line bg-surface-2">
-                <tr className="text-[10px] uppercase tracking-wider text-fg-dim">
-                  <th className="px-3 py-2 text-left">Window</th>
-                  <th className="px-3 py-2 text-right">v2 ret</th>
-                  <th className="px-3 py-2 text-right">v2 DD</th>
-                  <th className="px-3 py-2 text-right">BTC DD</th>
-                  <th className="px-3 py-2 text-right">DD ratio</th>
-                  <th className="px-3 py-2 text-right">v2 SR</th>
-                  <th className="px-3 py-2 text-right">BTC SR</th>
-                  <th className="px-3 py-2 text-right">SR Δ</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line">
-                {data.stress_results.map((r, i) => {
-                  const ratio =
-                    Math.abs(r.btc_max_dd_pct) > 0
-                      ? Math.abs(r.v2_max_dd_pct) / Math.abs(r.btc_max_dd_pct)
-                      : 0;
-                  const ratioFail = ratio > 1.5;
-                  const v2s = r.v2_sharpe ?? 0;
-                  const btcs = r.btc_sharpe ?? 0;
-                  const gap = v2s - btcs;
-                  const gapFail = gap < 0;
-                  return (
-                    <tr key={i} className="transition-colors hover:bg-surface-2">
-                      <td className="px-3 py-2 text-fg">
-                        <div className="font-mono text-[11px]">{r.label}</div>
-                        <div className="text-[10px] text-fg-dim">
-                          {r.start_date} → {r.end_date}
-                        </div>
-                      </td>
-                      <td className={cn("tabular px-3 py-2 text-right", r.v2_return_pct >= 0 ? "text-positive" : "text-negative")}>
-                        {fmtPct(r.v2_return_pct)}
-                      </td>
-                      <td className="tabular px-3 py-2 text-right text-negative">
-                        {r.v2_max_dd_pct.toFixed(1)}%
-                      </td>
-                      <td className="tabular px-3 py-2 text-right text-negative">
-                        {r.btc_max_dd_pct.toFixed(1)}%
-                      </td>
-                      <td className={cn("tabular px-3 py-2 text-right", ratioFail ? "text-negative font-semibold" : "text-fg")}>
+            <DataTable<StressResult>
+              minWidth={720}
+              getKey={(_r, i) => String(i)}
+              rows={data.stress_results}
+              columns={[
+                {
+                  key: "window",
+                  header: "Window",
+                  role: "identifier",
+                  align: "left",
+                  render: (r) => (
+                    <div>
+                      <div className="font-mono text-[11px]">{r.label}</div>
+                      <div className="text-[10px] text-fg-dim">
+                        {r.start_date} → {r.end_date}
+                      </div>
+                    </div>
+                  ),
+                },
+                { key: "v2ret", header: "v2 ret", role: "magnitude", num: (r) => r.v2_return_pct, unit: "%", sign: true, dp: 1, tone: "auto" },
+                { key: "v2dd", header: "v2 DD", role: "context", num: (r) => r.v2_max_dd_pct, unit: "%", dp: 1, tone: "negative" },
+                { key: "btcdd", header: "BTC DD", role: "context", num: (r) => r.btc_max_dd_pct, unit: "%", dp: 1, tone: "negative" },
+                {
+                  key: "ratio",
+                  header: "DD ratio",
+                  role: "context",
+                  align: "right",
+                  render: (r) => {
+                    const ratio =
+                      Math.abs(r.btc_max_dd_pct) > 0
+                        ? Math.abs(r.v2_max_dd_pct) / Math.abs(r.btc_max_dd_pct)
+                        : 0;
+                    return (
+                      <span className={cn("tabular-nums", ratio > 1.5 ? "text-negative font-semibold" : "text-fg")}>
                         {ratio.toFixed(2)}×
-                      </td>
-                      <td className="tabular px-3 py-2 text-right text-fg">
-                        {r.v2_sharpe != null ? r.v2_sharpe.toFixed(2) : "—"}
-                      </td>
-                      <td className="tabular px-3 py-2 text-right text-fg-muted">
-                        {r.btc_sharpe != null ? r.btc_sharpe.toFixed(2) : "—"}
-                      </td>
-                      <td className={cn("tabular px-3 py-2 text-right font-semibold", gapFail ? "text-negative" : "text-positive")}>
+                      </span>
+                    );
+                  },
+                },
+                { key: "v2sr", header: "v2 SR", role: "context", num: (r) => r.v2_sharpe, dp: 2 },
+                { key: "btcsr", header: "BTC SR", role: "context", num: (r) => r.btc_sharpe, dp: 2 },
+                {
+                  key: "srdelta",
+                  header: "SR Δ",
+                  role: "context",
+                  align: "right",
+                  render: (r) => {
+                    const gap = (r.v2_sharpe ?? 0) - (r.btc_sharpe ?? 0);
+                    return (
+                      <span className={cn("tabular-nums font-semibold", gap < 0 ? "text-negative" : "text-positive")}>
                         {gap >= 0 ? "+" : ""}
                         {gap.toFixed(2)}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                      </span>
+                    );
+                  },
+                },
+              ]}
+            />
           </CardBody>
         </Card>
       ) : null}
@@ -503,30 +500,18 @@ export function V2PreviewPanel() {
 function Stat({
   label,
   value,
-  tone = "default",
 }: {
   label: string;
-  value: string;
-  tone?: "positive" | "negative" | "default";
+  value: ReactNode;
 }) {
-  const cls =
-    tone === "positive"
-      ? "text-positive"
-      : tone === "negative"
-        ? "text-negative"
-        : "text-fg";
   return (
     <div className="rounded border border-line bg-surface-2 px-2 py-1.5">
       <div className="text-[9px] uppercase tracking-wider text-fg-dim">
         {label}
       </div>
-      <div className={cn("tabular text-sm font-semibold", cls)}>{value}</div>
+      <div className="text-sm font-semibold">{value}</div>
     </div>
   );
-}
-
-function fmtPct(n: number): string {
-  return `${n >= 0 ? "+" : ""}${n.toFixed(1)}%`;
 }
 
 /**
@@ -569,8 +554,8 @@ function MarginalCard({
             <>
               <p>
                 <strong className="text-warning">C4 marginal pass</strong> —
-                observed {criterion.observed.toFixed(2)} vs threshold{" "}
-                {criterion.threshold.toFixed(2)}, gap{" "}
+                observed <Num value={criterion.observed} dp={2} tier="context" />{" "}
+                vs threshold <Num value={criterion.threshold} dp={2} tier="context" />, gap{" "}
                 {(
                   ((criterion.observed - criterion.threshold) /
                     criterion.threshold) *
@@ -589,8 +574,12 @@ function MarginalCard({
                 <ul className="list-disc pl-5 text-[11px] text-fg-muted">
                   {bearDetails.map((b) => (
                     <li key={b.label}>
-                      {b.label} — BTC ret {b.btcRet.toFixed(1)}%, v2 DD
-                      ratio <strong>{b.ratio.toFixed(2)}</strong>
+                      {b.label} — BTC ret{" "}
+                      <Num value={b.btcRet} unit="%" sign dp={1} tone="auto" tier="context" />, v2 DD
+                      ratio{" "}
+                      <strong>
+                        <Num value={b.ratio} dp={2} tier="context" />
+                      </strong>
                     </li>
                   ))}
                 </ul>

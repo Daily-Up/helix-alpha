@@ -22,7 +22,8 @@ import {
   YAxis,
 } from "recharts";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
-import { cn } from "@/components/ui/cn";
+import { DataTable, type Column } from "@/components/ui/DataTable";
+import { Num } from "@/components/ui/Num";
 
 interface ReplayPayload {
   start_date: string;
@@ -84,6 +85,34 @@ export function StressTestsPanel() {
       </Card>
     );
   }
+
+  // 9 hand-built columns → role-based. AlphaCore return and α-vs-BTC carry
+  // magnitude bars (own-column scaled, homogeneous %); BTC ret, both DDs,
+  // Sharpe, Rebalances and Days fold to muted context.
+  const columns: Column<ReplayPayload>[] = [
+    {
+      key: "period",
+      header: "Period",
+      role: "identifier",
+      align: "left",
+      render: (r) => (
+        <div>
+          <div className="font-mono text-[11px]">{r.label}</div>
+          <div className="text-[10px] text-fg-dim">
+            {r.start_date} → {r.end_date}
+          </div>
+        </div>
+      ),
+    },
+    { key: "ret", header: "AlphaCore", role: "magnitude", num: (r) => r.return_pct, unit: "%", sign: true, dp: 1, tone: "auto" },
+    { key: "btc", header: "BTC", role: "context", num: (r) => r.btc_metrics.return_pct, unit: "%", sign: true, dp: 1, tone: "auto" },
+    { key: "alpha", header: "α vs BTC", role: "magnitude", num: (r) => r.alpha_vs_btc_pct, unit: "%", sign: true, dp: 1, tone: "auto" },
+    { key: "dd", header: "AlphaCore DD", role: "context", num: (r) => r.max_drawdown_pct, unit: "%", dp: 1, tone: "negative" },
+    { key: "btcdd", header: "BTC DD", role: "context", num: (r) => r.btc_metrics.max_drawdown_pct, unit: "%", dp: 1, tone: "negative" },
+    { key: "sharpe", header: "Sharpe", role: "context", num: (r) => r.sharpe, dp: 2 },
+    { key: "rebs", header: "Rebalances", role: "context", num: (r) => r.rebalance_count },
+    { key: "days", header: "Days", role: "context", num: (r) => r.sample_days },
+  ];
 
   return (
     <div className="flex flex-col gap-4">
@@ -194,69 +223,12 @@ export function StressTestsPanel() {
           </span>
         </CardHeader>
         <CardBody className="!p-0">
-          <table className="w-full text-xs">
-            <thead className="border-b border-line bg-surface-2">
-              <tr className="text-[10px] uppercase tracking-wider text-fg-dim">
-                <th className="px-3 py-2 text-left">Period</th>
-                <th className="px-3 py-2 text-right">AlphaCore</th>
-                <th className="px-3 py-2 text-right">BTC</th>
-                <th className="px-3 py-2 text-right">α vs BTC</th>
-                <th className="px-3 py-2 text-right">AlphaCore DD</th>
-                <th className="px-3 py-2 text-right">BTC DD</th>
-                <th className="px-3 py-2 text-right">Sharpe</th>
-                <th className="px-3 py-2 text-right">Rebalances</th>
-                <th className="px-3 py-2 text-right">Days</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line">
-              {data.replays.map((r) => (
-                <tr
-                  key={r.start_date + "-" + r.end_date}
-                  className="transition-colors hover:bg-surface-2"
-                >
-                  <td className="px-3 py-2 text-fg">
-                    <div className="font-mono text-[11px]">{r.label}</div>
-                    <div className="text-[10px] text-fg-dim">
-                      {r.start_date} → {r.end_date}
-                    </div>
-                  </td>
-                  <td className={cn("tabular px-3 py-2 text-right", r.return_pct > 0 ? "text-positive" : "text-negative")}>
-                    {fmtPct(r.return_pct)}
-                  </td>
-                  <td className={cn("tabular px-3 py-2 text-right", r.btc_metrics.return_pct > 0 ? "text-positive" : "text-negative")}>
-                    {fmtPct(r.btc_metrics.return_pct)}
-                  </td>
-                  <td
-                    className={cn(
-                      "tabular px-3 py-2 text-right",
-                      (r.alpha_vs_btc_pct ?? 0) > 0
-                        ? "text-positive"
-                        : (r.alpha_vs_btc_pct ?? 0) < 0
-                          ? "text-negative"
-                          : "",
-                    )}
-                  >
-                    {r.alpha_vs_btc_pct != null ? fmtPct(r.alpha_vs_btc_pct) : "—"}
-                  </td>
-                  <td className="tabular px-3 py-2 text-right text-negative">
-                    {r.max_drawdown_pct.toFixed(1)}%
-                  </td>
-                  <td className="tabular px-3 py-2 text-right text-negative">
-                    {r.btc_metrics.max_drawdown_pct.toFixed(1)}%
-                  </td>
-                  <td className="tabular px-3 py-2 text-right text-fg">
-                    {r.sharpe != null ? r.sharpe.toFixed(2) : "—"}
-                  </td>
-                  <td className="tabular px-3 py-2 text-right text-fg-muted">
-                    {r.rebalance_count}
-                  </td>
-                  <td className="tabular px-3 py-2 text-right text-fg-dim">
-                    {r.sample_days}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <DataTable
+            columns={columns}
+            rows={data.replays}
+            getKey={(r) => r.start_date + "-" + r.end_date}
+            minWidth={720}
+          />
         </CardBody>
       </Card>
     </div>
@@ -272,32 +244,18 @@ function ReplayStat({
   value: number | null;
   kind: "pct" | "pct_neg" | "raw";
 }) {
-  const display =
-    value == null
-      ? "—"
-      : kind === "raw"
-        ? value.toFixed(2)
-        : `${kind === "pct" && value > 0 ? "+" : ""}${value.toFixed(1)}%`;
-  const tone =
-    value == null
-      ? "text-fg-dim"
-      : kind === "pct"
-        ? value > 0
-          ? "text-positive"
-          : value < 0
-            ? "text-negative"
-            : "text-fg"
-        : kind === "pct_neg"
-          ? "text-negative"
-          : "text-fg";
   return (
     <div className="rounded border border-line bg-surface-2 px-2 py-1">
       <div className="text-[9px] uppercase tracking-wider text-fg-dim">{label}</div>
-      <div className={cn("tabular text-[11px] font-semibold", tone)}>{display}</div>
+      <div className="mt-0.5 font-semibold">
+        {kind === "raw" ? (
+          <Num value={value} dp={2} tier="context" />
+        ) : kind === "pct_neg" ? (
+          <Num value={value} unit="%" dp={1} tone="negative" tier="context" />
+        ) : (
+          <Num value={value} unit="%" sign dp={1} tone="auto" tier="context" />
+        )}
+      </div>
     </div>
   );
-}
-
-function fmtPct(n: number): string {
-  return `${n >= 0 ? "+" : ""}${n.toFixed(1)}%`;
 }

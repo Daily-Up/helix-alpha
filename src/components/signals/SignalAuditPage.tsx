@@ -22,7 +22,9 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { fmtRelative, fmtSodexSymbol, fmtUsd } from "@/lib/format";
+import { Num } from "@/components/ui/Num";
+import { Timestamp } from "@/components/ui/Timestamp";
+import { fmtRelative, fmtSodexSymbol } from "@/lib/format";
 import { stripTechnicalScoring } from "@/lib/format/reasoning";
 import { cn } from "@/components/ui/cn";
 import { AgentTraceCard, type AgentTraceData } from "./AgentTraceCard";
@@ -237,9 +239,7 @@ export function SignalAuditPage({ signalId }: { signalId: string }) {
             <Badge tone="default">
               {s.sodex_symbol.includes("-USD") ? "PERP" : "SPOT"}
             </Badge>
-            <Badge tone="default" mono>
-              {(s.confidence * 100).toFixed(0)}%
-            </Badge>
+            <Num value={s.confidence * 100} unit="%" dp={0} />
             <Badge
               tone={
                 s.status === "executed"
@@ -285,8 +285,12 @@ export function SignalAuditPage({ signalId }: { signalId: string }) {
                   {data.superseded_by.superseding_signal_id}
                 </Link>{" "}
                 — newer signal had{" "}
-                {data.superseded_by.significance_ratio.toFixed(2)}× higher
-                significance on the same asset, opposite direction.
+                <Num
+                  value={data.superseded_by.significance_ratio}
+                  dp={2}
+                  unit="×"
+                />{" "}
+                higher significance on the same asset, opposite direction.
               </div>
               <div style={{ marginTop: 2, opacity: 0.85 }}>
                 Reason: {data.superseded_by.reason}
@@ -316,7 +320,8 @@ export function SignalAuditPage({ signalId }: { signalId: string }) {
                     >
                       {sup.superseded_signal_id}
                     </Link>{" "}
-                    — ratio {sup.significance_ratio.toFixed(2)}×
+                    — ratio{" "}
+                    <Num value={sup.significance_ratio} dp={2} unit="×" />
                   </li>
                 ))}
               </ul>
@@ -341,8 +346,8 @@ export function SignalAuditPage({ signalId }: { signalId: string }) {
                 {data.suppressed_at_emission.map((sup) => (
                   <li key={sup.id}>
                     {sup.reason} (loser sig{" "}
-                    {sup.significance_loser.toFixed(3)} vs winner{" "}
-                    {sup.significance_winner.toFixed(3)})
+                    <Num value={sup.significance_loser} dp={2} /> vs winner{" "}
+                    <Num value={sup.significance_winner} dp={2} />)
                   </li>
                 ))}
               </ul>
@@ -353,33 +358,37 @@ export function SignalAuditPage({ signalId }: { signalId: string }) {
           <KV label="Asset class" value={s.asset_kind} />
           <KV
             label="Size"
-            value={s.suggested_size_usd != null ? fmtUsd(s.suggested_size_usd) : "—"}
+            value={
+              <Num value={s.suggested_size_usd} unit="$" tier="secondary" />
+            }
           />
           <KV
             label="Stop"
             value={
-              s.suggested_stop_pct != null ? `-${s.suggested_stop_pct}%` : "—"
+              <Num
+                value={
+                  s.suggested_stop_pct != null ? -s.suggested_stop_pct : null
+                }
+                unit="%"
+                sign
+                tone="negative"
+                tier="secondary"
+              />
             }
           />
           <KV
             label="Target"
             value={
-              s.suggested_target_pct != null
-                ? `+${s.suggested_target_pct}%`
-                : "—"
+              <Num
+                value={s.suggested_target_pct}
+                unit="%"
+                sign
+                tone="positive"
+                tier="secondary"
+              />
             }
           />
           <KV label="Horizon" value={s.expected_horizon ?? "—"} />
-          <KV
-            label="Direction"
-            value={s.direction.toUpperCase()}
-            tone={dirTone}
-          />
-          <KV label="Tier" value={s.tier} tone={tierTone} />
-          <KV
-            label="Conviction"
-            value={`${(s.confidence * 100).toFixed(0)}%`}
-          />
         </CardBody>
       </Card>
 
@@ -400,9 +409,11 @@ export function SignalAuditPage({ signalId }: { signalId: string }) {
         <Card>
           <CardHeader>
             <CardTitle>Triggering news event</CardTitle>
-            <span className="text-[11px] text-fg-dim">
-              {new Date(e.release_time).toISOString()} UTC
-            </span>
+            <Timestamp
+              ms={e.release_time}
+              mode="absolute"
+              className="text-[11px] text-fg-dim"
+            />
           </CardHeader>
           <CardBody className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center gap-2 text-[11px] text-fg-dim">
@@ -451,9 +462,11 @@ export function SignalAuditPage({ signalId }: { signalId: string }) {
               {data.duplicates.map((d) => (
                 <li key={d.id} className="flex flex-col gap-0.5 px-4 py-3 text-xs">
                   <div className="flex items-center gap-2">
-                    <span className="text-fg-dim">
-                      {new Date(d.release_time).toISOString().slice(0, 16).replace("T", " ")}
-                    </span>
+                    <Timestamp
+                      ms={d.release_time}
+                      mode="absolute"
+                      className="text-fg-dim"
+                    />
                     <span className="text-fg-muted">{d.author ?? "(no author)"}</span>
                     {d.source_link ? (
                       <a
@@ -492,7 +505,7 @@ export function SignalAuditPage({ signalId }: { signalId: string }) {
             <CardTitle>AI classification</CardTitle>
             <span className="text-[11px] text-fg-dim">
               {c.model} · prompt {c.prompt_version} · classified{" "}
-              {fmtRelative(c.classified_at)}
+              <Timestamp ms={c.classified_at} mode="relative" />
             </span>
           </CardHeader>
           <CardBody className="flex flex-col gap-3">
@@ -512,7 +525,14 @@ export function SignalAuditPage({ signalId }: { signalId: string }) {
               <KV label="Severity" value={c.severity} />
               <KV
                 label="Classifier conf"
-                value={`${(c.confidence * 100).toFixed(0)}%`}
+                value={
+                  <Num
+                    value={c.confidence * 100}
+                    unit="%"
+                    dp={0}
+                    tier="secondary"
+                  />
+                }
               />
               <KV
                 label="Actionable"
@@ -732,22 +752,11 @@ function OutcomeCell({
       <div className="text-[10px] font-medium uppercase tracking-wider text-fg-dim">
         {label}
       </div>
-      <div
-        className={cn(
-          "tabular text-base font-semibold",
-          measured && pnl! > 0 && "text-positive",
-          measured && pnl! <= 0 && "text-negative",
-          !measured && "text-fg-dim",
-        )}
-      >
-        {measured
-          ? `${pnl! >= 0 ? "+" : ""}${pnl!.toFixed(2)}%`
-          : "pending"}
-      </div>
+      <Num value={pnl} unit="%" sign dp={2} tone="auto" tier="lead" />
       {impact != null ? (
         <div className="text-[10px] text-fg-dim">
-          asset move {impact >= 0 ? "+" : ""}
-          {impact.toFixed(2)}%
+          asset move{" "}
+          <Num value={impact} unit="%" sign dp={2} tone="auto" tier="context" />
         </div>
       ) : null}
     </div>

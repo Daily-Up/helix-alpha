@@ -1,16 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import Link from "next/link";
 import {
   fmtAssetSymbol,
   fmtRelative,
   fmtSodexSymbol,
-  fmtUsd,
   truncate,
 } from "@/lib/format";
 import { stripTechnicalScoring } from "@/lib/format/reasoning";
 import { cn } from "@/components/ui/cn";
+import { Num } from "@/components/ui/Num";
 import { ExecuteLiveButton } from "@/components/sodex/ExecuteLiveButton";
 import { isPublicMode } from "@/lib/public-mode";
 
@@ -511,26 +511,34 @@ export function SignalCard({
         style={{ columnGap: "32px", rowGap: "12px", marginBottom: "4px" }}
       >
         <TradeFigure
-          value={fmtUsd(sig.suggested_size_usd)}
+          value={<Num value={sig.suggested_size_usd} unit="$" tier="lead" />}
           label="Size"
         />
         <TradeFigure
           value={
-            sig.suggested_stop_pct != null
-              ? `−${sig.suggested_stop_pct}%`
-              : "—"
+            <Num
+              value={
+                sig.suggested_stop_pct != null ? -sig.suggested_stop_pct : null
+              }
+              unit="%"
+              sign
+              tone="negative"
+              tier="lead"
+            />
           }
           label="Stop"
-          tone={sig.suggested_stop_pct != null ? "negative" : "neutral"}
         />
         <TradeFigure
           value={
-            sig.suggested_target_pct != null
-              ? `+${sig.suggested_target_pct}%`
-              : "—"
+            <Num
+              value={sig.suggested_target_pct}
+              unit="%"
+              sign
+              tone="positive"
+              tier="lead"
+            />
           }
           label="Target"
-          tone={sig.suggested_target_pct != null ? "positive" : "neutral"}
         />
         <TradeFigure
           value={sig.expected_horizon ?? "—"}
@@ -825,13 +833,13 @@ function TradeBuilder({
         {risk != null && reward != null ? (
           <>
             <span style={{ color: TEXT_DIM }}>Risk</span>{" "}
-            <span style={{ color: NEGATIVE }}>−${risk.toFixed(2)}</span>
+            <Num value={-risk} unit="$" sign tone="negative" />
             <span style={{ margin: "0 10px", color: TEXT_DIM }}>·</span>
             <span style={{ color: TEXT_DIM }}>Reward</span>{" "}
-            <span style={{ color: POSITIVE }}>+${reward.toFixed(2)}</span>
+            <Num value={reward} unit="$" sign tone="positive" />
             <span style={{ margin: "0 10px", color: TEXT_DIM }}>·</span>
             <span style={{ color: TEXT_DIM }}>R:R</span>{" "}
-            <span style={{ color: TEXT_BRAND }}>{rr?.toFixed(2)}</span>
+            <Num value={rr} dp={2} />
           </>
         ) : (
           <span style={{ color: TEXT_DIM }}>Enter valid values…</span>
@@ -991,7 +999,7 @@ function TradeFigure({
   label,
   tone = "neutral",
 }: {
-  value: string;
+  value: ReactNode;
   label: string;
   tone?: "positive" | "negative" | "warning" | "neutral";
 }) {

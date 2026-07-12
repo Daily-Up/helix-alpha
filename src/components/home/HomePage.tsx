@@ -11,8 +11,9 @@ import Link from "next/link";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Stat } from "@/components/ui/Stat";
+import { Num } from "@/components/ui/Num";
+import { Timestamp } from "@/components/ui/Timestamp";
 import { fmtAssetSymbol, fmtRelative, fmtUsd } from "@/lib/format";
-import { cn } from "@/components/ui/cn";
 
 interface HomeData {
   counts: {
@@ -220,7 +221,10 @@ export function HomePage() {
                     </Badge>
                     <span className="ml-auto text-[11px] text-fg-dim">
                       {data.briefing.date} · generated{" "}
-                      {fmtRelative(data.briefing.generated_at)}
+                      <Timestamp
+                        ms={data.briefing.generated_at}
+                        mode="relative"
+                      />
                     </span>
                   </div>
                 </CardHeader>
@@ -249,9 +253,14 @@ export function HomePage() {
                         <span className="font-mono text-sm font-semibold text-fg">
                           {fmtAssetSymbol(data.briefing.top_pick.asset_symbol)}
                         </span>
-                        <span className="ml-auto tabular text-xs text-fg-muted">
-                          {(data.briefing.top_pick.conviction * 100).toFixed(0)}
-                          % conviction
+                        <span className="ml-auto text-xs text-fg-muted">
+                          <Num
+                            value={data.briefing.top_pick.conviction * 100}
+                            unit="%"
+                            dp={0}
+                            tier="context"
+                          />{" "}
+                          conviction
                         </span>
                       </div>
                       <p className="text-xs text-fg-muted">
@@ -343,9 +352,13 @@ export function HomePage() {
                           {s.event_type ? (
                             <Badge tone="default">{s.event_type}</Badge>
                           ) : null}
-                          <span className="ml-auto tabular text-fg-muted">
-                            {(s.confidence * 100).toFixed(0)}%
-                          </span>
+                          <Num
+                            value={s.confidence * 100}
+                            unit="%"
+                            dp={0}
+                            tier="secondary"
+                            className="ml-auto"
+                          />
                         </div>
                         {s.event_title ? (
                           <div className="text-fg-muted">
@@ -354,7 +367,7 @@ export function HomePage() {
                           </div>
                         ) : null}
                         <div className="text-[10px] text-fg-dim">
-                          fired {fmtRelative(s.fired_at)}
+                          fired <Timestamp ms={s.fired_at} mode="relative" />
                         </div>
                       </li>
                     ))}
@@ -390,24 +403,20 @@ export function HomePage() {
                           <span className="font-mono text-sm font-semibold text-fg">
                             {fmtAssetSymbol(p.symbol, p.kind)}
                           </span>
-                          <span className="tabular text-fg">
-                            {p.weight_pct.toFixed(2)}%
-                          </span>
-                          {p.pnl_pct != null ? (
-                            <span
-                              className={cn(
-                                "tabular text-xs",
-                                p.pnl_pct > 0
-                                  ? "text-positive"
-                                  : p.pnl_pct < 0
-                                    ? "text-negative"
-                                    : "text-fg-muted",
-                              )}
-                            >
-                              {p.pnl_pct >= 0 ? "+" : ""}
-                              {p.pnl_pct.toFixed(2)}%
-                            </span>
-                          ) : null}
+                          <Num
+                            value={p.weight_pct}
+                            unit="%"
+                            dp={2}
+                            tier="secondary"
+                          />
+                          <Num
+                            value={p.pnl_pct}
+                            unit="%"
+                            sign
+                            dp={2}
+                            tone="auto"
+                            tier="context"
+                          />
                         </div>
                         {p.rationale ? (
                           <div className="text-[11px] text-fg-muted">

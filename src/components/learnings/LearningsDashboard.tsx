@@ -15,12 +15,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
-import { Stat } from "@/components/ui/Stat";
 import { HeroStat, SubStat } from "@/components/ui/HeroStat";
 import { Badge } from "@/components/ui/Badge";
+import { DataTable, type Column } from "@/components/ui/DataTable";
+import { Timestamp } from "@/components/ui/Timestamp";
 import { StatSkeleton, PanelSkeleton } from "@/components/ui/Skeleton";
 import { useBulkMountReveal } from "@/hooks/useMountReveal";
-import { fmtRelative, truncate } from "@/lib/format";
+import { truncate } from "@/lib/format";
 import { cn } from "@/components/ui/cn";
 
 type Horizon = "1d" | "3d" | "7d";
@@ -95,21 +96,6 @@ function fmtRate(v: number | null | undefined): string {
   return `${(v * 100).toFixed(0)}%`;
 }
 
-function rateTone(v: number | null | undefined): string {
-  if (v == null) return "text-fg-muted";
-  if (v >= 0.6) return "text-positive";
-  if (v >= 0.5) return "text-fg";
-  if (v >= 0.4) return "text-fg-muted";
-  return "text-negative";
-}
-
-function pnlTone(v: number | null | undefined): string {
-  if (v == null) return "text-fg-muted";
-  if (v > 0.5) return "text-positive";
-  if (v < -0.5) return "text-negative";
-  return "text-fg-muted";
-}
-
 export function LearningsDashboard() {
   const [data, setData] = useState<LearningsResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -134,8 +120,99 @@ export function LearningsDashboard() {
 
   const hitRateKey = `hit_rate_${horizon}` as const;
   const pnlKey = `avg_pnl_pct_${horizon}` as const;
-  const impactKey = `impact_pct_${horizon}` as const;
   const pnlSignalKey = `pnl_pct_${horizon}` as const;
+
+  // Recent-outcomes table: role-based columns. PnL carries the magnitude bar
+  // (the one homogeneous signed number); the redundant Hit? ✓/✕ column is
+  // dropped (it merely restated sign(PnL)) and the "move X%" subline is folded.
+  const recentColumns: Column<SignalOutcomeRow>[] = [
+    {
+      key: "fired",
+      header: "Fired",
+      role: "context",
+      align: "left",
+      render: (r) => <Timestamp ms={r.fired_at} mode="relative" />,
+    },
+    {
+      key: "asset",
+      header: "Asset",
+      role: "identifier",
+      render: (r) => (
+        <div className="flex flex-col leading-tight">
+          <span className="font-mono text-fg">{r.asset_symbol}</span>
+          <span className="text-[10px] text-fg-dim">{r.asset_kind}</span>
+        </div>
+      ),
+    },
+    {
+      key: "dir",
+      header: "Dir",
+      role: "context",
+      align: "left",
+      render: (r) => (
+        <Badge tone={r.direction === "long" ? "positive" : "negative"} mono>
+          {r.direction.toUpperCase()}
+        </Badge>
+      ),
+    },
+    {
+      key: "tier",
+      header: "Tier",
+      role: "context",
+      align: "left",
+      render: (r) => (
+        <Badge
+          tone={
+            r.tier === "auto"
+              ? "accent"
+              : r.tier === "review"
+                ? "info"
+                : "default"
+          }
+        >
+          {r.tier}
+        </Badge>
+      ),
+    },
+    {
+      key: "conf",
+      header: "Conf",
+      role: "context",
+      num: (r) => r.confidence * 100,
+      unit: "%",
+      dp: 0,
+    },
+    {
+      key: "event",
+      header: "Event",
+      role: "context",
+      align: "left",
+      render: (r) => r.event_type ?? "—",
+    },
+    {
+      key: "news",
+      header: "News",
+      role: "identifier",
+      render: (r) => (
+        <span
+          title={r.event_title ?? undefined}
+          className="whitespace-normal font-[var(--font-inter)] text-fg-muted"
+        >
+          {truncate(r.event_title ?? "—", 60)}
+        </span>
+      ),
+    },
+    {
+      key: "pnl",
+      header: `PnL T+${horizon}`,
+      role: "magnitude",
+      num: (r) => r[pnlSignalKey],
+      unit: "%",
+      sign: true,
+      dp: 1,
+      tone: "auto",
+    },
+  ];
 
   // Calibration insight: are higher-confidence signals actually winning more?
   const calibrationInsight = useMemo(() => {
@@ -345,120 +422,18 @@ export function LearningsDashboard() {
           </span>
         </CardHeader>
         <CardBody className="p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="border-b border-line bg-surface-2">
-                <tr className="text-[10px] uppercase tracking-wider text-fg-dim">
-                  <th className="px-3 py-2 text-left">Fired</th>
-                  <th className="px-3 py-2 text-left">Asset</th>
-                  <th className="px-3 py-2 text-left">Dir</th>
-                  <th className="px-3 py-2 text-left">Tier</th>
-                  <th className="px-3 py-2 text-right">Conf</th>
-                  <th className="px-3 py-2 text-left">Event type</th>
-                  <th className="px-3 py-2 text-left">News</th>
-                  <th className="px-3 py-2 text-right">
-                    PnL T+{horizon}
-                  </th>
-                  <th className="px-3 py-2 text-left">Hit?</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line">
-                {data.recent.map((r) => {
-                  const pnl = r[pnlSignalKey];
-                  const impact = r[impactKey];
-                  const measured = pnl != null;
-                  const hit = measured ? pnl! > 0 : null;
-                  return (
-                    <tr
-                      key={r.signal_id}
-                      className="text-xs transition-colors hover:bg-surface-2"
-                    >
-                      <td className="px-3 py-2 text-fg-muted whitespace-nowrap">
-                        {fmtRelative(r.fired_at)}
-                      </td>
-                      <td className="px-3 py-2">
-                        <div className="font-mono text-fg">
-                          {r.asset_symbol}
-                        </div>
-                        <div className="text-[10px] text-fg-dim">
-                          {r.asset_kind}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2">
-                        <Badge
-                          tone={
-                            r.direction === "long" ? "positive" : "negative"
-                          }
-                          mono
-                        >
-                          {r.direction.toUpperCase()}
-                        </Badge>
-                      </td>
-                      <td className="px-3 py-2">
-                        <Badge
-                          tone={
-                            r.tier === "auto"
-                              ? "accent"
-                              : r.tier === "review"
-                                ? "info"
-                                : "default"
-                          }
-                        >
-                          {r.tier}
-                        </Badge>
-                      </td>
-                      <td className="tabular px-3 py-2 text-right text-fg">
-                        {(r.confidence * 100).toFixed(0)}%
-                      </td>
-                      <td className="px-3 py-2 text-fg-muted">
-                        {r.event_type ?? "—"}
-                      </td>
-                      <td className="px-3 py-2 text-fg-muted max-w-xs">
-                        <span title={r.event_title ?? ""}>
-                          {truncate(r.event_title ?? "—", 60)}
-                        </span>
-                      </td>
-                      <td
-                        className={cn(
-                          "tabular px-3 py-2 text-right font-medium",
-                          measured && (pnl! > 0 ? "text-positive" : "text-negative"),
-                          !measured && "text-fg-dim",
-                        )}
-                      >
-                        {pnl != null ? fmtPct(pnl) : "—"}
-                        {impact != null ? (
-                          <div className="text-[10px] font-normal text-fg-dim">
-                            move {fmtPct(impact)}
-                          </div>
-                        ) : null}
-                      </td>
-                      <td className="px-3 py-2">
-                        {hit == null ? (
-                          <span className="text-fg-dim text-[11px]">
-                            pending
-                          </span>
-                        ) : hit ? (
-                          <Badge tone="positive">✓</Badge>
-                        ) : (
-                          <Badge tone="negative">✕</Badge>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-                {data.recent.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={9}
-                      className="px-4 py-6 text-center text-sm text-fg-dim"
-                    >
-                      No signals in this window yet.
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
+          {data.recent.length === 0 ? (
+            <div className="px-4 py-6 text-center text-sm text-fg-dim">
+              No signals in this window yet.
+            </div>
+          ) : (
+            <DataTable
+              columns={recentColumns}
+              rows={data.recent}
+              getKey={(r) => r.signal_id}
+              minWidth={760}
+            />
+          )}
         </CardBody>
       </Card>
     </div>
@@ -486,7 +461,35 @@ function BreakdownCard({
   const pnlKey = `avg_pnl_pct_${horizon}` as const;
   const visible = rows.slice(0, maxRows);
   const totalCount = rows.reduce((a, r) => a + r.count, 0);
-  const maxBucketCount = Math.max(1, ...rows.map((r) => r.count));
+
+  // Avg PnL carries the magnitude bar (signed, real spread); hit rate is the
+  // emphasised lead number (no threshold colour); N is quiet context. The
+  // volume "Share" bar and the rateTone/pnlTone helpers are retired.
+  const columns: Column<BucketStats>[] = [
+    { key: "bucket", header: "Bucket", role: "identifier", render: (r) => r.key },
+    { key: "n", header: "N", role: "context", num: (r) => r.count },
+    {
+      key: "hit",
+      header: "Hit rate",
+      role: "lead",
+      num: (r) => {
+        const v = r[hitKey];
+        return v != null ? v * 100 : null;
+      },
+      unit: "%",
+      dp: 0,
+    },
+    {
+      key: "pnl",
+      header: "Avg PnL",
+      role: "magnitude",
+      num: (r) => r[pnlKey],
+      unit: "%",
+      sign: true,
+      dp: 1,
+      tone: "auto",
+    },
+  ];
 
   return (
     <Card>
@@ -502,66 +505,18 @@ function BreakdownCard({
         <span className="text-[11px] text-fg-dim">{totalCount} signals</span>
       </CardHeader>
       <CardBody className="p-0">
-        <table className="w-full">
-          <thead className="border-b border-line bg-surface-2">
-            <tr className="text-[10px] uppercase tracking-wider text-fg-dim">
-              <th className="px-3 py-2 text-left">Bucket</th>
-              <th className="px-3 py-2 text-right">N</th>
-              <th className="px-3 py-2 text-right">Hit rate</th>
-              <th className="px-3 py-2 text-right">Avg PnL</th>
-              <th className="px-3 py-2 text-left w-24">Share</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-line">
-            {visible.map((r) => (
-              <tr
-                key={r.key}
-                className="text-xs transition-colors hover:bg-surface-2"
-              >
-                <td className="px-3 py-2 font-mono text-fg">{r.key}</td>
-                <td className="tabular px-3 py-2 text-right text-fg-muted">
-                  {r.count}
-                </td>
-                <td
-                  className={cn(
-                    "tabular px-3 py-2 text-right font-medium",
-                    rateTone(r[hitKey]),
-                  )}
-                >
-                  {fmtRate(r[hitKey])}
-                </td>
-                <td
-                  className={cn(
-                    "tabular px-3 py-2 text-right",
-                    pnlTone(r[pnlKey]),
-                  )}
-                >
-                  {fmtPct(r[pnlKey])}
-                </td>
-                <td className="px-3 py-2">
-                  <div className="h-1.5 rounded-full bg-surface-2 w-20">
-                    <div
-                      className="h-full rounded-full bg-accent/60"
-                      style={{
-                        width: `${(r.count / maxBucketCount) * 100}%`,
-                      }}
-                    />
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {visible.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={5}
-                  className="px-4 py-6 text-center text-sm text-fg-dim"
-                >
-                  No data yet.
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
+        {visible.length === 0 ? (
+          <div className="px-4 py-6 text-center text-sm text-fg-dim">
+            No data yet.
+          </div>
+        ) : (
+          <DataTable
+            columns={columns}
+            rows={visible}
+            getKey={(r) => r.key}
+            minWidth={480}
+          />
+        )}
       </CardBody>
     </Card>
   );

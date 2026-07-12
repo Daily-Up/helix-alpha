@@ -1,4 +1,5 @@
 import { fmtRelative, truncate } from "@/lib/format";
+import { Num } from "@/components/ui/Num";
 
 export interface EventCardData {
   id: string;
@@ -148,7 +149,13 @@ export function EventCard({ ev }: { ev: EventCardData }) {
                 color: TEXT_MUTED,
               }}
             >
-              · {((ev.confidence ?? 0) * 100).toFixed(0)}% CONF
+              · <Num
+                value={(ev.confidence ?? 0) * 100}
+                unit="%"
+                dp={0}
+                tier="context"
+              />{" "}
+              CONF
             </span>
           </>
         ) : skipped ? (
@@ -188,7 +195,7 @@ export function EventCard({ ev }: { ev: EventCardData }) {
                   color: TEXT_DIM,
                 }}
               >
-                · score {ev.skip_score.toFixed(2)}
+                · score <Num value={ev.skip_score} dp={2} tier="context" />
               </span>
             ) : null}
           </>

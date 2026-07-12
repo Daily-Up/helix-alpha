@@ -30,6 +30,10 @@ import type { Eip1193Provider } from "@/lib/sodex-onchain/signing";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { cn } from "@/components/ui/cn";
+import { Addr } from "@/components/ui/Addr";
+import { Timestamp } from "@/components/ui/Timestamp";
+import { DataTable } from "@/components/ui/DataTable";
+import { fmtSodexSymbol } from "@/lib/format";
 import {
   SODEX_NETWORKS,
   type SodexNetwork,
@@ -320,7 +324,7 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
             </span>
             <span className="font-mono text-xs text-fg-muted">
               key: <span className="text-fg">{localKey.name || "(burner)"}</span>{" "}
-              · address: <span className="text-fg">{localKey.address.slice(0, 8)}…{localKey.address.slice(-6)}</span>
+              · address: <Addr value={localKey.address} tail={6} />
             </span>
           </div>
         </div>
@@ -349,10 +353,7 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
             />
             {isConnected ? (
               <span className="text-xs text-fg-muted">
-                connected as{" "}
-                <span className="font-mono text-fg">
-                  {address?.slice(0, 6)}…{address?.slice(-4)}
-                </span>
+                connected as <Addr value={address} />
               </span>
             ) : localKey ? (
               <span className="text-xs text-fg-dim">
@@ -386,9 +387,7 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
                   <span className="text-fg-dim">Perps Account ID</span>
                   <span className="text-fg">{perpsState?.aid ?? 0}</span>
                   <span className="text-fg-dim">Wallet</span>
-                  <span className="break-all text-fg">
-                    {accountState.user}
-                  </span>
+                  <Addr value={accountState.user} />
                 </div>
 
                 <SodexBalancesTable
@@ -445,11 +444,7 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
           <CardBody>
             <div className="flex flex-col gap-3">
               <p className="text-sm text-fg">
-                Wallet{" "}
-                <span className="font-mono text-fg">
-                  {address?.slice(0, 6)}…{address?.slice(-4)}
-                </span>{" "}
-                isn&apos;t registered on{" "}
+                Wallet <Addr value={address} /> isn&apos;t registered on{" "}
                 {SODEX_NETWORKS[network].label} yet (account ID is{" "}
                 <span className="font-mono">0</span>). That&apos;s why
                 you saw{" "}
@@ -562,9 +557,11 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
                               <span className="font-mono font-medium text-fg">
                                 {k.name}
                               </span>
-                              <span className="font-mono text-[10px] text-fg-dim">
-                                {k.publicKey.slice(0, 10)}…{k.publicKey.slice(-6)}
-                              </span>
+                              <Addr
+                                value={k.publicKey}
+                                tail={6}
+                                className="text-[10px] text-fg-dim"
+                              />
                             </div>
                             <div className="flex flex-col items-start gap-0.5">
                               {isHelix ? (
@@ -820,40 +817,72 @@ function MyTradesPanel({ wallet }: { wallet: `0x${string}` }) {
             click <strong>▶ Execute live</strong> on any signal.
           </div>
         ) : (
-          <ul className="divide-y divide-line">
-            {trades.map((t) => (
-              <li
-                key={t.id}
-                className="grid grid-cols-[80px_120px_60px_80px_80px_100px] items-center gap-3 px-3 py-1.5 text-xs"
-              >
-                <Badge
-                  tone={
-                    t.status === "filled"
-                      ? "positive"
-                      : t.status === "rejected"
-                        ? "negative"
-                        : "neutral"
-                  }
-                >
-                  {t.status}
-                </Badge>
-                <span className="font-mono text-fg">{t.symbol}</span>
-                <span
-                  className="font-mono text-[10px]"
-                  style={{ color: t.side === "buy" ? "#5cc97a" : "#e06c66" }}
-                >
-                  {t.side.toUpperCase()}
-                </span>
-                <span className="text-right text-fg-muted">
-                  {t.size_usd != null ? `$${t.size_usd.toFixed(0)}` : "—"}
-                </span>
-                <Badge tone="neutral">{t.network}</Badge>
-                <span className="text-right text-[10px] text-fg-dim">
-                  {new Date(t.filled_at).toISOString().slice(11, 19)}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <DataTable<ExecutedTradeView>
+            columns={[
+              {
+                key: "status",
+                header: "Status",
+                role: "identifier",
+                render: (t) => (
+                  <Badge
+                    tone={
+                      t.status === "filled"
+                        ? "positive"
+                        : t.status === "rejected"
+                          ? "negative"
+                          : "neutral"
+                    }
+                  >
+                    {t.status}
+                  </Badge>
+                ),
+              },
+              {
+                key: "symbol",
+                header: "Market",
+                role: "identifier",
+                render: (t) => fmtSodexSymbol(t.symbol),
+              },
+              {
+                key: "side",
+                header: "Side",
+                role: "identifier",
+                render: (t) => (
+                  <span
+                    className="font-mono"
+                    style={{
+                      color: t.side === "buy" ? "#5cc97a" : "#e06c66",
+                    }}
+                  >
+                    {t.side.toUpperCase()}
+                  </span>
+                ),
+              },
+              {
+                key: "size",
+                header: "Size",
+                role: "context",
+                num: (t) => t.size_usd,
+                unit: "$",
+                dp: 0,
+              },
+              {
+                key: "network",
+                header: "Net",
+                role: "context",
+                render: (t) => t.network,
+              },
+              {
+                key: "filled_at",
+                header: "Filled",
+                role: "context",
+                render: (t) => <Timestamp ms={t.filled_at} mode="absolute" />,
+              },
+            ]}
+            rows={trades}
+            getKey={(t) => t.id}
+            minWidth={520}
+          />
         )}
       </CardBody>
     </Card>

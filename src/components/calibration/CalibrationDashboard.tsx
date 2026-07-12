@@ -30,9 +30,12 @@ import Link from "next/link";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { HeroStat, SubStat } from "@/components/ui/HeroStat";
 import { Badge } from "@/components/ui/Badge";
+import { Num } from "@/components/ui/Num";
+import { DataTable, type Column } from "@/components/ui/DataTable";
+import { Magnitude } from "@/components/ui/Magnitude";
 import { PanelSkeleton, ChartSkeleton } from "@/components/ui/Skeleton";
 import { useBulkMountReveal } from "@/hooks/useMountReveal";
-import { fmtRelative, fmtUsd } from "@/lib/format";
+import { fmtRelative } from "@/lib/format";
 import { cn } from "@/components/ui/cn";
 
 interface CalibrationPayload {
@@ -372,30 +375,15 @@ function FrameworkComparisonCard({
   // outcomes start landing.
   const v1Empty = summary.v1.sample === 0;
   const v2Empty = summary.v2.sample === 0;
-  const fmtRate = (r: number | null) =>
-    r == null ? "—" : `${(r * 100).toFixed(1)}%`;
-  const fmtDelta = (d: number, kind: "rate" | "usd" | "pct" | "n") => {
-    // Suppress deltas when either side has no data — a delta vs. zero
-    // baseline is misleading.
-    if (v1Empty || v2Empty) return "—";
-    const sign = d > 0 ? "+" : "";
-    if (kind === "rate") return `${sign}${(d * 100).toFixed(1)}pp`;
-    if (kind === "usd") return `${sign}${fmtUsd(d)}`;
-    if (kind === "pct") return `${sign}${d.toFixed(2)}%`;
-    return `${sign}${d}`;
-  };
-  const fmtVal = (label: "rate" | "usd" | "pct" | "n", entry: FrameworkEntry) => {
-    if (entry.sample === 0) return "—";
-    if (label === "rate") return fmtRate(entry.hit_rate);
-    if (label === "usd") return fmtUsd(entry.total_pnl_usd);
-    if (label === "pct")
-      return entry.mean_realized_pct == null
-        ? "—"
-        : `${entry.mean_realized_pct.toFixed(2)}%`;
-    return String(entry.sample);
-  };
-  const cell = (n: number) =>
-    n > 0 ? "text-positive" : n < 0 ? "text-negative" : "text-fg";
+  const bothPopulated = !v1Empty && !v2Empty;
+  // Numeric accessors return null when a framework has no outcomes so <Num>
+  // renders its "—" empty state; deltas suppress unless both sides populate
+  // (a delta vs. a zero baseline misleads).
+  const rateVal = (e: FrameworkEntry) =>
+    e.sample === 0 || e.hit_rate == null ? null : e.hit_rate * 100;
+  const pctVal = (e: FrameworkEntry) =>
+    e.sample === 0 ? null : e.mean_realized_pct;
+  const usdVal = (e: FrameworkEntry) => (e.sample === 0 ? null : e.total_pnl_usd);
   return (
     <Card>
       <CardHeader>
@@ -445,34 +433,80 @@ function FrameworkComparisonCard({
           <tbody className="divide-y divide-line">
             <tr>
               <td className="px-3 py-2 text-fg">Hit rate</td>
-              <td className="tabular px-3 py-2 text-right">{fmtVal("rate", summary.v1)}</td>
-              <td className="tabular px-3 py-2 text-right">{fmtVal("rate", summary.v2)}</td>
-              <td className={cn("tabular px-3 py-2 text-right font-semibold", cell(summary.delta.hit_rate))}>
-                {fmtDelta(summary.delta.hit_rate, "rate")}
+              <td className="px-3 py-2 text-right">
+                <Num value={rateVal(summary.v1)} unit="%" dp={1} tier="secondary" />
+              </td>
+              <td className="px-3 py-2 text-right">
+                <Num value={rateVal(summary.v2)} unit="%" dp={1} tier="secondary" />
+              </td>
+              <td className="px-3 py-2 text-right">
+                <Num
+                  value={bothPopulated ? summary.delta.hit_rate * 100 : null}
+                  unit="pp"
+                  dp={1}
+                  sign
+                  tone="auto"
+                  tier="secondary"
+                  className="font-semibold"
+                />
               </td>
             </tr>
             <tr>
               <td className="px-3 py-2 text-fg">Total realized P&amp;L</td>
-              <td className="tabular px-3 py-2 text-right">{fmtVal("usd", summary.v1)}</td>
-              <td className="tabular px-3 py-2 text-right">{fmtVal("usd", summary.v2)}</td>
-              <td className={cn("tabular px-3 py-2 text-right font-semibold", cell(summary.delta.total_pnl_usd))}>
-                {fmtDelta(summary.delta.total_pnl_usd, "usd")}
+              <td className="px-3 py-2 text-right">
+                <Num value={usdVal(summary.v1)} unit="$" compact tier="secondary" />
+              </td>
+              <td className="px-3 py-2 text-right">
+                <Num value={usdVal(summary.v2)} unit="$" compact tier="secondary" />
+              </td>
+              <td className="px-3 py-2 text-right">
+                <Num
+                  value={bothPopulated ? summary.delta.total_pnl_usd : null}
+                  unit="$"
+                  compact
+                  sign
+                  tone="auto"
+                  tier="secondary"
+                  className="font-semibold"
+                />
               </td>
             </tr>
             <tr>
               <td className="px-3 py-2 text-fg">Mean realized %</td>
-              <td className="tabular px-3 py-2 text-right">{fmtVal("pct", summary.v1)}</td>
-              <td className="tabular px-3 py-2 text-right">{fmtVal("pct", summary.v2)}</td>
-              <td className={cn("tabular px-3 py-2 text-right font-semibold", cell(summary.delta.mean_realized_pct))}>
-                {fmtDelta(summary.delta.mean_realized_pct, "pct")}
+              <td className="px-3 py-2 text-right">
+                <Num value={pctVal(summary.v1)} unit="%" dp={2} tier="secondary" />
+              </td>
+              <td className="px-3 py-2 text-right">
+                <Num value={pctVal(summary.v2)} unit="%" dp={2} tier="secondary" />
+              </td>
+              <td className="px-3 py-2 text-right">
+                <Num
+                  value={bothPopulated ? summary.delta.mean_realized_pct : null}
+                  unit="%"
+                  dp={2}
+                  sign
+                  tone="auto"
+                  tier="secondary"
+                  className="font-semibold"
+                />
               </td>
             </tr>
             <tr>
               <td className="px-3 py-2 text-fg">Sample size (resolved)</td>
-              <td className="tabular px-3 py-2 text-right">{summary.v1.sample}</td>
-              <td className="tabular px-3 py-2 text-right">{summary.v2.sample}</td>
-              <td className={cn("tabular px-3 py-2 text-right font-semibold", cell(summary.delta.sample))}>
-                {fmtDelta(summary.delta.sample, "n")}
+              <td className="px-3 py-2 text-right">
+                <Num value={summary.v1.sample} tier="secondary" />
+              </td>
+              <td className="px-3 py-2 text-right">
+                <Num value={summary.v2.sample} tier="secondary" />
+              </td>
+              <td className="px-3 py-2 text-right">
+                <Num
+                  value={bothPopulated ? summary.delta.sample : null}
+                  sign
+                  tone="auto"
+                  tier="secondary"
+                  className="font-semibold"
+                />
               </td>
             </tr>
           </tbody>
@@ -576,6 +610,48 @@ function PanelHitRateBySubtype({
 }: {
   rows: CalibrationPayload["by_subtype"];
 }) {
+  type Row = CalibrationPayload["by_subtype"][number];
+  // 8 hand-formatted columns → 5 role-based. Mean realized carries the
+  // magnitude bar (scaled to the column max); % stop / % flat (derivable
+  // complement of % target) and Median (near-duplicate of Mean) folded away.
+  const columns: Column<Row>[] = [
+    {
+      key: "subtype",
+      header: "Subtype",
+      role: "identifier",
+      render: (r) => r.catalyst_subtype.replace(/_/g, " "),
+    },
+    { key: "n", header: "N", role: "context", num: (r) => r.sample },
+    {
+      key: "target",
+      header: "% target",
+      role: "context",
+      num: (r) => (r.sample > 0 ? (r.target_hit / r.sample) * 100 : null),
+      unit: "%",
+      dp: 0,
+      tone: "positive",
+    },
+    {
+      key: "mean",
+      header: "Mean realized",
+      role: "magnitude",
+      num: (r) => r.mean_realized_pct,
+      unit: "%",
+      sign: true,
+      dp: 2,
+      tone: "auto",
+    },
+    {
+      key: "pnl",
+      header: "Total PnL",
+      role: "context",
+      num: (r) => r.total_pnl_usd,
+      unit: "$",
+      sign: true,
+      compact: true,
+      tone: "auto",
+    },
+  ];
   return (
     <Card>
       <CardHeader>
@@ -585,90 +661,18 @@ function PanelHitRateBySubtype({
         </span>
       </CardHeader>
       <CardBody className="!p-0">
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead className="border-b border-line bg-surface-2">
-              <tr className="text-[10px] uppercase tracking-wider text-fg-dim">
-                <th className="px-3 py-2 text-left">Subtype</th>
-                <th className="px-3 py-2 text-right">N</th>
-                <th className="px-3 py-2 text-right">% target</th>
-                <th className="px-3 py-2 text-right">% stop</th>
-                <th className="px-3 py-2 text-right">% flat</th>
-                <th className="px-3 py-2 text-right">Mean</th>
-                <th className="px-3 py-2 text-right">Median</th>
-                <th className="px-3 py-2 text-right">Total PnL</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line">
-              {rows.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={8}
-                    className="px-3 py-4 text-center text-fg-dim"
-                  >
-                    No subtypes with ≥5 resolved outcomes yet.
-                  </td>
-                </tr>
-              ) : (
-                rows.map((r) => {
-                  const pct = (n: number) =>
-                    r.sample > 0 ? `${((n / r.sample) * 100).toFixed(0)}%` : "—";
-                  return (
-                    <tr
-                      key={r.catalyst_subtype}
-                      className="transition-colors hover:bg-surface-2"
-                    >
-                      <td className="px-3 py-2 font-mono text-fg">
-                        {r.catalyst_subtype.replace(/_/g, " ")}
-                      </td>
-                      <td className="tabular px-3 py-2 text-right text-fg-muted">
-                        {r.sample}
-                      </td>
-                      <td className="tabular px-3 py-2 text-right text-positive">
-                        {pct(r.target_hit)}
-                      </td>
-                      <td className="tabular px-3 py-2 text-right text-negative">
-                        {pct(r.stop_hit)}
-                      </td>
-                      <td className="tabular px-3 py-2 text-right text-fg-dim">
-                        {pct(r.flat)}
-                      </td>
-                      <td
-                        className={cn(
-                          "tabular px-3 py-2 text-right",
-                          (r.mean_realized_pct ?? 0) > 0
-                            ? "text-positive"
-                            : "text-negative",
-                        )}
-                      >
-                        {r.mean_realized_pct != null
-                          ? `${r.mean_realized_pct >= 0 ? "+" : ""}${r.mean_realized_pct.toFixed(2)}%`
-                          : "—"}
-                      </td>
-                      <td className="tabular px-3 py-2 text-right text-fg-muted">
-                        {r.median_realized_pct != null
-                          ? `${r.median_realized_pct >= 0 ? "+" : ""}${r.median_realized_pct.toFixed(2)}%`
-                          : "—"}
-                      </td>
-                      <td
-                        className={cn(
-                          "tabular px-3 py-2 text-right",
-                          r.total_pnl_usd > 0
-                            ? "text-positive"
-                            : r.total_pnl_usd < 0
-                              ? "text-negative"
-                              : "text-fg-dim",
-                        )}
-                      >
-                        {fmtUsd(r.total_pnl_usd)}
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+        {rows.length === 0 ? (
+          <div className="px-3 py-4 text-center text-xs text-fg-dim">
+            No subtypes with ≥5 resolved outcomes yet.
+          </div>
+        ) : (
+          <DataTable
+            columns={columns}
+            rows={rows}
+            getKey={(r) => r.catalyst_subtype}
+            minWidth={640}
+          />
+        )}
       </CardBody>
     </Card>
   );
@@ -775,6 +779,13 @@ function PanelPnlGrid({ rows }: { rows: CalibrationPayload["pnl_grid"] }) {
   const cellByKey = new Map(
     rows.map((r) => [`${r.catalyst_subtype}|${r.asset_class}`, r]),
   );
+  // Every cell shares one unit (% realized) → a SHARED heatmap scale reads
+  // honestly across columns (per-column bars would rescale each asset class
+  // independently). Tint opacity is proportional to |mean| / globalMax.
+  const globalMax = rows.reduce(
+    (mx, r) => Math.max(mx, Math.abs(r.mean_realized_pct ?? 0)),
+    0,
+  );
 
   return (
     <Card>
@@ -820,18 +831,38 @@ function PanelPnlGrid({ rows }: { rows: CalibrationPayload["pnl_grid"] }) {
                           </td>
                         );
                       const v = cell.mean_realized_pct ?? 0;
+                      const ratio =
+                        globalMax > 0 ? Math.abs(v) / globalMax : 0;
                       return (
                         <td
                           key={cls}
-                          className={cn(
-                            "tabular px-3 py-2 text-right",
-                            v > 0 ? "text-positive" : v < 0 ? "text-negative" : "",
-                          )}
+                          className="relative px-3 py-2 text-right"
                         >
-                          {v >= 0 ? "+" : ""}
-                          {v.toFixed(1)}%{" "}
-                          <span className="text-[10px] text-fg-dim">
-                            (n={cell.sample})
+                          {v !== 0 && ratio > 0 ? (
+                            <div
+                              aria-hidden
+                              className="absolute inset-0"
+                              style={{
+                                backgroundColor:
+                                  v > 0
+                                    ? "var(--positive)"
+                                    : "var(--negative)",
+                                opacity: 0.05 + 0.35 * ratio,
+                              }}
+                            />
+                          ) : null}
+                          <span className="relative z-[1]">
+                            <Num
+                              value={cell.mean_realized_pct}
+                              unit="%"
+                              sign
+                              dp={1}
+                              tone="auto"
+                              tier="context"
+                            />{" "}
+                            <span className="text-[10px] text-fg-dim">
+                              (n={cell.sample})
+                            </span>
                           </span>
                         </td>
                       );
@@ -867,8 +898,8 @@ function PanelExtremes({
         </span>
       </CardHeader>
       <CardBody className="flex flex-col gap-3">
-        <ExtremeList title="Top winners" rows={winners} positive />
-        <ExtremeList title="Worst losers" rows={losers} positive={false} />
+        <ExtremeList title="Top winners" rows={winners} />
+        <ExtremeList title="Worst losers" rows={losers} />
       </CardBody>
     </Card>
   );
@@ -877,12 +908,16 @@ function PanelExtremes({
 function ExtremeList({
   title,
   rows,
-  positive,
 }: {
   title: string;
   rows: ExtremeRow[];
-  positive: boolean;
 }) {
+  // Scale each list to its own max so rank reads as bar length (winners to
+  // winners' max, losers to losers' max). tone="auto" colours by sign.
+  const listMax = rows.reduce(
+    (mx, r) => Math.max(mx, Math.abs(r.realized_pct ?? 0)),
+    0,
+  );
   return (
     <div>
       <div className="mb-1 text-[10px] uppercase tracking-wider text-fg-dim">
@@ -897,7 +932,7 @@ function ExtremeList({
           {rows.map((r) => (
             <li
               key={r.signal_id}
-              className="flex items-baseline gap-2 rounded border border-line bg-surface-2 px-2 py-1 text-[11px]"
+              className="flex items-center gap-2 rounded border border-line bg-surface-2 px-2 py-1 text-[11px]"
             >
               <Badge tone={r.direction === "long" ? "positive" : "negative"} mono>
                 {r.direction.toUpperCase()}
@@ -905,15 +940,16 @@ function ExtremeList({
               <span className="font-mono font-medium text-fg">
                 {r.asset_id.replace(/^[a-z]+-/, "").toUpperCase()}
               </span>
-              <span
-                className={cn(
-                  "tabular ml-auto font-semibold",
-                  positive ? "text-positive" : "text-negative",
-                )}
-              >
-                {(r.realized_pct ?? 0) >= 0 ? "+" : ""}
-                {(r.realized_pct ?? 0).toFixed(2)}%
-              </span>
+              <Magnitude
+                value={r.realized_pct}
+                max={listMax}
+                unit="%"
+                sign
+                dp={2}
+                tone="auto"
+                tier="secondary"
+                className="ml-auto w-28"
+              />
               <Link
                 href={`/signal/${r.signal_id}`}
                 className="text-fg-dim hover:text-accent-2 hover:underline"

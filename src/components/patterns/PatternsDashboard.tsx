@@ -4,8 +4,7 @@ import { useEffect, useState } from "react";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Stat } from "@/components/ui/Stat";
 import { Badge } from "@/components/ui/Badge";
-import { fmtPct } from "@/lib/format";
-import { cn } from "@/components/ui/cn";
+import { DataTable, type Column } from "@/components/ui/DataTable";
 
 interface PatternStats {
   event_type: string;
@@ -68,6 +67,72 @@ export function PatternsDashboard() {
     .filter((p) => p.best.n >= 2)
     .sort((a, b) => b.best.empirical_tradability - a.best.empirical_tradability);
 
+  // Leaderboard: 8 flat columns → role-based. Tradability (the sort key) now
+  // ENCODES as a magnitude bar instead of a threshold-colored pill, so rank
+  // reads as length. Median (near-duplicate of Avg) and Stdev folded away.
+  const leaderboardColumns: Column<PatternsByType>[] = [
+    { key: "event", header: "Event type", role: "identifier", render: (p) => p.event_type },
+    {
+      key: "sentiment",
+      header: "Sentiment",
+      role: "context",
+      render: (p) => (
+        <Badge
+          tone={
+            p.best.sentiment === "positive"
+              ? "positive"
+              : p.best.sentiment === "negative"
+                ? "negative"
+                : "default"
+          }
+        >
+          {p.best.sentiment}
+        </Badge>
+      ),
+    },
+    { key: "n", header: "N", role: "context", num: (p) => p.best.n },
+    { key: "avg", header: "Avg 1d", role: "context", num: (p) => p.best.avg_pct, unit: "%", sign: true, dp: 1, tone: "auto" },
+    { key: "hit", header: "Hit rate", role: "context", num: (p) => p.best.hit_rate * 100, unit: "%", dp: 0 },
+    { key: "trad", header: "Tradability", role: "magnitude", num: (p) => p.best.empirical_tradability * 100, unit: "%", dp: 0 },
+  ];
+
+  // Calibration audit: Δ (the divergence from calibration) becomes the
+  // magnitude bar; hardcoded + empirical stay as quiet context inputs.
+  const calibrationColumns: Column<Comparison>[] = [
+    { key: "event", header: "Event type", role: "identifier", render: (c) => c.event_type },
+    { key: "hardcoded", header: "Hardcoded", role: "context", num: (c) => c.hardcoded * 100, unit: "%", dp: 0 },
+    { key: "empirical", header: "Empirical", role: "context", num: (c) => (c.empirical != null ? c.empirical * 100 : null), unit: "%", dp: 0 },
+    { key: "delta", header: "Δ", role: "magnitude", num: (c) => (c.delta != null ? c.delta * 100 : null), unit: "%", sign: true, dp: 0, tone: "auto" },
+    {
+      key: "verdict",
+      header: "Verdict",
+      role: "context",
+      render: (c) => (
+        <Badge
+          tone={
+            c.verdict === "calibrated"
+              ? "positive"
+              : c.verdict === "underrated"
+                ? "info"
+                : c.verdict === "overrated"
+                  ? "negative"
+                  : "default"
+          }
+        >
+          {c.verdict.replace("_", " ")}
+        </Badge>
+      ),
+    },
+  ];
+
+  // Per-asset: Avg 1d is the one homogeneous signed magnitude → the bar.
+  const perAssetColumns: Column<PerAsset>[] = [
+    { key: "asset", header: "Asset", role: "identifier", render: (r) => r.asset_id },
+    { key: "event", header: "Event type", role: "context", render: (r) => r.event_type },
+    { key: "n", header: "N", role: "context", num: (r) => r.n },
+    { key: "avg", header: "Avg 1d", role: "magnitude", num: (r) => r.avg, unit: "%", sign: true, dp: 1, tone: "auto" },
+  ];
+
   return (
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -105,108 +170,30 @@ export function PatternsDashboard() {
           </span>
         </CardHeader>
         <CardBody className="p-0">
-          <table className="w-full">
-            <thead className="border-b border-line bg-surface-2">
-              <tr className="text-[10px] uppercase tracking-wider text-fg-dim">
-                <th className="px-3 py-2 text-left">Event type</th>
-                <th className="px-3 py-2 text-left">Sentiment</th>
-                <th className="px-3 py-2 text-right">N</th>
-                <th className="px-3 py-2 text-right">Avg 1d</th>
-                <th className="px-3 py-2 text-right">Median</th>
-                <th className="px-3 py-2 text-right">Stdev</th>
-                <th className="px-3 py-2 text-right">Hit rate</th>
-                <th className="px-3 py-2 text-right">Tradability</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line">
-              {ranked.map((p) => {
-                const b = p.best;
-                return (
-                  <tr
-                    key={p.event_type}
-                    className="text-xs transition-colors hover:bg-surface-2"
-                  >
-                    <td className="px-3 py-2 font-mono font-medium text-fg">
-                      {p.event_type}
-                    </td>
-                    <td className="px-3 py-2">
-                      <Badge
-                        tone={
-                          b.sentiment === "positive"
-                            ? "positive"
-                            : b.sentiment === "negative"
-                              ? "negative"
-                              : "default"
-                        }
-                      >
-                        {b.sentiment}
-                      </Badge>
-                    </td>
-                    <td className="tabular px-3 py-2 text-right text-fg">
-                      {b.n}
-                    </td>
-                    <td
-                      className={cn(
-                        "tabular px-3 py-2 text-right",
-                        b.avg_pct > 0
-                          ? "text-positive"
-                          : b.avg_pct < 0
-                            ? "text-negative"
-                            : "text-fg-muted",
-                      )}
-                    >
-                      {fmtPct(b.avg_pct)}
-                    </td>
-                    <td className="tabular px-3 py-2 text-right text-fg-muted">
-                      {fmtPct(b.median_pct)}
-                    </td>
-                    <td className="tabular px-3 py-2 text-right text-fg-dim">
-                      {b.stddev_pct.toFixed(2)}%
-                    </td>
-                    <td className="tabular px-3 py-2 text-right text-fg">
-                      {(b.hit_rate * 100).toFixed(0)}%
-                    </td>
-                    <td className="tabular px-3 py-2 text-right">
-                      <span
-                        className={cn(
-                          "rounded px-1.5 py-0.5 font-mono",
-                          b.empirical_tradability > 0.6
-                            ? "bg-positive/15 text-positive"
-                            : b.empirical_tradability > 0.3
-                              ? "bg-warning/15 text-warning"
-                              : "bg-line-2 text-fg-muted",
-                        )}
-                      >
-                        {(b.empirical_tradability * 100).toFixed(0)}%
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
-              {ranked.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={8}
-                    className="px-3 py-8 text-center text-sm text-fg-muted"
-                  >
-                    No patterns yet. Run{" "}
-                    <code className="rounded bg-surface-2 px-1 py-0.5 font-mono text-xs">
-                      npm run backfill:news
-                    </code>{" "}
-                    →{" "}
-                    <code className="rounded bg-surface-2 px-1 py-0.5 font-mono text-xs">
-                      npm run reclassify
-                    </code>{" "}
-                    →{" "}
-                    <code className="rounded bg-surface-2 px-1 py-0.5 font-mono text-xs">
-                      npm run test:impact
-                    </code>{" "}
-                    to populate.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
+          {ranked.length === 0 ? (
+            <div className="px-3 py-8 text-center text-sm text-fg-muted">
+              No patterns yet. Run{" "}
+              <code className="rounded bg-surface-2 px-1 py-0.5 font-mono text-xs">
+                npm run backfill:news
+              </code>{" "}
+              →{" "}
+              <code className="rounded bg-surface-2 px-1 py-0.5 font-mono text-xs">
+                npm run reclassify
+              </code>{" "}
+              →{" "}
+              <code className="rounded bg-surface-2 px-1 py-0.5 font-mono text-xs">
+                npm run test:impact
+              </code>{" "}
+              to populate.
+            </div>
+          ) : (
+            <DataTable<PatternsByType>
+              columns={leaderboardColumns}
+              rows={ranked}
+              getKey={(p) => p.event_type}
+              minWidth={640}
+            />
+          )}
         </CardBody>
       </Card>
 
@@ -219,66 +206,12 @@ export function PatternsDashboard() {
           </span>
         </CardHeader>
         <CardBody className="p-0">
-          <table className="w-full">
-            <thead className="border-b border-line bg-surface-2">
-              <tr className="text-[10px] uppercase tracking-wider text-fg-dim">
-                <th className="px-3 py-2 text-left">Event type</th>
-                <th className="px-3 py-2 text-right">Hardcoded</th>
-                <th className="px-3 py-2 text-right">Empirical</th>
-                <th className="px-3 py-2 text-right">Δ</th>
-                <th className="px-3 py-2 text-left">Verdict</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line">
-              {data.hardcoded_vs_empirical.map((c) => (
-                <tr
-                  key={c.event_type}
-                  className="text-xs transition-colors hover:bg-surface-2"
-                >
-                  <td className="px-3 py-2 font-mono text-fg">{c.event_type}</td>
-                  <td className="tabular px-3 py-2 text-right text-fg-muted">
-                    {(c.hardcoded * 100).toFixed(0)}%
-                  </td>
-                  <td className="tabular px-3 py-2 text-right text-fg">
-                    {c.empirical != null
-                      ? `${(c.empirical * 100).toFixed(0)}%`
-                      : "—"}
-                  </td>
-                  <td
-                    className={cn(
-                      "tabular px-3 py-2 text-right",
-                      c.delta == null
-                        ? "text-fg-dim"
-                        : c.delta > 0
-                          ? "text-positive"
-                          : c.delta < 0
-                            ? "text-negative"
-                            : "text-fg-muted",
-                    )}
-                  >
-                    {c.delta == null
-                      ? "—"
-                      : `${c.delta >= 0 ? "+" : ""}${(c.delta * 100).toFixed(0)}%`}
-                  </td>
-                  <td className="px-3 py-2">
-                    <Badge
-                      tone={
-                        c.verdict === "calibrated"
-                          ? "positive"
-                          : c.verdict === "underrated"
-                            ? "info"
-                            : c.verdict === "overrated"
-                              ? "negative"
-                              : "default"
-                      }
-                    >
-                      {c.verdict.replace("_", " ")}
-                    </Badge>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <DataTable<Comparison>
+            columns={calibrationColumns}
+            rows={data.hardcoded_vs_empirical}
+            getKey={(c) => c.event_type}
+            minWidth={520}
+          />
         </CardBody>
       </Card>
 
@@ -292,42 +225,12 @@ export function PatternsDashboard() {
             </span>
           </CardHeader>
           <CardBody className="p-0">
-            <table className="w-full">
-              <thead className="border-b border-line bg-surface-2">
-                <tr className="text-[10px] uppercase tracking-wider text-fg-dim">
-                  <th className="px-3 py-2 text-left">Asset</th>
-                  <th className="px-3 py-2 text-left">Event type</th>
-                  <th className="px-3 py-2 text-right">N</th>
-                  <th className="px-3 py-2 text-right">Avg 1d</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line">
-                {data.per_asset.map((r, i) => (
-                  <tr
-                    key={`${r.asset_id}-${r.event_type}-${i}`}
-                    className="text-xs transition-colors hover:bg-surface-2"
-                  >
-                    <td className="px-3 py-2 font-mono text-fg">{r.asset_id}</td>
-                    <td className="px-3 py-2 text-fg-muted">{r.event_type}</td>
-                    <td className="tabular px-3 py-2 text-right text-fg">
-                      {r.n}
-                    </td>
-                    <td
-                      className={cn(
-                        "tabular px-3 py-2 text-right font-medium",
-                        r.avg > 0
-                          ? "text-positive"
-                          : r.avg < 0
-                            ? "text-negative"
-                            : "text-fg-muted",
-                      )}
-                    >
-                      {fmtPct(r.avg)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <DataTable<PerAsset>
+              columns={perAssetColumns}
+              rows={data.per_asset}
+              getKey={(r, i) => `${r.asset_id}-${r.event_type}-${i}`}
+              minWidth={420}
+            />
           </CardBody>
         </Card>
       ) : null}

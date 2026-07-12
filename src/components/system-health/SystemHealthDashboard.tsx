@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
+import { DataTable } from "@/components/ui/DataTable";
 import { fmtRelative } from "@/lib/format";
 import { cn } from "@/components/ui/cn";
 import { FrameworkSwitchPanel } from "./FrameworkSwitchPanel";
@@ -223,19 +224,29 @@ export function SystemHealthDashboard() {
               No gate refusals in the last 24h.
             </div>
           ) : (
-            <ul className="divide-y divide-line">
-              {s.recent_gate_refusals.map((r) => (
-                <li
-                  key={r.rule}
-                  className="flex items-center justify-between px-4 py-2 text-xs"
-                >
-                  <code className="rounded bg-surface-2 px-1.5 py-0.5 text-fg">
-                    {r.rule}
-                  </code>
-                  <span className="tabular text-fg-muted">{r.count}</span>
-                </li>
-              ))}
-            </ul>
+            <DataTable
+              rows={s.recent_gate_refusals}
+              getKey={(r) => r.rule}
+              minWidth={360}
+              columns={[
+                {
+                  key: "rule",
+                  header: "Rule",
+                  role: "identifier",
+                  render: (r) => (
+                    <code className="rounded bg-surface-2 px-1.5 py-0.5 text-fg">
+                      {r.rule}
+                    </code>
+                  ),
+                },
+                {
+                  key: "count",
+                  header: "Count",
+                  role: "magnitude",
+                  num: (r) => r.count,
+                },
+              ]}
+            />
           )}
         </CardBody>
       </Card>

@@ -19,6 +19,7 @@ import {
   fmtSodexSymbol,
   fmtUntil,
 } from "@/lib/format";
+import { formatNum } from "@/lib/format/num";
 import { cn } from "@/components/ui/cn";
 
 // Editorial design tokens — keep in sync with HeroStat + SignalCard.
@@ -122,14 +123,6 @@ const REGIME_META: Record<
   mixed: { label: "MIXED", color: WARNING },
   neutral: { label: "NEUTRAL", color: TEXT_MUTED },
 };
-
-function fmtUsdCompact(n: number): string {
-  const abs = Math.abs(n);
-  if (abs >= 1e9) return `${n < 0 ? "-" : ""}$${(abs / 1e9).toFixed(1)}B`;
-  if (abs >= 1e6) return `${n < 0 ? "-" : ""}$${(abs / 1e6).toFixed(1)}M`;
-  if (abs >= 1e3) return `${n < 0 ? "-" : ""}$${(abs / 1e3).toFixed(1)}K`;
-  return `${n < 0 ? "-" : ""}$${abs.toFixed(0)}`;
-}
 
 export function BriefingPage() {
   const [latest, setLatest] = useState<BriefingRow | null>(null);
@@ -597,7 +590,11 @@ function BriefingHero({
                 value={fmtPrice(topPickTrade.stop_price)}
                 sub={
                   topPickTrade.stop_pct != null
-                    ? `−${topPickTrade.stop_pct.toFixed(1)}%`
+                    ? formatNum(-topPickTrade.stop_pct, {
+                        unit: "%",
+                        sign: true,
+                        dp: 1,
+                      }).text
                     : undefined
                 }
                 tone="negative"
@@ -607,18 +604,20 @@ function BriefingHero({
                 value={fmtPrice(topPickTrade.target_price)}
                 sub={
                   topPickTrade.target_pct != null
-                    ? `+${topPickTrade.target_pct.toFixed(1)}%`
+                    ? formatNum(topPickTrade.target_pct, {
+                        unit: "%",
+                        sign: true,
+                        dp: 1,
+                      }).text
                     : undefined
                 }
                 tone="positive"
               />
               <BriefFigure
                 label="Size"
-                value={
-                  topPickTrade.size_usd != null
-                    ? `$${topPickTrade.size_usd.toLocaleString()}`
-                    : "—"
-                }
+                num={topPickTrade.size_usd}
+                unit="$"
+                compact
                 sub={
                   topPickTrade.rr_ratio != null
                     ? `R:R ${topPickTrade.rr_ratio.toFixed(2)}`
@@ -714,11 +713,10 @@ function BriefingHero({
               >
                 <BriefFigure
                   label="Hit rate (T+1d)"
-                  value={
-                    topPickTrade.backtest.hit_rate_1d_pct != null
-                      ? `${topPickTrade.backtest.hit_rate_1d_pct.toFixed(0)}%`
-                      : "—"
-                  }
+                  num={topPickTrade.backtest.hit_rate_1d_pct}
+                  unit="%"
+                  dp={0}
+                  tone="auto"
                   sub={
                     topPickTrade.backtest.expected_direction === "up"
                       ? "moves up"
@@ -726,43 +724,22 @@ function BriefingHero({
                         ? "moves down"
                         : undefined
                   }
-                  tone={
-                    (topPickTrade.backtest.hit_rate_1d_pct ?? 0) >= 60
-                      ? "positive"
-                      : (topPickTrade.backtest.hit_rate_1d_pct ?? 0) < 50
-                        ? "negative"
-                        : "neutral"
-                  }
                 />
                 <BriefFigure
                   label="Avg T+1d"
-                  value={
-                    topPickTrade.backtest.avg_impact_1d_pct != null
-                      ? `${topPickTrade.backtest.avg_impact_1d_pct >= 0 ? "+" : ""}${topPickTrade.backtest.avg_impact_1d_pct.toFixed(2)}%`
-                      : "—"
-                  }
-                  tone={
-                    (topPickTrade.backtest.avg_impact_1d_pct ?? 0) > 0
-                      ? "positive"
-                      : (topPickTrade.backtest.avg_impact_1d_pct ?? 0) < 0
-                        ? "negative"
-                        : "neutral"
-                  }
+                  num={topPickTrade.backtest.avg_impact_1d_pct}
+                  unit="%"
+                  sign
+                  dp={2}
+                  tone="auto"
                 />
                 <BriefFigure
                   label="Avg T+3d"
-                  value={
-                    topPickTrade.backtest.avg_impact_3d_pct != null
-                      ? `${topPickTrade.backtest.avg_impact_3d_pct >= 0 ? "+" : ""}${topPickTrade.backtest.avg_impact_3d_pct.toFixed(2)}%`
-                      : "—"
-                  }
-                  tone={
-                    (topPickTrade.backtest.avg_impact_3d_pct ?? 0) > 0
-                      ? "positive"
-                      : (topPickTrade.backtest.avg_impact_3d_pct ?? 0) < 0
-                        ? "negative"
-                        : "neutral"
-                  }
+                  num={topPickTrade.backtest.avg_impact_3d_pct}
+                  unit="%"
+                  sign
+                  dp={2}
+                  tone="auto"
                 />
                 <BriefFigure
                   label="Bucket"
@@ -1021,7 +998,10 @@ function InputsSummary({ inputs }: { inputs: BriefingInputsSummary }) {
       body:
         inputs.etf_net_flow_24h_usd == null
           ? "(no recent data)"
-          : fmtUsdCompact(inputs.etf_net_flow_24h_usd),
+          : formatNum(inputs.etf_net_flow_24h_usd, {
+              unit: "$",
+              compact: true,
+            }).text,
     },
     {
       label: "Track record signal",
@@ -1043,7 +1023,10 @@ function InputsSummary({ inputs }: { inputs: BriefingInputsSummary }) {
           ? `${inputs.treasury_summary.acquiring_companies} treasuries acquired ` +
             `${inputs.treasury_summary.net_btc_acquired.toLocaleString()} BTC` +
             (inputs.treasury_summary.total_acq_cost_usd != null
-              ? ` (${fmtUsdCompact(inputs.treasury_summary.total_acq_cost_usd)} disclosed)`
+              ? ` (${formatNum(inputs.treasury_summary.total_acq_cost_usd, {
+                  unit: "$",
+                  compact: true,
+                }).text} disclosed)`
               : "") +
             ` · total held: ${inputs.treasury_summary.total_btc_held_latest.toLocaleString()} BTC`
           : "(no recent purchases on file)",
@@ -1206,24 +1189,56 @@ function ArchiveRow({ briefing }: { briefing: BriefingRow }) {
 
 /**
  * One slot in the top-pick trade-levels grid. Fraunces value, mono small-caps label.
+ *
+ * Two value modes:
+ *  - text: pass `value` (a pre-formatted string like fmtPrice(...) or a label).
+ *  - number: pass `num` (+ optional unit / sign / dp / compact) and the figure
+ *    routes it through the shared one-number policy (formatNum). `tone="auto"`
+ *    colours by sign (green up / red down; zero recedes) using this page's
+ *    editorial hex palette — same precision as <Num>, kept on-brand.
  */
 function BriefFigure({
   label,
   value,
+  num,
+  unit,
+  sign,
+  dp,
+  compact,
   sub,
   tone = "neutral",
 }: {
   label: string;
-  value: string;
+  value?: string;
+  num?: number | null;
+  unit?: string;
+  sign?: boolean;
+  dp?: number;
+  compact?: boolean;
   sub?: string;
-  tone?: "positive" | "negative" | "neutral";
+  tone?: "positive" | "negative" | "neutral" | "auto";
 }) {
+  const parts =
+    num !== undefined ? formatNum(num, { unit, sign, dp, compact }) : null;
+  const text = parts ? parts.text : (value ?? "—");
+  const resolvedTone =
+    tone === "auto"
+      ? parts && !parts.isEmpty
+        ? parts.isNegative
+          ? "negative"
+          : parts.isZero
+            ? "zero"
+            : "positive"
+        : "neutral"
+      : tone;
   const color =
-    tone === "positive"
+    resolvedTone === "positive"
       ? POSITIVE
-      : tone === "negative"
+      : resolvedTone === "negative"
         ? NEGATIVE
-        : TEXT_BRAND;
+        : resolvedTone === "zero"
+          ? TEXT_DIM
+          : TEXT_BRAND;
   return (
     <div className="flex flex-col" style={{ minWidth: "72px" }}>
       <span
@@ -1236,7 +1251,7 @@ function BriefFigure({
           lineHeight: 1.1,
         }}
       >
-        {value}
+        {text}
       </span>
       <span
         className="font-[var(--font-jetbrains-mono)] uppercase"

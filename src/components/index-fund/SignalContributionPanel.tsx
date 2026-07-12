@@ -25,7 +25,8 @@ import {
   YAxis,
 } from "recharts";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
-import { fmtUsd } from "@/lib/format";
+import { Num } from "@/components/ui/Num";
+import { DataTable, type Column } from "@/components/ui/DataTable";
 import { cn } from "@/components/ui/cn";
 
 interface AttribRow {
@@ -127,12 +128,65 @@ export function SignalContributionPanel() {
       pnl: r.total_pnl_usd ?? 0,
     }));
 
-  const totalToneClass =
-    data.total_pnl_usd > 0
-      ? "text-positive"
-      : data.total_pnl_usd < 0
-        ? "text-negative"
-        : "text-fg";
+  // Per-rebalance attribution table columns. Signal P&L is the ONE number per
+  // row → magnitude bar scaled to the largest attributed P&L; the accessor
+  // returns null on !sanity_ok / null-pnl so those rows show Empty (preserving
+  // the prior "—" behaviour) instead of a bar.
+  const columns: Column<AttribRow>[] = [
+    {
+      key: "when",
+      header: "When",
+      role: "context",
+      align: "left",
+      render: (r) => new Date(r.asof_ms).toISOString().slice(0, 10),
+    },
+    {
+      key: "pnl",
+      header: "Signal P&L",
+      role: "magnitude",
+      num: (r) =>
+        r.sanity_ok && r.total_pnl_usd != null ? r.total_pnl_usd : null,
+      unit: "$",
+      sign: true,
+      compact: true,
+      tone: "auto",
+    },
+    {
+      key: "tilts",
+      header: "Top tilts (Δ bps)",
+      role: "context",
+      align: "left",
+      render: (r) =>
+        r.sanity_ok ? (
+          <TopTilts
+            deltas={r.weight_deltas_bps}
+            symbols={data.symbols ?? {}}
+          />
+        ) : (
+          <span className="text-fg-dim">—</span>
+        ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      role: "context",
+      align: "left",
+      render: (r) =>
+        !r.sanity_ok ? (
+          <span className="rounded border border-warning/40 bg-warning/10 px-1.5 py-0.5 text-[10px] text-warning">
+            {r.sanity_note ?? "sanity failed"}
+          </span>
+        ) : r.resolved_at != null ? (
+          <span className="rounded border border-line bg-surface-2 px-1.5 py-0.5 text-[10px] text-fg-dim">
+            resolved
+          </span>
+        ) : (
+          <span className="rounded border border-info/40 bg-info/10 px-1.5 py-0.5 text-[10px] text-info">
+            pending
+          </span>
+        ),
+    },
+  ];
 
   return (
     <Card>
@@ -149,9 +203,14 @@ export function SignalContributionPanel() {
           <span className="text-[10px] uppercase tracking-wider text-fg-dim">
             cumulative signal P&amp;L
           </span>
-          <span className={cn("tabular text-2xl font-semibold", totalToneClass)}>
-            {fmtUsd(data.total_pnl_usd)}
-          </span>
+          <Num
+            value={data.total_pnl_usd}
+            unit="$"
+            sign
+            compact
+            tone="auto"
+            tier="lead"
+          />
           <span className="text-[11px] text-fg-dim">
             sum across {data.resolved_count} resolved rebalance
             {data.resolved_count !== 1 ? "s" : ""}. Positive = news signals
@@ -205,72 +264,12 @@ export function SignalContributionPanel() {
         ) : null}
 
         {/* Per-rebalance table */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead className="border-b border-line bg-surface-2">
-              <tr className="text-[10px] uppercase tracking-wider text-fg-dim">
-                <th className="px-3 py-2 text-left">When</th>
-                <th className="px-3 py-2 text-right">Signal P&amp;L</th>
-                <th className="px-3 py-2 text-left">Top tilts (Δ bps)</th>
-                <th className="px-3 py-2 text-left">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line">
-              {data.rebalances.slice(0, 12).map((r) => {
-                const date = new Date(r.asof_ms).toISOString().slice(0, 10);
-                return (
-                  <tr
-                    key={r.id}
-                    className="transition-colors hover:bg-surface-2"
-                  >
-                    <td className="px-3 py-2 text-fg-muted">{date}</td>
-                    <td
-                      className={cn(
-                        "tabular px-3 py-2 text-right",
-                        r.total_pnl_usd != null && r.sanity_ok
-                          ? r.total_pnl_usd > 0
-                            ? "text-positive"
-                            : r.total_pnl_usd < 0
-                              ? "text-negative"
-                              : "text-fg"
-                          : "text-fg-dim",
-                      )}
-                    >
-                      {r.sanity_ok && r.total_pnl_usd != null
-                        ? fmtUsd(r.total_pnl_usd)
-                        : "—"}
-                    </td>
-                    <td className="px-3 py-2 text-fg-muted">
-                      {r.sanity_ok ? (
-                        <TopTilts
-                          deltas={r.weight_deltas_bps}
-                          symbols={data.symbols ?? {}}
-                        />
-                      ) : (
-                        <span className="text-fg-dim">—</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-[10px]">
-                      {!r.sanity_ok ? (
-                        <span className="rounded border border-warning/40 bg-warning/10 px-1.5 py-0.5 text-warning">
-                          {r.sanity_note ?? "sanity failed"}
-                        </span>
-                      ) : r.resolved_at != null ? (
-                        <span className="rounded border border-line bg-surface-2 px-1.5 py-0.5 text-fg-dim">
-                          resolved
-                        </span>
-                      ) : (
-                        <span className="rounded border border-info/40 bg-info/10 px-1.5 py-0.5 text-info">
-                          pending
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <DataTable<AttribRow>
+          columns={columns}
+          rows={data.rebalances.slice(0, 12)}
+          getKey={(r) => r.id}
+          minWidth={560}
+        />
       </CardBody>
     </Card>
   );

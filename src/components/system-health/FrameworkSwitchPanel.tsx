@@ -10,7 +10,8 @@
 
 import { useEffect, useState } from "react";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
-import { cn } from "@/components/ui/cn";
+import { Num } from "@/components/ui/Num";
+import { Timestamp } from "@/components/ui/Timestamp";
 
 interface SwitchRow {
   id: string;
@@ -96,20 +97,22 @@ export function FrameworkSwitchPanel() {
             <tbody className="divide-y divide-line">
               {rows.map((r) => (
                 <tr key={r.id} className="transition-colors hover:bg-surface-2">
-                  <td className="px-3 py-2 text-fg-muted">{r.switched_at}</td>
+                  <td className="px-3 py-2 text-fg-muted">
+                    <Timestamp ms={new Date(r.switched_at).getTime()} mode="absolute" />
+                  </td>
                   <td className="px-3 py-2 text-fg">
                     <span className="font-mono text-[11px]">
                       {r.from_version} → {r.to_version}
                     </span>
                   </td>
                   <td className="tabular px-3 py-2 text-right text-fg">
-                    ${r.live_nav_at_switch.toFixed(0)}
+                    <Num value={r.live_nav_at_switch} unit="$" dp={0} />
                   </td>
-                  <td className={cn("tabular px-3 py-2 text-right", retCls(r.v1_30d_return))}>
-                    {fmtRet(r.v1_30d_return)}
+                  <td className="tabular px-3 py-2 text-right">
+                    <Num value={r.v1_30d_return} unit="%" sign tone="auto" dp={1} />
                   </td>
-                  <td className={cn("tabular px-3 py-2 text-right", retCls(r.v2_30d_return))}>
-                    {fmtRet(r.v2_30d_return)}
+                  <td className="tabular px-3 py-2 text-right">
+                    <Num value={r.v2_30d_return} unit="%" sign tone="auto" dp={1} />
                   </td>
                   <td className="px-3 py-2 text-[10px]">
                     {r.user_confirmed_understanding ? (
@@ -130,13 +133,4 @@ export function FrameworkSwitchPanel() {
       </CardBody>
     </Card>
   );
-}
-
-function fmtRet(n: number | null): string {
-  if (n == null) return "—";
-  return `${n >= 0 ? "+" : ""}${n.toFixed(1)}%`;
-}
-function retCls(n: number | null): string {
-  if (n == null) return "text-fg-dim";
-  return n >= 0 ? "text-positive" : "text-negative";
 }

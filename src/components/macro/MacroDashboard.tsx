@@ -10,7 +10,6 @@ import { useEffect, useState } from "react";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Stat } from "@/components/ui/Stat";
 import { isPublicMode } from "@/lib/public-mode";
-import { Badge } from "@/components/ui/Badge";
 import { cn } from "@/components/ui/cn";
 
 interface UpcomingRow {
@@ -78,21 +77,6 @@ function fmtMacroRaw(raw: string | null | undefined): string {
   if (abs >= 1_000) return `${(n / 1_000).toFixed(2)}K`;
   // Small numbers: trim trailing zeros after at most 2 decimals.
   return Number.isInteger(n) ? `${n}` : n.toFixed(2);
-}
-
-function surpriseTone(s: HistoryRow):
-  | "positive"
-  | "negative"
-  | "warning"
-  | "default" {
-  if (s.surprise == null) return "default";
-  const abs = Math.abs(s.surprise);
-  // Inflation/PPI/CPI: cooler = positive (risk-on); hotter = negative.
-  // Activity (PMI, retail): hotter = positive.
-  // We don't know the indicator's "polarity" here without a lookup,
-  // so just color by absolute deviation magnitude.
-  if (abs < 0.05) return "default";
-  return s.surprise >= 0 ? "warning" : "warning";
 }
 
 export function MacroDashboard() {
@@ -272,9 +256,9 @@ export function MacroDashboard() {
                         {fmtMacroRaw(s.previous_raw)}
                       </td>
                       <td className="px-3 py-2 text-right">
-                        <Badge tone={surpriseTone(s)} mono>
+                        <span className="tabular-nums text-fg">
                           {fmtSurprise(s)}
-                        </Badge>
+                        </span>
                       </td>
                     </tr>
                   ))
@@ -329,7 +313,9 @@ export function MacroDashboard() {
                       {fmtMacroRaw(r.previous_raw)}
                     </td>
                     <td className="px-3 py-2 text-right text-[11px]">
-                      {r.surprise != null ? fmtSurprise(r) : "—"}
+                      <span className="tabular-nums text-fg">
+                        {fmtSurprise(r)}
+                      </span>
                     </td>
                   </tr>
                 ))}
