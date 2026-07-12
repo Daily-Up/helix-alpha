@@ -152,7 +152,7 @@ export function HoldingsTable({
       ),
     },
     { key: "weight", header: "Weight", role: "magnitude", num: (r) => r.weightPct, unit: "%", dp: 1 },
-    { key: "drift", header: "Drift", role: "magnitude", num: (r) => r.driftPct, unit: "%", sign: true, dp: 1, tone: "auto" },
+    { key: "drift", header: "Drift", role: "magnitude", num: (r) => r.driftPct, unit: "%", sign: true, dp: 2, tone: "auto" },
     { key: "value", header: "Value", role: "lead", num: (r) => r.valueUsd, unit: "$", compact: true },
     { key: "pnl", header: "P&L", role: "magnitude", num: (r) => r.pnlUsd, unit: "$", sign: true, tone: "auto" },
     {

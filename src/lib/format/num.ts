@@ -67,7 +67,9 @@ export function formatNum(
   } else if (a >= 1) {
     body = a.toFixed(opts.dp ?? 2);
   } else {
-    body = trimSubOne(a);
+    // Honour an explicit dp even sub-1 (e.g. a 0.9% drift shows "0.9%",
+    // not "0.9027%"); otherwise cap at 4 significant decimals.
+    body = opts.dp != null ? a.toFixed(opts.dp) : trimSubOne(a);
   }
 
   const signStr = neg ? "-" : opts.sign && value > 0 ? "+" : "";
