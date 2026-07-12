@@ -285,6 +285,23 @@ export default async function PerformancePage() {
       ? totals.realized_wins / totals.priced_resolved
       : null;
 
+  // Column maxes for the "Avg realized" magnitude bars — so the strongest
+  // and weakest tiers / catalysts read as length, not just a signed number.
+  const tierRealizedMax = Math.max(
+    0,
+    ...tiers.map((t) => Math.abs(t.avg_realized_pct ?? 0)),
+  );
+  const subtypeRealizedMax = Math.max(
+    0,
+    ...subtypes.map((s) => Math.abs(s.avg_realized_pct ?? 0)),
+  );
+  const recentRealizedMax = Math.max(
+    0,
+    ...recent
+      .filter((r) => !(r.outcome === "flat" && r.price_at_outcome == null))
+      .map((r) => Math.abs(r.realized_pct ?? 0)),
+  );
+
   return (
     <Shell>
       <HairlineHeader
@@ -341,19 +358,7 @@ export default async function PerformancePage() {
             <Cell key="w" v={t.target_hit} color={COLORS.pos} />,
             <Cell key="l" v={t.stop_hit} color={COLORS.neg} />,
             String(t.flat),
-            <span
-              key="r"
-              style={{
-                color:
-                  t.avg_realized_pct == null
-                    ? COLORS.text
-                    : t.avg_realized_pct > 0
-                      ? COLORS.pos
-                      : COLORS.neg,
-              }}
-            >
-              {fmtPct(t.avg_realized_pct, true)}
-            </span>,
+            <MagBar key="r" value={t.avg_realized_pct} max={tierRealizedMax} />,
           ])}
         />
       </Section>
@@ -369,19 +374,7 @@ export default async function PerformancePage() {
               <Cell key="w" v={s.wins} color={COLORS.pos} />,
               <Cell key="l" v={s.losses} color={COLORS.neg} />,
               String(s.flat),
-              <span
-                key="r"
-                style={{
-                  color:
-                    s.avg_realized_pct == null
-                      ? COLORS.text
-                      : s.avg_realized_pct > 0
-                        ? COLORS.pos
-                        : COLORS.neg,
-                }}
-              >
-                {fmtPct(s.avg_realized_pct, true)}
-              </span>,
+              <MagBar key="r" value={s.avg_realized_pct} max={subtypeRealizedMax} />,
             ])}
           />
         </Section>
@@ -425,22 +418,19 @@ export default async function PerformancePage() {
                 // placeholder, not a real flat. Show "—" to be honest.
                 const unpriceable =
                   r.outcome === "flat" && r.price_at_outcome == null;
+                if (unpriceable) {
+                  return (
+                    <span
+                      key="r"
+                      title="no kline data for this asset"
+                      style={{ color: COLORS.muted }}
+                    >
+                      —
+                    </span>
+                  );
+                }
                 return (
-                  <span
-                    key="r"
-                    title={unpriceable ? "no kline data for this asset" : undefined}
-                    style={{
-                      color: unpriceable
-                        ? COLORS.muted
-                        : r.realized_pct == null
-                          ? COLORS.text
-                          : r.realized_pct > 0
-                            ? COLORS.pos
-                            : COLORS.neg,
-                    }}
-                  >
-                    {unpriceable ? "—" : fmtPct(r.realized_pct, true)}
-                  </span>
+                  <MagBar key="r" value={r.realized_pct} max={recentRealizedMax} />
                 );
               })(),
             ])}
@@ -544,6 +534,50 @@ function SimpleTable({ head, rows }: { head: string[]; rows: React.ReactNode[][]
 
 function Cell({ v, color }: { v: number; color: string }) {
   return <span style={{ color: v > 0 ? color : COLORS.muted }}>{v}</span>;
+}
+
+/**
+ * A signed percentage with a proportional bar behind it, scaled to the
+ * column max. Left-anchored so the eye reads magnitude as length; green
+ * up / red down. Rendered in this page's inline-style idiom (not the
+ * dashboard <Magnitude>) so the editorial design language is preserved.
+ */
+function MagBar({ value, max }: { value: number | null; max: number }) {
+  const color =
+    value == null ? COLORS.muted : value > 0 ? COLORS.pos : COLORS.neg;
+  const pct =
+    value != null && max > 0 ? Math.min(100, (Math.abs(value) / max) * 100) : 0;
+  return (
+    <span
+      style={{
+        position: "relative",
+        display: "inline-block",
+        minWidth: 96,
+        padding: "3px 8px",
+      }}
+    >
+      {value != null && pct > 0 && (
+        <span
+          aria-hidden
+          style={{
+            position: "absolute",
+            top: 3,
+            bottom: 3,
+            left: 0,
+            width: `${pct}%`,
+            background: color,
+            opacity: 0.28,
+            borderRadius: 2,
+          }}
+        />
+      )}
+      <span
+        style={{ position: "relative", color, fontVariantNumeric: "tabular-nums" }}
+      >
+        {value == null ? "—" : fmtPct(value, true)}
+      </span>
+    </span>
+  );
 }
 
 function HeadlineCell({
