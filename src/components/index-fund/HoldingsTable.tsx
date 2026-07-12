@@ -1,8 +1,7 @@
 "use client";
 
-import { Badge } from "@/components/ui/Badge";
-import { fmtAssetSymbol, fmtPct, fmtUsd } from "@/lib/format";
-import { cn } from "@/components/ui/cn";
+import { fmtAssetSymbol } from "@/lib/format";
+import { DataTable, type Column } from "@/components/ui/DataTable";
 
 /**
  * Turn the rebalance worker's compact driver string
@@ -77,6 +76,20 @@ export interface PositionView {
   rationale: string | null;
 }
 
+/** Display row — only the fields the migrated table renders. */
+interface HRow {
+  key: string;
+  symbol: string;
+  name: string;
+  market: string | null;
+  weightPct: number;
+  driftPct: number | null;
+  valueUsd: number;
+  pnlUsd: number | null;
+  why: string | null;
+  isCash?: boolean;
+}
+
 export function HoldingsTable({
   positions,
   cashUsd,
@@ -88,147 +101,72 @@ export function HoldingsTable({
 }) {
   const cashWeight = navTotal > 0 ? cashUsd / navTotal : 0;
 
-  return (
-    <div className="overflow-hidden">
-      <table className="w-full">
-        <thead className="border-b border-line bg-surface-2">
-          <tr className="text-[10px] uppercase tracking-wider text-fg-dim">
-            <th className="px-3 py-2 text-left">Asset</th>
-            <th className="px-3 py-2 text-left">Mkt</th>
-            <th className="px-3 py-2 text-right">Target</th>
-            <th className="px-3 py-2 text-right">Current</th>
-            <th className="px-3 py-2 text-right">Drift</th>
-            <th className="px-3 py-2 text-right">Quantity</th>
-            <th className="px-3 py-2 text-right">Avg Entry</th>
-            <th className="px-3 py-2 text-right">Last Px</th>
-            <th className="px-3 py-2 text-right">Value</th>
-            <th className="px-3 py-2 text-right">P&L</th>
-            <th className="px-3 py-2 text-left">Why</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-line">
-          {positions.map((p) => {
-            const drift = p.current_weight - p.target_weight;
-            return (
-              <tr
-                key={p.asset_id}
-                className="text-xs transition-colors hover:bg-surface-2"
-              >
-                <td className="px-3 py-2">
-                  <div className="font-mono font-medium text-fg">
-                    {fmtAssetSymbol(
-                      p.symbol,
-                      p.symbol.toLowerCase().startsWith("ssi") ? "index" : undefined,
-                    )}
-                  </div>
-                  <div className="text-[10px] text-fg-dim">{p.name}</div>
-                </td>
-                <td className="px-3 py-2">
-                  {p.market ? (
-                    <Badge tone="default">{p.market.toUpperCase()}</Badge>
-                  ) : (
-                    "—"
-                  )}
-                </td>
-                <td className="tabular px-3 py-2 text-right text-fg">
-                  {(p.target_weight * 100).toFixed(2)}%
-                </td>
-                <td className="tabular px-3 py-2 text-right text-fg">
-                  {(p.current_weight * 100).toFixed(2)}%
-                </td>
-                <td
-                  className={cn(
-                    "tabular px-3 py-2 text-right",
-                    drift > 0.005
-                      ? "text-positive"
-                      : drift < -0.005
-                        ? "text-negative"
-                        : "text-fg-dim",
-                  )}
-                >
-                  {drift >= 0 ? "+" : ""}
-                  {(drift * 100).toFixed(2)}%
-                </td>
-                <td className="tabular px-3 py-2 text-right text-fg-muted">
-                  {p.quantity.toFixed(p.quantity < 1 ? 4 : 2)}
-                </td>
-                <td className="tabular px-3 py-2 text-right text-fg-dim">
-                  {p.avg_entry_price != null
-                    ? `$${p.avg_entry_price.toFixed(p.avg_entry_price < 1 ? 4 : 2)}`
-                    : "—"}
-                </td>
-                <td className="tabular px-3 py-2 text-right text-fg">
-                  {p.current_price != null
-                    ? `$${p.current_price.toFixed(p.current_price < 1 ? 4 : 2)}`
-                    : "—"}
-                </td>
-                <td className="tabular px-3 py-2 text-right font-medium text-fg">
-                  {fmtUsd(p.current_value_usd)}
-                </td>
-                <td
-                  className={cn(
-                    "tabular px-3 py-2 text-right",
-                    (p.unrealised_pnl_usd ?? 0) > 0
-                      ? "text-positive"
-                      : (p.unrealised_pnl_usd ?? 0) < 0
-                        ? "text-negative"
-                        : "text-fg-muted",
-                  )}
-                >
-                  {p.unrealised_pnl_usd != null
-                    ? fmtUsd(p.unrealised_pnl_usd)
-                    : "—"}
-                  {p.unrealised_pnl_pct != null ? (
-                    <div className="text-[10px] font-normal">
-                      {fmtPct(p.unrealised_pnl_pct)}
-                    </div>
-                  ) : null}
-                </td>
-                <td
-                  className="px-3 py-2 align-top text-[11px] leading-snug text-fg-muted"
-                  style={{ minWidth: "14rem", maxWidth: "22rem" }}
-                >
-                  {p.rationale ? (
-                    <span
-                      className="whitespace-normal"
-                      title={p.rationale}
-                    >
-                      {humanizeRationale(p.rationale)}
-                    </span>
-                  ) : (
-                    <span className="text-fg-dim">—</span>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-          {/* Cash row */}
-          <tr className="text-xs bg-surface-2/30">
-            <td className="px-3 py-2">
-              <div className="font-mono font-medium text-fg">USDC</div>
-              <div className="text-[10px] text-fg-dim">Cash reserve</div>
-            </td>
-            <td className="px-3 py-2">
-              <Badge tone="default">CASH</Badge>
-            </td>
-            <td className="px-3 py-2 text-right text-fg-muted">—</td>
-            <td className="tabular px-3 py-2 text-right text-fg">
-              {(cashWeight * 100).toFixed(2)}%
-            </td>
-            <td className="px-3 py-2 text-right text-fg-dim">—</td>
-            <td className="px-3 py-2 text-right text-fg-muted">—</td>
-            <td className="px-3 py-2 text-right text-fg-dim">—</td>
-            <td className="tabular px-3 py-2 text-right text-fg">$1.00</td>
-            <td className="tabular px-3 py-2 text-right font-medium text-fg">
-              {fmtUsd(cashUsd)}
-            </td>
-            <td className="px-3 py-2 text-right text-fg-dim">—</td>
-            <td className="px-3 py-2 text-[11px] text-fg-dim">
-              cash reserve (configurable in settings)
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  );
+  const rows: HRow[] = positions.map((p) => ({
+    key: p.asset_id,
+    symbol: p.symbol,
+    name: p.name,
+    market: p.market,
+    weightPct: p.current_weight * 100,
+    driftPct: (p.current_weight - p.target_weight) * 100,
+    valueUsd: p.current_value_usd,
+    pnlUsd: p.unrealised_pnl_usd,
+    why: p.rationale,
+  }));
+  rows.push({
+    key: "__cash__",
+    symbol: "USDC",
+    name: "Cash reserve",
+    market: null,
+    weightPct: cashWeight * 100,
+    driftPct: null,
+    valueUsd: cashUsd,
+    pnlUsd: null,
+    why: "cash reserve (configurable in settings)",
+    isCash: true,
+  });
+
+  // 11 flat columns → 6 role-based. Weight / Drift / P&L now ENCODE their
+  // magnitude (bar scaled to the column max), so which holdings dominate and
+  // which have drifted off target is skimmable, not computed. Target /
+  // Quantity / Avg-Entry / Last-Px folded away — low-variance context.
+  const columns: Column<HRow>[] = [
+    {
+      key: "asset",
+      header: "Asset",
+      role: "identifier",
+      render: (r) => (
+        <div className="flex flex-col leading-tight">
+          <span className="font-medium text-fg">
+            {fmtAssetSymbol(
+              r.symbol,
+              r.symbol.toLowerCase().startsWith("ssi") ? "index" : undefined,
+            )}
+            {r.market ? (
+              <span className="ml-1.5 text-[9px] uppercase tracking-wider text-fg-dim">
+                {r.market}
+              </span>
+            ) : null}
+          </span>
+          <span className="text-[10px] text-fg-dim">{r.name}</span>
+        </div>
+      ),
+    },
+    { key: "weight", header: "Weight", role: "magnitude", num: (r) => r.weightPct, unit: "%", dp: 1 },
+    { key: "drift", header: "Drift", role: "magnitude", num: (r) => r.driftPct, unit: "%", sign: true, dp: 1, tone: "auto" },
+    { key: "value", header: "Value", role: "lead", num: (r) => r.valueUsd, unit: "$", compact: true },
+    { key: "pnl", header: "P&L", role: "magnitude", num: (r) => r.pnlUsd, unit: "$", sign: true, tone: "auto" },
+    {
+      key: "why",
+      header: "Why",
+      role: "context",
+      align: "left",
+      render: (r) => (
+        <span className="whitespace-normal" title={r.why ?? undefined}>
+          {r.isCash ? r.why : humanizeRationale(r.why)}
+        </span>
+      ),
+    },
+  ];
+
+  return <DataTable columns={columns} rows={rows} getKey={(r) => r.key} minWidth={620} />;
 }

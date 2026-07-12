@@ -32,6 +32,8 @@ import {
 import { getLivePrice } from "@/lib/sodex-onchain/client";
 import { type SodexNetwork } from "@/lib/sodex-onchain/chains";
 import { fmtSodexCoin as displayCoin } from "@/lib/format";
+import { Num } from "@/components/ui/Num";
+import { Action } from "@/components/ui/Action";
 
 interface BalanceRow {
   coin: string;
@@ -200,15 +202,17 @@ export function SodexBalancesTable({ network, spotState, perpsState }: Props) {
             // single labelled row (e.g. "ETH (Spot)"). If TWO+ venues,
             // render a parent total row followed by indented sub-rows.
             const single = g.rows.length === 1;
+            const coin = displayCoin(g.coin);
             if (single) {
               const r = g.rows[0];
               return (
                 <Row
                   key={`${g.coin}-${r.venue}`}
-                  label={`${displayCoin(g.coin)} (${venueLabel(r.venue)})`}
-                  total={`${r.total} ${displayCoin(g.coin)}`}
+                  label={`${coin} (${venueLabel(r.venue)})`}
+                  coin={coin}
+                  totalNum={num(r.total)}
                   usd={g.usdPrice != null ? num(r.total) * g.usdPrice : null}
-                  available={r.available}
+                  availableNum={num(r.available)}
                 />
               );
             }
@@ -216,19 +220,21 @@ export function SodexBalancesTable({ network, spotState, perpsState }: Props) {
               <>
                 <Row
                   key={g.coin}
-                  label={displayCoin(g.coin)}
-                  total={`${g.totalBalance.toFixed(6)} ${displayCoin(g.coin)}`}
+                  label={coin}
+                  coin={coin}
+                  totalNum={g.totalBalance}
                   usd={g.totalUsd}
-                  available={g.totalAvailable.toFixed(6)}
+                  availableNum={g.totalAvailable}
                   isParent
                 />
                 {g.rows.map((r) => (
                   <Row
                     key={`${g.coin}-${r.venue}`}
-                    label={`${displayCoin(g.coin)} (${venueLabel(r.venue)})`}
-                    total={`${r.total} ${displayCoin(g.coin)}`}
+                    label={`${coin} (${venueLabel(r.venue)})`}
+                    coin={coin}
+                    totalNum={num(r.total)}
                     usd={g.usdPrice != null ? num(r.total) * g.usdPrice : null}
-                    available={r.available}
+                    availableNum={num(r.available)}
                     isChild
                   />
                 ))}
@@ -268,16 +274,18 @@ function Th({
 
 function Row({
   label,
-  total,
+  coin,
+  totalNum,
   usd,
-  available,
+  availableNum,
   isParent,
   isChild,
 }: {
   label: string;
-  total: string;
+  coin: string;
+  totalNum: number;
   usd: number | null;
-  available: string;
+  availableNum: number;
   isParent?: boolean;
   isChild?: boolean;
 }) {
@@ -289,45 +297,43 @@ function Row({
       >
         {label}
       </td>
-      <td className="py-2 pr-3 text-right font-mono text-fg">{total}</td>
-      <td className="py-2 pr-3 text-right font-mono text-fg">
-        {usd != null ? `$${usd.toFixed(2)}` : "—"}
+      <td className="py-2 pr-3 text-right">
+        <Num value={totalNum} unit={coin} />
       </td>
-      <td className="py-2 pr-3 text-right font-mono text-fg">{available}</td>
+      <td className="py-2 pr-3 text-right">
+        <Num value={usd} unit="$" />
+      </td>
+      <td className="py-2 pr-3 text-right">
+        <Num value={availableNum} unit={coin} />
+      </td>
       <td className="py-2 text-right">
-        <ActionLinks />
+        <ActionLinks totalNum={totalNum} availableNum={availableNum} />
       </td>
     </tr>
   );
 }
 
-function ActionLinks() {
+/** Actions gate on the balance: no Withdraw with nothing available, no
+ *  Transfer with a zero balance. Deposit is always possible. */
+function ActionLinks({
+  totalNum,
+  availableNum,
+}: {
+  totalNum: number;
+  availableNum: number;
+}) {
+  const WALLET = "https://sodex.com/wallet";
   return (
-    <span className="inline-flex gap-3 text-[11px]">
-      <a
-        href="https://sodex.com/wallet"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-accent-2 hover:text-accent"
-      >
+    <span className="inline-flex gap-3">
+      <Action enabled={totalNum > 0} href={WALLET} tone="primary">
         Transfer
-      </a>
-      <a
-        href="https://sodex.com/wallet"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-accent-2 hover:text-accent"
-      >
+      </Action>
+      <Action enabled href={WALLET} tone="primary">
         Deposit
-      </a>
-      <a
-        href="https://sodex.com/wallet"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-accent-2 hover:text-accent"
-      >
+      </Action>
+      <Action enabled={availableNum > 0} href={WALLET} tone="primary">
         Withdraw
-      </a>
+      </Action>
     </span>
   );
 }
