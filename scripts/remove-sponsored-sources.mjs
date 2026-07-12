@@ -6,7 +6,7 @@ if (existsSync(envPath)) for (const line of readFileSync(envPath,"utf8").split("
 const db = createClient({ url: process.env.TURSO_DATABASE_URL, authToken: process.env.TURSO_AUTH_TOKEN });
 
 // Sponsored/KOL Twitter accounts the user chose to remove (case-insensitive).
-const BLOCKED = ["cryptorover", "watcherguru", "coinspace_", "cointelegraph"];
+const BLOCKED = ["cryptorover", "watcherguru", "coinspace_", "cointelegraph", "coindesk"];
 const now = Date.now();
 
 // Every signal whose triggering event came from one of these authors.

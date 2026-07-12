@@ -520,7 +520,7 @@ function sourceTierScore(
   const knownTier1 = ["bloomberg", "reuters", "wsj", "ft.com", "coinbase", "sec.gov"];
   const knownTier2 = [
     "panews", "chaincatcher", "decrypt", "decrpt", "foresightnews",
-    "theblock", "coindesk", "unchained", "techflow",
+    "theblock", "unchained", "techflow",
     "odaily", "benzinga",
   ];
   if (knownTier1.some((t) => a.includes(t))) return 0.95;
@@ -541,6 +541,7 @@ const BLOCKED_SOURCES = new Set([
   "watcherguru",
   "coinspace_",
   "cointelegraph",
+  "coindesk",
 ]);
 
 export function isBlockedSource(author: string | null | undefined): boolean {
