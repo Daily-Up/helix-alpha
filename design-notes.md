@@ -43,14 +43,25 @@ testable. Never re-implement it in a component.
 - **TreasuriesDashboard** (/treasuries) — Top-holders table → `<DataTable>` with **BTC-held** as a magnitude bar, so MSTR's dominance reads as length. `#` rank kept as context.
 - **Magnitude bar visibility** — bumped from ~15–20% → **45%** opacity, left-anchored proportion fill; `<DataTable>` rows given breathing room (taller, wider padding, row hover). The bars were technically present before but invisible; this is the change that made the pass *look* like a change.
 
-### Still on the API-shape default (next passes, same recipe)
-SignalCard trade figures (lead = conviction), macro/sectors returns tables
-(heterogeneous units — encode per-column or leave as coloured numbers), the
-treasuries *recent-purchases* table, and the equal-weight stat rows where a single
-lead is defensible. Note: several stat rows (home "Live snapshot", events StatsBar)
-are genuinely co-equal KPIs — forcing a hero there would be arbitrary, so they stay
-flat by design. Ops/stub screens (/agents, /jobs, /system-health, /patterns,
-/learnings, /calibration) are gated internal — migrate last.
+### Full-app pass (all remaining screens — audited then migrated in one sweep)
+Every remaining table + stat-row was migrated onto the primitives:
+- **home** (/app) — AlphaIndex top-positions list: weight/P&L through `<Num>`; confidence in the pending-signal feed too. Live-snapshot 4-up left flat (genuinely co-equal KPIs).
+- **signals** — `SignalCard` + `SignalAuditPage` trade figures / measured-outcome cells through `<Num>` (tone="auto"); folded the duplicate Direction/Tier/Conviction KV cells (already badges up top).
+- **events** — `StatsBar` ranked (Events-24h lead + `<Timestamp>` last-ingest); `EventCard` precision.
+- **index-fund** — Risk&Perf grid through `<Num>` (mixed units → no bar, rule 6); `SignalContributionPanel` attribution table + `V2PreviewPanel`/`StressTestsPanel` stress-window tables → `<DataTable>` with v2/BTC + P&L magnitude bars.
+- **briefing** — figure rows routed through `formatNum` (the engine behind `<Num>`) to keep the protected editorial hexes + Fraunces value font (rule: don't touch palette).
+- **sodex** — live-trades list → `<DataTable>`; every `0x…` through `<Addr>`.
+- **macro** — de-badged the Surprise column (rule 4); no bar (heterogeneous units, rule 6).
+- **sectors** — dominance table (Mkt-Dominance bar) + SSI returns matrix (7d = the one magnitude bar; all timeframes kept as context).
+- **etfs** — stat row ranked (Daily-Net-Flow hero).
+- **treasuries** — recent-purchases table → diverging BTC-bought bar (green buys / red reductions).
+- **ops/internal** (gated): agents (runs bar), calibration (hit-rate table + PnL heatmap shared-scale tint), learnings (BreakdownCard ×4 + recent-outcomes), patterns (leaderboard + calibration audit), system-health ×2 (gate-refusal count bar).
+
+Result: raw `.toFixed` **161 → 90**, address-slice variants **7 → 3**. Guard baseline
+ratcheted down to `{toFixed:90, toLocaleString:18, addrSlice:3}`. Left flat *by design*:
+home "Live snapshot" + a few figure rows that are genuinely co-equal (no defensible lead),
+and heterogeneous-unit rows where a shared bar would mislead. Charts (NavChart,
+AllocationDonut, recharts) untouched per the do-not-touch list.
 
 ## Make it stick
 `tests/ui-primitives-guard.test.ts` is a **ratchet**: it counts raw `.toFixed()`,
