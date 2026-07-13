@@ -2,27 +2,40 @@ import { cn } from "./cn";
 
 /**
  * A per-asset visual anchor for table identifier cells — the thing that makes
- * a data table read as "an exchange", not "a spreadsheet". We trade a mix of
- * crypto majors, crypto-stocks (COIN, MSTR) and internal indexes (…​.ssi), so
- * there is no single logo CDN that covers the universe — and a judged demo
- * shouldn't depend on a third-party image host anyway. So this is a monogram
- * chip: a deterministic, on-palette colour derived from the ticker + a 1–2
- * glyph mark. Recognisable majors get their real symbol (₿ / Ξ).
+ * a data table read as "an exchange", not "a spreadsheet".
  *
- * Deterministic hue keeps a given asset the SAME colour everywhere it appears,
- * so the eye learns "orange square = BTC" across screens.
+ * For crypto majors we ship the REAL brand mark: CC0 SVGs from the
+ * cryptocurrency-icons set, bundled under /public/asset-logos and served
+ * same-origin (no third-party image host at runtime — matters for a judged
+ * demo behind a strict CSP). The long tail — crypto-stocks (COIN, MSTR),
+ * internal indexes (…​.ssi), coins we don't have a mark for — falls back to a
+ * deterministic monogram chip: a muted, on-palette colour derived from the
+ * ticker so a given asset is the SAME colour everywhere it appears.
  */
 
-const GLYPH: Record<string, string> = {
-  BTC: "₿",
-  WBTC: "₿",
-  CBBTC: "₿",
-  ETH: "Ξ",
-  WETH: "Ξ",
-  STETH: "Ξ",
+/** Lowercase tickers we have a real bundled SVG for (see /public/asset-logos). */
+const REAL_LOGOS = new Set([
+  "1inch", "aave", "ada", "algo", "atom", "avax", "bat", "bch", "bnb", "btc",
+  "chz", "comp", "crv", "dai", "dash", "doge", "dot", "enj", "eos", "etc",
+  "eth", "fil", "grt", "icp", "link", "ltc", "mana", "matic", "mkr", "qnt",
+  "sand", "snx", "sol", "trx", "tusd", "uni", "usdc", "usdt", "vet", "wbtc",
+  "xlm", "xmr", "xrp", "xtz", "yfi", "zec", "zil",
+]);
+
+/** Symbols that should borrow another asset's mark (wrapped / renamed / staked). */
+const ALIAS: Record<string, string> = {
+  pol: "matic",
+  weth: "eth",
+  steth: "eth",
+  wsteth: "eth",
+  reth: "eth",
+  cbbtc: "btc",
+  tbtc: "btc",
+  wbeth: "eth",
+  usdce: "usdc",
 };
 
-/** Curated, muted hue ring — warm→cool, never garish on the near-black bg. */
+/** Curated, muted hue ring for monograms — warm→cool, never garish on near-black. */
 const HUES = [14, 28, 40, 96, 150, 172, 194, 214, 258, 292, 330, 352];
 
 function clean(sym: string): string {
@@ -33,6 +46,14 @@ function clean(sym: string): string {
     .replace(/^ssi/i, "")
     .replace(/[^a-z0-9]/gi, "")
     .toUpperCase();
+}
+
+function logoFile(clean: string): string | null {
+  const lc = clean.toLowerCase();
+  if (REAL_LOGOS.has(lc)) return lc;
+  const a = ALIAS[lc];
+  if (a && REAL_LOGOS.has(a)) return a;
+  return null;
 }
 
 function hueOf(s: string): number {
@@ -51,7 +72,27 @@ export function AssetLogo({
   className?: string;
 }) {
   const c = symbol ? clean(symbol) : "";
-  const glyph = GLYPH[c] ?? (c.slice(0, 2) || "•");
+  const file = c ? logoFile(c) : null;
+
+  if (file) {
+    // Real brand mark — the CC0 SVGs already carry their own coloured circle.
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={`/asset-logos/${file}.svg`}
+        alt=""
+        aria-hidden
+        width={size}
+        height={size}
+        loading="lazy"
+        className={cn("shrink-0 rounded-full", className)}
+        style={{ width: size, height: size }}
+      />
+    );
+  }
+
+  // Monogram fallback — deterministic, on-palette chip.
+  const glyph = c.slice(0, 2) || "•";
   const hue = hueOf(c || "?");
   return (
     <span
@@ -63,7 +104,7 @@ export function AssetLogo({
       style={{
         width: size,
         height: size,
-        fontSize: glyph.length > 1 && glyph.length <= 2 ? size * 0.4 : size * 0.5,
+        fontSize: size * 0.4,
         background: `hsl(${hue} 45% 22% / 0.9)`,
         color: `hsl(${hue} 62% 72%)`,
         boxShadow: `inset 0 0 0 1px hsl(${hue} 46% 46% / 0.45)`,
