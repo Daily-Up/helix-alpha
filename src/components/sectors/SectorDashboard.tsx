@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { fmtRelative } from "@/lib/format";
 import { DataTable, type Column } from "@/components/ui/DataTable";
+import { AssetCell } from "@/components/ui/AssetLogo";
 
 interface SectorRow {
   snapshot_at: number;
@@ -155,14 +156,15 @@ function IndexMomentumTable({ indices }: { indices: IndexRow[] }) {
       role: "identifier",
       align: "left",
       render: (r) => (
-        <div className="flex flex-col leading-tight">
-          <span className="font-medium text-fg">
-            {r.ticker.toLowerCase().startsWith("ssi")
+        <AssetCell
+          logoSymbol={r.ticker}
+          primary={
+            r.ticker.toLowerCase().startsWith("ssi")
               ? `${r.ticker.slice(3).toUpperCase()}.ssi`
-              : r.ticker}
-          </span>
-          <span className="text-[10px] text-fg-dim">{r.name}</span>
-        </div>
+              : r.ticker
+          }
+          secondary={r.name}
+        />
       ),
     },
     { key: "price", header: "Price", role: "context", num: (r) => r.price, unit: "$", dp: 2 },

@@ -11,6 +11,7 @@ import {
 import { stripTechnicalScoring } from "@/lib/format/reasoning";
 import { cn } from "@/components/ui/cn";
 import { Num } from "@/components/ui/Num";
+import { AssetLogo } from "@/components/ui/AssetLogo";
 import { ExecuteLiveButton } from "@/components/sodex/ExecuteLiveButton";
 import { isPublicMode } from "@/lib/public-mode";
 
@@ -301,7 +302,8 @@ export function SignalCard({
       />
 
       {/* Kicker line — ticker + direction + tier. One quiet line. */}
-      <div className="mb-3 flex items-baseline gap-x-3">
+      <div className="mb-3 flex items-center gap-x-3">
+        <AssetLogo symbol={sig.asset_symbol} size={20} />
         <span
           className="font-[var(--font-jetbrains-mono)]"
           style={{

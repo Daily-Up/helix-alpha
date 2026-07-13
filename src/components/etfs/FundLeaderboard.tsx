@@ -1,6 +1,7 @@
 "use client";
 
 import { DataTable, type Column } from "@/components/ui/DataTable";
+import { AssetCell } from "@/components/ui/AssetLogo";
 
 export interface FundRow {
   ticker: string;
@@ -35,10 +36,7 @@ export function FundLeaderboard({ funds }: { funds: FundRow[] }) {
       header: "Fund",
       role: "identifier",
       render: (f) => (
-        <div className="flex flex-col leading-tight">
-          <span className="font-medium text-fg">{f.ticker}</span>
-          <span className="text-[10px] text-fg-dim">{f.name}</span>
-        </div>
+        <AssetCell logoSymbol={f.ticker} primary={f.ticker} secondary={f.name} />
       ),
     },
     { key: "flow", header: "Daily Inflow", role: "magnitude", num: (f) => f.net_inflow, unit: "$", sign: true, tone: "auto" },
