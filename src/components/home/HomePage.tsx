@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Stat } from "@/components/ui/Stat";
 import { Num } from "@/components/ui/Num";
 import { Timestamp } from "@/components/ui/Timestamp";
+import { cn } from "@/components/ui/cn";
 import { fmtAssetSymbol, fmtRelative, fmtUsd } from "@/lib/format";
 
 interface HomeData {
@@ -98,6 +99,16 @@ const REGIME_TONE: Record<
   neutral: "default",
 };
 
+const REGIME_DOT: Record<
+  "risk_on" | "risk_off" | "mixed" | "neutral",
+  string
+> = {
+  risk_on: "bg-positive",
+  risk_off: "bg-negative",
+  mixed: "bg-accent",
+  neutral: "bg-fg-dim",
+};
+
 export function HomePage() {
   const [data, setData] = useState<HomeData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -110,46 +121,44 @@ export function HomePage() {
   }, []);
 
   return (
-    <div className="flex flex-col gap-8">
-      {/* ── Hero ────────────────────────────────────────────── */}
-      <section className="rounded-md border border-line bg-gradient-to-br from-surface to-surface-2 px-6 py-8 md:px-8 md:py-10">
-        <div className="flex flex-col gap-2">
-          <span className="inline-flex w-max items-center gap-1 rounded bg-accent/15 px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-accent-2">
-            SoSoValue × SoDEX × Claude
-          </span>
-          <h1 className="text-2xl font-semibold leading-tight text-fg md:text-3xl">
-            Event-driven alpha for crypto and crypto-stocks.
+    <div className="flex flex-col gap-6">
+      {/* ── Masthead: identity + live status (the product leads, not a pitch) ── */}
+      <header className="flex flex-col gap-4 border-b border-line pb-6 md:flex-row md:items-end md:justify-between">
+        <div className="max-w-2xl">
+          <div className="font-[var(--font-jetbrains-mono)] text-[10px] font-medium uppercase tracking-[0.22em] text-fg-dim">
+            SoSoValue · SoDEX · Anthropic Claude
+          </div>
+          <h1 className="mt-3 font-[var(--font-fraunces)] text-[28px] font-light leading-[1.06] tracking-[-0.02em] text-fg md:text-[34px]">
+            Event-driven alpha,{" "}
+            <span className="italic text-accent-2">audited in the open.</span>
           </h1>
-          <p className="max-w-2xl text-sm text-fg-muted md:text-base">
-            Helix reads every news event in real time, classifies it with
-            Claude, generates tiered trade signals, manages a paper portfolio
-            against momentum + signals, and grades its own track record. All on
-            one screen.
+          <p className="mt-2.5 max-w-xl text-[13px] leading-relaxed text-fg-muted">
+            Live news, classified by Claude into tiered signals and an
+            AI-managed book — every call graded against what actually happened.
           </p>
         </div>
-
-        {/* Pillar cards */}
-        <div className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-3">
-          <PillarCard
-            badge="ALPHATRADE"
-            title="Tactical signals"
-            body="News → Claude classifier → Auto / Review / Info trade signals against SoDEX perps + spot pairs."
-            href="/signals"
-          />
-          <PillarCard
-            badge="ALPHAINDEX"
-            title="AI-managed portfolio"
-            body="Anchored allocation over BTC, ETH, MAG7, RWA + momentum tilts. Reviewed by Claude before each rebalance."
-            href="/index-fund"
-          />
-          <PillarCard
-            badge="DAILY BRIEFING"
-            title="One-paragraph market read"
-            body="Every morning Claude synthesizes pending signals, sectors, ETF flows + macro into a single trade thesis."
-            href="/briefing"
-          />
-        </div>
-      </section>
+        {data ? (
+          <div className="flex shrink-0 items-center gap-5 font-[var(--font-jetbrains-mono)] text-[11px] text-fg-dim">
+            {data.briefing ? (
+              <span className="inline-flex items-center gap-1.5">
+                <span
+                  className={cn(
+                    "h-1.5 w-1.5 rounded-full",
+                    REGIME_DOT[data.briefing.regime],
+                  )}
+                />
+                {data.briefing.regime.replace("_", "-").toUpperCase()}
+              </span>
+            ) : null}
+            {data.counts.last_event_at ? (
+              <span>
+                last event{" "}
+                <Timestamp ms={data.counts.last_event_at} mode="relative" />
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+      </header>
 
       {loading && !data ? (
         <div className="text-sm text-fg-dim">Loading live snapshot…</div>
@@ -488,34 +497,6 @@ export function HomePage() {
         </>
       ) : null}
     </div>
-  );
-}
-
-function PillarCard({
-  badge,
-  title,
-  body,
-  href,
-}: {
-  badge: string;
-  title: string;
-  body: string;
-  href: string;
-}) {
-  return (
-    <Link
-      href={href}
-      className="group rounded-md border border-line bg-surface p-4 transition-colors hover:border-accent/50 hover:bg-surface-2"
-    >
-      <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-accent-2">
-        {badge}
-      </div>
-      <div className="mb-1 text-sm font-semibold text-fg">{title}</div>
-      <div className="text-xs text-fg-muted">{body}</div>
-      <div className="mt-2 text-[11px] text-accent-2 opacity-0 transition-opacity group-hover:opacity-100">
-        Explore →
-      </div>
-    </Link>
   );
 }
 

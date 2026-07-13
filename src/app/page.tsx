@@ -52,8 +52,8 @@ export default function HelixLandingPage() {
       <main id="main">
 
       {/* ─────────── Section 2: Hero ─────────── */}
-      <section className="relative pt-32 md:pt-40 overflow-hidden">
-        <div className="mx-auto grid max-w-[1280px] grid-cols-1 gap-16 px-6 md:grid-cols-12 md:gap-8 md:px-12 md:pb-40">
+      <section className="relative pt-24 md:pt-28 overflow-hidden">
+        <div className="mx-auto grid max-w-[1280px] grid-cols-1 gap-16 px-6 md:grid-cols-12 md:gap-8 md:px-12 md:pb-32">
           {/* LEFT — copy */}
           <div className="md:col-span-7 md:pr-8">
             <div
