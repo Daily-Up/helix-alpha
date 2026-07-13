@@ -6,6 +6,7 @@ import { Stat } from "@/components/ui/Stat";
 import { HeroStat, SubStat } from "@/components/ui/HeroStat";
 import { StatSkeleton, TableSkeleton } from "@/components/ui/Skeleton";
 import { DataTable, type Column } from "@/components/ui/DataTable";
+import { AssetCell } from "@/components/ui/AssetLogo";
 import { Num } from "@/components/ui/Num";
 import { Timestamp } from "@/components/ui/Timestamp";
 import { Action } from "@/components/ui/Action";
@@ -187,17 +188,22 @@ export function PortfolioDashboard() {
                   header: "Asset",
                   role: "identifier",
                   render: (p) => (
-                    <span title={p.sodex_symbol}>
-                      {fmtSodexSymbol(p.sodex_symbol)}
-                      <span
-                        className={cn(
-                          "ml-1.5 text-[9px] uppercase tracking-wider",
-                          p.direction === "long" ? "text-positive" : "text-negative",
-                        )}
-                      >
-                        {p.direction}
-                      </span>
-                    </span>
+                    <AssetCell
+                      logoSymbol={p.sodex_symbol}
+                      primary={
+                        <span title={p.sodex_symbol}>
+                          {fmtSodexSymbol(p.sodex_symbol)}
+                          <span
+                            className={cn(
+                              "ml-1.5 text-[9px] uppercase tracking-wider",
+                              p.direction === "long" ? "text-positive" : "text-negative",
+                            )}
+                          >
+                            {p.direction}
+                          </span>
+                        </span>
+                      }
+                    />
                   ),
                 },
                 { key: "size", header: "Size", role: "context", num: (p) => p.size_usd, unit: "$" },
@@ -247,17 +253,22 @@ export function PortfolioDashboard() {
                   header: "Asset",
                   role: "identifier",
                   render: (t) => (
-                    <span title={t.sodex_symbol}>
-                      {fmtSodexSymbol(t.sodex_symbol)}
-                      <span
-                        className={cn(
-                          "ml-1.5 text-[9px] uppercase tracking-wider",
-                          t.direction === "long" ? "text-positive" : "text-negative",
-                        )}
-                      >
-                        {t.direction}
-                      </span>
-                    </span>
+                    <AssetCell
+                      logoSymbol={t.sodex_symbol}
+                      primary={
+                        <span title={t.sodex_symbol}>
+                          {fmtSodexSymbol(t.sodex_symbol)}
+                          <span
+                            className={cn(
+                              "ml-1.5 text-[9px] uppercase tracking-wider",
+                              t.direction === "long" ? "text-positive" : "text-negative",
+                            )}
+                          >
+                            {t.direction}
+                          </span>
+                        </span>
+                      }
+                    />
                   ),
                 },
                 { key: "size", header: "Size", role: "context", num: (t) => t.size_usd, unit: "$" },

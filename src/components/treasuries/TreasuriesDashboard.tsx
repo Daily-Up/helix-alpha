@@ -14,6 +14,7 @@ import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { HeroStat, SubStat } from "@/components/ui/HeroStat";
 import { isPublicMode } from "@/lib/public-mode";
 import { DataTable } from "@/components/ui/DataTable";
+import { AssetCell } from "@/components/ui/AssetLogo";
 
 interface Stats {
   total_companies: number;
@@ -167,8 +168,14 @@ export function TreasuriesDashboard() {
           <DataTable<Holder & { rank: number }>
             columns={[
               { key: "rank", header: "#", role: "context", align: "left", render: (h) => h.rank },
-              { key: "ticker", header: "Ticker", role: "identifier", render: (h) => h.ticker },
-              { key: "name", header: "Company", role: "context", align: "left", render: (h) => h.name },
+              {
+                key: "ticker",
+                header: "Company",
+                role: "identifier",
+                render: (h) => (
+                  <AssetCell logoSymbol={h.ticker} primary={h.ticker} secondary={h.name} />
+                ),
+              },
               { key: "listed", header: "Listed", role: "context", align: "left", render: (h) => h.list_location ?? "—" },
               { key: "btc", header: "BTC held", role: "magnitude", num: (h) => h.btc_holding, unit: "BTC" },
               { key: "lastbuy", header: "Last buy", role: "context", render: (h) => h.last_purchase_date },
@@ -192,8 +199,14 @@ export function TreasuriesDashboard() {
           <DataTable<Purchase>
             columns={[
               { key: "date", header: "Date", role: "context", align: "left", render: (p) => p.date },
-              { key: "ticker", header: "Ticker", role: "identifier", render: (p) => p.ticker },
-              { key: "company", header: "Company", role: "context", align: "left", render: (p) => p.company_name },
+              {
+                key: "ticker",
+                header: "Company",
+                role: "identifier",
+                render: (p) => (
+                  <AssetCell logoSymbol={p.ticker} primary={p.ticker} secondary={p.company_name} />
+                ),
+              },
               { key: "btc", header: "BTC bought", role: "magnitude", num: (p) => p.btc_acq, unit: "BTC", sign: true, tone: "auto" },
               { key: "held", header: "Holdings after", role: "context", num: (p) => p.btc_holding, unit: "BTC" },
               { key: "cost", header: "Cost", role: "context", num: (p) => p.acq_cost_usd, unit: "$" },

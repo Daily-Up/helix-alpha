@@ -2,6 +2,7 @@
 
 import { fmtAssetSymbol } from "@/lib/format";
 import { DataTable, type Column } from "@/components/ui/DataTable";
+import { AssetCell } from "@/components/ui/AssetLogo";
 
 /**
  * Turn the rebalance worker's compact driver string
@@ -135,20 +136,23 @@ export function HoldingsTable({
       header: "Asset",
       role: "identifier",
       render: (r) => (
-        <div className="flex flex-col leading-tight">
-          <span className="font-medium text-fg">
-            {fmtAssetSymbol(
-              r.symbol,
-              r.symbol.toLowerCase().startsWith("ssi") ? "index" : undefined,
-            )}
-            {r.market ? (
-              <span className="ml-1.5 text-[9px] uppercase tracking-wider text-fg-dim">
-                {r.market}
-              </span>
-            ) : null}
-          </span>
-          <span className="text-[10px] text-fg-dim">{r.name}</span>
-        </div>
+        <AssetCell
+          logoSymbol={r.symbol}
+          primary={
+            <>
+              {fmtAssetSymbol(
+                r.symbol,
+                r.symbol.toLowerCase().startsWith("ssi") ? "index" : undefined,
+              )}
+              {r.market ? (
+                <span className="ml-1.5 text-[9px] uppercase tracking-wider text-fg-dim">
+                  {r.market}
+                </span>
+              ) : null}
+            </>
+          }
+          secondary={r.name}
+        />
       ),
     },
     { key: "weight", header: "Weight", role: "magnitude", num: (r) => r.weightPct, unit: "%", dp: 1 },

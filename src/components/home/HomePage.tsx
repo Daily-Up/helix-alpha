@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Stat } from "@/components/ui/Stat";
 import { Num } from "@/components/ui/Num";
 import { Timestamp } from "@/components/ui/Timestamp";
+import { AssetLogo } from "@/components/ui/AssetLogo";
 import { cn } from "@/components/ui/cn";
 import { fmtAssetSymbol, fmtRelative, fmtUsd } from "@/lib/format";
 
@@ -336,6 +337,7 @@ export function HomePage() {
                         className="flex flex-col gap-1 px-4 py-3 text-xs"
                       >
                         <div className="flex flex-wrap items-center gap-2">
+                          <AssetLogo symbol={s.asset_symbol} size={18} />
                           <Badge
                             tone={
                               s.tier === "auto"
@@ -409,6 +411,7 @@ export function HomePage() {
                         className="flex flex-col gap-1 px-4 py-3 text-xs"
                       >
                         <div className="flex flex-wrap items-center gap-2">
+                          <AssetLogo symbol={p.symbol} size={18} />
                           <span className="font-mono text-sm font-semibold text-fg">
                             {fmtAssetSymbol(p.symbol, p.kind)}
                           </span>
