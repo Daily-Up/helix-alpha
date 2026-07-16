@@ -1,4 +1,5 @@
 import { cn } from "./cn";
+import { ASSET_LOGO_FILES } from "./asset-logos.generated";
 
 /**
  * A per-asset visual anchor for table identifier cells — the thing that makes
@@ -13,15 +14,6 @@ import { cn } from "./cn";
  * ticker so a given asset is the SAME colour everywhere it appears.
  */
 
-/** Lowercase tickers we have a real bundled SVG for (see /public/asset-logos). */
-const REAL_LOGOS = new Set([
-  "1inch", "aave", "ada", "algo", "atom", "avax", "bat", "bch", "bnb", "btc",
-  "chz", "comp", "crv", "dai", "dash", "doge", "dot", "enj", "eos", "etc",
-  "eth", "fil", "grt", "icp", "link", "ltc", "mana", "matic", "mkr", "qnt",
-  "sand", "snx", "sol", "trx", "tusd", "uni", "usdc", "usdt", "vet", "wbtc",
-  "xlm", "xmr", "xrp", "xtz", "yfi", "zec", "zil",
-]);
-
 /** Symbols that should borrow another asset's mark (wrapped / renamed / staked). */
 const ALIAS: Record<string, string> = {
   pol: "matic",
@@ -33,6 +25,8 @@ const ALIAS: Record<string, string> = {
   tbtc: "btc",
   wbeth: "eth",
   usdce: "usdc",
+  block: "xyz", // Block Inc trades as XYZ
+  wbtc: "wbtc",
 };
 
 /** Curated, muted hue ring for monograms — warm→cool, never garish on near-black. */
@@ -48,11 +42,12 @@ function clean(sym: string): string {
     .toUpperCase();
 }
 
+/** Cleaned lowercase key → bundled logo filename (with extension), or null. */
 function logoFile(clean: string): string | null {
   const lc = clean.toLowerCase();
-  if (REAL_LOGOS.has(lc)) return lc;
+  if (ASSET_LOGO_FILES[lc]) return ASSET_LOGO_FILES[lc];
   const a = ALIAS[lc];
-  if (a && REAL_LOGOS.has(a)) return a;
+  if (a && ASSET_LOGO_FILES[a]) return ASSET_LOGO_FILES[a];
   return null;
 }
 
@@ -75,17 +70,22 @@ export function AssetLogo({
   const file = c ? logoFile(c) : null;
 
   if (file) {
-    // Real brand mark — the CC0 SVGs already carry their own coloured circle.
+    // Real brand mark. Crypto marks carry their own coloured circle; company
+    // logos are square, so a subtle surface backing + rounding keeps the row
+    // rhythm consistent across both.
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
-        src={`/asset-logos/${file}.svg`}
+        src={`/asset-logos/${file}`}
         alt=""
         aria-hidden
         width={size}
         height={size}
         loading="lazy"
-        className={cn("shrink-0 rounded-full", className)}
+        className={cn(
+          "shrink-0 rounded-[5px] bg-white/[0.04] object-contain p-px ring-1 ring-white/5",
+          className,
+        )}
         style={{ width: size, height: size }}
       />
     );
