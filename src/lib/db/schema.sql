@@ -523,13 +523,14 @@ INSERT OR IGNORE INTO user_settings (key, value) VALUES
   ('default_take_profit_pct',     '18'),
   ('paper_starting_balance_usd',  '10000'),
   -- AlphaIndex settings
-  ('index_auto_rebalance',         'false'),
+  ('index_auto_rebalance',         'true'),
   ('index_min_position_pct',       '2'),
   ('index_max_position_pct',       '25'),
   ('index_cash_reserve_pct',       '5'),
   ('index_rebalance_threshold_pct','1'),
   ('index_review_with_claude',     'true'),
-  ('index_framework_version',      'v1');
+  ('index_framework_version',      'v2'),
+  ('index_rebalance_interval_hours','24');
 
 -- ── 14a. BTC Treasuries (corporate balance-sheet ledger) ─────────────────
 -- Mirrors SoSoValue's /btc-treasuries + /purchase-history endpoints.
