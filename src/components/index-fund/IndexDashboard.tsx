@@ -20,6 +20,7 @@ import { StressTestsPanel } from "./StressTestsPanel";
 import { SignalContributionPanel } from "./SignalContributionPanel";
 import { V2PreviewPanel } from "./V2PreviewPanel";
 import { FrameworkSelector } from "./FrameworkSelector";
+import { ExecuteIndexButton } from "@/components/sodex/ExecuteIndexButton";
 import { isPublicMode } from "@/lib/public-mode";
 
 interface IndexResponse {
@@ -175,6 +176,15 @@ export function IndexDashboard() {
               {busy === "rebalance" ? "Rebalancing…" : "▶ Rebalance Now"}
             </button>
           ) : null}
+          <ExecuteIndexButton
+            legs={data.positions
+              .filter((p) => p.sodex_symbol && p.target_weight > 0)
+              .map((p) => ({
+                sodex_symbol: p.sodex_symbol,
+                symbol: p.symbol,
+                target_weight: p.target_weight,
+              }))}
+          />
         </div>
       </div>
 
