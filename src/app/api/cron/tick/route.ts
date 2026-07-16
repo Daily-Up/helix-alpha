@@ -23,7 +23,7 @@ import {
   autoExecutePending,
   reconcileOpenPositions,
 } from "@/lib/trading";
-import { Signals, Settings, Cron } from "@/lib/db";
+import { Signals, Settings, Cron, IndexFund } from "@/lib/db";
 import { rebalanceIndex } from "@/lib/index-fund";
 import { runResolutionJob } from "@/lib/outcomes/resolve-job";
 import { evaluateAlerts, isReadOnly } from "@/lib/system-health";
@@ -113,23 +113,36 @@ async function handle(req: Request): Promise<NextResponse> {
     summary.expired = { error: (err as Error).message };
   }
 
-  // 6) Rebalance AlphaIndex if auto-rebalance is enabled. We don't run
-  // every tick — once per day-ish — but let it skip in v1 since cost is
-  // low ($0.05/rebalance with Claude review).
+  // 6) Rebalance AlphaIndex if auto-rebalance is enabled — but at most once
+  //    per `index_rebalance_interval_hours` (default 24h). The tick fires
+  //    ~hourly via GitHub Actions, so WITHOUT this cadence guard the index
+  //    would churn its book (and pay for a Claude review) every tick. Paper
+  //    only: rebalance.ts simulates fills at live SoDEX prices.
   try {
     const settings = await Settings.getSettings();
-    if (settings.index_auto_rebalance) {
-      const rb = await rebalanceIndex("alphacore", {
-        triggered_by: "scheduled",
-      });
-      summary.index_rebalance = {
-        trades: rb.trades.length,
-        pre_nav: rb.pre_nav,
-        post_nav: rb.post_nav,
-        reasoning: rb.reasoning.slice(0, 200),
-      };
-    } else {
+    if (!settings.index_auto_rebalance) {
       summary.index_rebalance = { skipped: "auto-rebalance disabled" };
+    } else {
+      const last = (await IndexFund.listRebalances("alphacore", 1))[0];
+      const intervalMs =
+        Math.max(1, settings.index_rebalance_interval_hours) * 3_600_000;
+      const sinceMs = last ? Date.now() - last.rebalanced_at : Infinity;
+      if (sinceMs < intervalMs) {
+        summary.index_rebalance = {
+          skipped: `cadence: ${Math.round(sinceMs / 3_600_000)}h since last < ${settings.index_rebalance_interval_hours}h`,
+        };
+      } else {
+        const rb = await rebalanceIndex("alphacore", {
+          triggered_by: "scheduled",
+        });
+        summary.index_rebalance = {
+          framework: settings.index_framework_version,
+          trades: rb.trades.length,
+          pre_nav: rb.pre_nav,
+          post_nav: rb.post_nav,
+          reasoning: rb.reasoning.slice(0, 200),
+        };
+      }
     }
   } catch (err) {
     summary.index_rebalance = { error: (err as Error).message };

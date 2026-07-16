@@ -23,6 +23,8 @@ export interface SettingsSnapshot {
   index_rebalance_threshold_pct: number;
   index_review_with_claude: boolean;
   index_framework_version: "v1" | "v2";
+  /** Minimum hours between autonomous rebalances (cadence guard). */
+  index_rebalance_interval_hours: number;
 }
 
 const SETTING_KEYS: ReadonlyArray<keyof SettingsSnapshot> = [
@@ -43,6 +45,7 @@ const SETTING_KEYS: ReadonlyArray<keyof SettingsSnapshot> = [
   "index_rebalance_threshold_pct",
   "index_review_with_claude",
   "index_framework_version",
+  "index_rebalance_interval_hours",
 ];
 
 const BOOLEAN_KEYS = new Set<keyof SettingsSnapshot>([
@@ -79,13 +82,16 @@ const DEFAULTS: SettingsSnapshot = {
   default_stop_loss_pct: 8,
   default_take_profit_pct: 18,
   paper_starting_balance_usd: 10000,
-  index_auto_rebalance: false,
+  // AlphaIndex rebalances itself once per day on the tick. Paper only —
+  // simulated fills at live SoDEX prices; see rebalance.ts.
+  index_auto_rebalance: true,
   index_min_position_pct: 2,
   index_max_position_pct: 25,
   index_cash_reserve_pct: 5,
   index_rebalance_threshold_pct: 1,
   index_review_with_claude: true,
-  index_framework_version: "v1",
+  index_framework_version: "v2",
+  index_rebalance_interval_hours: 24,
 };
 
 /** Read all settings as a typed snapshot, falling back to defaults. */

@@ -91,7 +91,9 @@ export async function computeCandidatePortfolioV2AsOf(
  * Compute target weights using v2.1. Throws if klines are missing
  * for BTC — v2 is undefined without an anchor price series.
  */
-export async function computeCandidatePortfolioV2(): Promise<CandidatePortfolio> {
+export async function computeCandidatePortfolioV2(
+  navOverride?: { currentNav: number; peakNav: number },
+): Promise<CandidatePortfolio> {
   const series = await loadAllSeries();
   if (!series.has(BTC_ID)) {
     throw new Error(
@@ -105,7 +107,7 @@ export async function computeCandidatePortfolioV2(): Promise<CandidatePortfolio>
   // because the smoothing is bounded at 3 days.
   const btcBars = series.get(BTC_ID)!;
   const today = btcBars[btcBars.length - 1].ts_ms;
-  let state: V2EngineState = newEngineState();
+  const state: V2EngineState = newEngineState();
   const lookback = btcBars.slice(-60); // 60 bars of warm-up
   for (let i = 0; i < lookback.length; i++) {
     // 30d trailing window for the regime classifier
@@ -119,14 +121,19 @@ export async function computeCandidatePortfolioV2(): Promise<CandidatePortfolio>
   // Load aggregated 14d signals.
   const signals = await loadAggregatedSignals();
 
-  // We don't know live NAV here — pass a nominal so the breaker uses
-  // its peak/current ratio. The setting `paper_starting_balance_usd`
-  // is the right baseline; rebalance.ts has the live mtm but we can
-  // approximate to 1.0 since the breaker only cares about the ratio.
+  // Real NAV context so the drawdown circuit breaker actually works. The
+  // old path hardcoded current_nav:1 with peak_nav:0, so drawdown was
+  // ALWAYS 0 and the -8% / -12% breaker could never fire in the live
+  // path — the exact safety rail the UI promises. Seed the engine with
+  // the index NAV ledger (current = latest snapshot, peak = all-time
+  // high); a live caller may override with the intraday mark-to-market.
+  const nav = navOverride ?? (await loadIndexNavContext("alphacore"));
+  state.peak_nav = nav.peakNav;
+
   const result = runV2Engine({
     asof_ms: today,
     series,
-    current_nav: 1, // breaker uses ratio; rebalance.ts re-derives weights
+    current_nav: nav.currentNav,
     signals,
     state,
   });
@@ -143,6 +150,25 @@ export async function computeCandidatePortfolioV2(): Promise<CandidatePortfolio>
       capped_at_max: 0,
     },
   };
+}
+
+/**
+ * The index's live NAV context for the circuit breaker: current NAV (latest
+ * snapshot in the ledger) and its all-time peak. Falls back to a nominal 1.0
+ * before any history exists (first rebalance — no drawdown possible yet).
+ */
+async function loadIndexNavContext(
+  indexId: string,
+): Promise<{ currentNav: number; peakNav: number }> {
+  const rows = await all<{ nav_usd: number }>(
+    `SELECT nav_usd FROM index_nav_history WHERE index_id = ? ORDER BY date ASC`,
+    [indexId],
+  );
+  if (rows.length === 0) return { currentNav: 1, peakNav: 1 };
+  const currentNav = rows[rows.length - 1].nav_usd;
+  let peakNav = currentNav;
+  for (const r of rows) if (r.nav_usd > peakNav) peakNav = r.nav_usd;
+  return { currentNav, peakNav };
 }
 
 // ─────────────────────────────────────────────────────────────────────────
