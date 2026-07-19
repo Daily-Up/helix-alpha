@@ -92,13 +92,18 @@ export function SodexBalancesTable({ network, spotState, perpsState }: Props) {
       });
     }
     for (const b of perpsState?.B ?? []) {
-      const total = num(b.t);
-      const locked = num(b.l);
+      // Perps balances use `wb` (wallet balance) + `aw` (available), not the
+      // spot `t`/`l`. Reading `t` here is why "USDC (Futures)" showed 0 while
+      // SoDEX reported margin. Skip empty coins (the perps account lists many
+      // markets at 0).
+      const total = num(b.wb);
+      if (!Number.isFinite(total) || total === 0) continue;
+      const available = b.aw != null ? num(b.aw) : total;
       out.push({
         coin: b.a,
         venue: "futures",
-        total: b.t,
-        available: (total - locked).toFixed(6),
+        total: b.wb,
+        available: available.toFixed(6),
       });
     }
     return out;

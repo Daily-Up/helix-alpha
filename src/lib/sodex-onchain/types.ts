@@ -81,8 +81,11 @@ export interface SodexPerpsAccountState {
   cm: string;
   oim: string;
   ocm: string;
-  /** Balances. */
-  B: Array<{ i: number; a: string; t: string; l: string }>;
+  /**
+   * Balances. NOTE: perps entries use `wb` (wallet balance) + `aw`
+   * (available), NOT the spot `t`/`l` shape — reading `t` here yields 0.
+   */
+  B: Array<{ i: number; a: string; wb: string; aw?: string; am?: string }>;
   /** Open positions. */
   P: unknown[];
   /** Open orders. */
