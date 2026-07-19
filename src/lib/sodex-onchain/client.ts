@@ -302,7 +302,7 @@ export async function addApiKey(opts: {
   expiresAt?: number;
 }): Promise<{ name: string }> {
   const { network, provider, account, accountID, name, publicKey } = opts;
-  const { chainId, spotEndpoint } = SODEX_NETWORKS[network];
+  const { chainId, spotEndpoint, perpsEndpoint } = SODEX_NETWORKS[network];
 
   // Default: 7-day expiry (the SoDEX UI's default behavior — see
   // EXPIRED_DAYS=7 in their bundle).
@@ -346,12 +346,29 @@ export async function addApiKey(opts: {
     signatureChainID: walletChainId,
   };
 
+  // Register on the SPOT gateway (required).
   const res = await fetch(`${spotEndpoint}/exchange`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   await handle<unknown>(res);
+
+  // ALSO register on the PERPS gateway — it keeps a SEPARATE api-key registry,
+  // so without this every perps order fails with "API key not found". The
+  // addAPIKey signature is universal (account-wide), so the exact same body is
+  // valid on both gateways. Best-effort: a perps failure must not break the
+  // (already-succeeded) spot setup.
+  try {
+    const perpsRes = await fetch(`${perpsEndpoint}/exchange`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    await handle<unknown>(perpsRes);
+  } catch {
+    /* perps registration is best-effort */
+  }
   return { name };
 }
 
