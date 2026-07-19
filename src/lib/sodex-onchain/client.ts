@@ -418,6 +418,12 @@ export async function placeOrderBatch(opts: {
       type: first.type,
       timeInForce: first.timeInForce,
       quantity: first.quantity,
+      // Perps REQUIRE these (spot ignores them). "modifier is invalid" fires
+      // when they're absent: NORMAL order (1), one-way mode so positionSide
+      // is BOTH (1), and we're opening so not reduce-only.
+      modifier: first.modifier ?? 1,
+      reduceOnly: first.reduceOnly ?? false,
+      positionSide: first.positionSide ?? 1,
     };
     const params = {
       accountID: batch.accountID,
