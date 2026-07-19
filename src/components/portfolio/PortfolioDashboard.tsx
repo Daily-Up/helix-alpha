@@ -10,6 +10,7 @@ import { AssetCell } from "@/components/ui/AssetLogo";
 import { Num } from "@/components/ui/Num";
 import { Timestamp } from "@/components/ui/Timestamp";
 import { Action } from "@/components/ui/Action";
+import { LiveOrdersPanel } from "@/components/sodex/LiveOrdersPanel";
 import { isPublicMode } from "@/lib/public-mode";
 import { useBulkMountReveal } from "@/hooks/useMountReveal";
 import { fmtPct, fmtSodexSymbol, fmtUsd } from "@/lib/format";
@@ -167,7 +168,12 @@ export function PortfolioDashboard() {
         </div>
       </div>
 
-      {/* Open positions */}
+      {/* Live SoDEX orders for the connected account (mainnet). Renders only
+          when a trading identity is present; otherwise the paper book below
+          stands alone. */}
+      <LiveOrdersPanel />
+
+      {/* Open positions (paper simulation) */}
       <Card className="">
         <CardHeader>
           <CardTitle>Open Positions</CardTitle>
