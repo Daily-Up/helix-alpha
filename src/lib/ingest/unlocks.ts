@@ -10,7 +10,8 @@
  * Data source is keyless (DefiLlama datasets CDN). Only cliff (discrete)
  * unlocks become rows — linear vesting is a rate change, not a lump, and
  * doesn't represent a datable sell-pressure event. Idempotent + safe to run
- * daily. Signal generation is a separate step (trading/unlock-signals.ts).
+ * daily. The short trade plan (eligibility, entry/cover timing) is derived
+ * at read time from each row by lib/unlocks/plan.ts — nothing to "generate".
  */
 
 import { Assets, TokenUnlocks } from "@/lib/db";

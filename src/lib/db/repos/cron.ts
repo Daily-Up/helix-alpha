@@ -22,7 +22,6 @@ export type JobName =
   | "generate_briefing"
   | "ingest_btc_treasuries"
   | "ingest_unlocks"
-  | "generate_unlock_signals"
   | "resolve_outcomes"
   | "backup_db"
   // Public-action rate-limit keys (recorded by /api/public/* endpoints

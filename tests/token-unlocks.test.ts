@@ -6,7 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { setupMemoryDb, teardownMemoryDb } from "./db-setup";
-import { TokenUnlocks, Signals, Outcomes } from "@/lib/db";
+import { TokenUnlocks } from "@/lib/db";
 import type { NewTokenUnlock } from "@/lib/db";
 import {
   upcomingUnlockEvents,
@@ -15,7 +15,11 @@ import {
   circulatingAtNow,
 } from "@/lib/unlocks/defillama";
 import type { EmissionsDetail } from "@/lib/unlocks/types";
-import { generateUnlockSignals } from "@/lib/trading/unlock-signals";
+import {
+  computeUnlockTradePlan,
+  classifyRecipient,
+  type UnlockPlanInput,
+} from "@/lib/unlocks/plan";
 
 const HOUR = 3600 * 1000;
 
@@ -173,73 +177,62 @@ describe("token_unlocks repo", () => {
   });
 });
 
-describe("generateUnlockSignals", () => {
-  beforeEach(async () => {
-    await setupMemoryDb();
+describe("computeUnlockTradePlan (pure)", () => {
+  const DAY = 24 * HOUR;
+  const base = (o: Partial<UnlockPlanInput> = {}): UnlockPlanInput => ({
+    unlock_at: Date.now() + 20 * DAY,
+    unlock_kind: "cliff",
+    unlock_value_usd: 8_000_000,
+    pct_of_circulating: 1.66,
+    categories_json: JSON.stringify([{ recipient: "Team", category: "insiders" }]),
+    tradable_perp: 1,
+    sodex_symbol: "ARB-USD",
+    ...o,
   });
-  afterEach(() => teardownMemoryDb());
 
-  async function seedTradableUnlock(overrides: Partial<NewTokenUnlock> = {}) {
+  it("classifyRecipient maps DefiLlama categories", () => {
+    expect(classifyRecipient(JSON.stringify([{ category: "insiders" }]))).toBe("team");
+    expect(classifyRecipient(JSON.stringify([{ category: "privateSale" }]))).toBe("investor");
+    expect(
+      classifyRecipient(JSON.stringify([{ category: "insiders" }, { category: "privateSale" }])),
+    ).toBe("mixed");
+    expect(classifyRecipient(JSON.stringify([{ category: "airdrop" }]))).toBe("other");
+  });
+
+  it("team cliff ≥1% of float on a perp is eligible with a plan", () => {
+    const p = computeUnlockTradePlan(base());
+    expect(p.eligible).toBe(true);
+    expect(p.recipientClass).toBe("team");
+    expect(p.materiality).toBe("modest");
+    expect(p.entryLeadDays).toBe(7);
+    expect(p.entryAt).toBeLessThan(p.coverAt);
+    expect(p.conviction).toBeGreaterThan(0.4);
+  });
+
+  it("skips community / small / non-perp unlocks", () => {
+    expect(computeUnlockTradePlan(base({ categories_json: JSON.stringify([{ category: "airdrop" }]) })).eligible).toBe(false);
+    expect(computeUnlockTradePlan(base({ pct_of_circulating: 0.3 })).eligible).toBe(false);
+    expect(computeUnlockTradePlan(base({ tradable_perp: 0, sodex_symbol: null })).eligible).toBe(false);
+  });
+
+  it("materiality scales entry lead + conviction; huge > modest", () => {
+    const modest = computeUnlockTradePlan(base({ pct_of_circulating: 2 }));
+    const huge = computeUnlockTradePlan(base({ pct_of_circulating: 12 }));
+    expect(huge.materiality).toBe("huge");
+    expect(huge.entryLeadDays).toBe(14);
+    expect(huge.conviction).toBeGreaterThan(modest.conviction);
+    expect(huge.targetPct).toBeGreaterThan(modest.targetPct);
+  });
+
+  it("phase reflects the entry window relative to now", () => {
     const now = Date.now();
-    const row: NewTokenUnlock = {
-      id: "arbitrum-2099-01-01",
-      protocol_slug: "arbitrum",
-      token_id: "arbitrum:0x91",
-      symbol: "ARB", // real universe ticker → findAsset resolves (tok-arb)
-      asset_id: "tok-arb",
-      sodex_symbol: "ARB-USD",
-      tradable_perp: 1,
-      unlock_at: now + 36 * HOUR, // within default 72h lead window
-      unlock_date: "2099-01-01",
-      unlock_kind: "cliff",
-      tokens_unlocked: 92645833,
-      unlock_value_usd: 8_200_000, // above MIN_USD
-      price_usd: 0.0886,
-      pct_of_circulating: 1.66, // above MIN_PCT_FLOAT
-      pct_of_max_supply: 0.93,
-      categories_json: JSON.stringify([{ recipient: "Team", category: "insiders" }]),
-      source: "defillama",
-      raw_json: "{}",
-      ...overrides,
-    };
-    await TokenUnlocks.upsertUnlocks([row]);
-  }
-
-  it("creates a SHORT signal + outcome for a large near-term unlock, idempotently", async () => {
-    await seedTradableUnlock();
-
-    const first = await generateUnlockSignals();
-    expect(first.created).toBe(1);
-    expect(first.by_tier.review + first.by_tier.auto).toBe(1);
-
-    const signals = await Signals.listSignals({ status: "pending" });
-    expect(signals.length).toBe(1);
-    const sig = signals[0];
-    expect(sig.direction).toBe("short");
-    expect(sig.sodex_symbol).toBe("ARB-USD");
-    expect(sig.catalyst_subtype).toBe("unlock_supply");
-    expect(sig.event_chain_id).toBe("unlock:arbitrum-2099-01-01");
-    expect(sig.suggested_size_usd).toBeGreaterThan(0);
-    expect(sig.significance_score).toBeGreaterThan(0);
-
-    // I-30 companion outcome exists
-    expect(await Outcomes.outcomeExistsFor(sig.id)).toBe(true);
-
-    // rerun → deduped, no new signal
-    const second = await generateUnlockSignals();
-    expect(second.created).toBe(0);
-    expect(second.skipped_duplicate).toBe(1);
-  });
-
-  it("skips small unlocks below the threshold", async () => {
-    await seedTradableUnlock({
-      id: "arbitrum-2099-03-03",
-      unlock_date: "2099-03-03",
-      unlock_value_usd: 100_000, // below MIN_USD
-      pct_of_circulating: 0.1, // below MIN_PCT_FLOAT
-    });
-    const res = await generateUnlockSignals();
-    expect(res.created).toBe(0);
-    expect(res.skipped_below_threshold).toBe(1);
+    // far out → watching
+    expect(computeUnlockTradePlan(base({ unlock_at: now + 20 * DAY }), now).phase).toBe("watching");
+    // inside the 7d window → entry (armed)
+    expect(computeUnlockTradePlan(base({ unlock_at: now + 3 * DAY }), now).phase).toBe("entry");
+    // ineligible → ineligible regardless of timing
+    expect(
+      computeUnlockTradePlan(base({ unlock_at: now + 3 * DAY, pct_of_circulating: 0.2 }), now).phase,
+    ).toBe("ineligible");
   });
 });

@@ -14,21 +14,16 @@ export default function UnlocksPage() {
         <header>
           <h1 className="dash-title">Token Unlocks</h1>
           <p className="mt-2 dash-description">
-            A forward calendar of scheduled token supply unlocks. A large
-            cliff — sized as a share of circulating float — is predictable,
-            datable sell pressure, so Helix fires a SHORT into it on the perp.
-            Each shortable unlock links straight to a one-click trade.
+            A forward calendar of scheduled token supply unlocks — and the
+            short setups worth fading. The negative impact is front-loaded, so
+            for large team / investor cliffs Helix plans a short into the
+            anticipation (a week or two ahead) and a cover shortly after the
+            unlock. Shortable candidates execute one-click on the perp, right
+            here.
           </p>
           <p className="mt-3 text-[12px] text-fg-muted">
-            <span>
-              Data: DefiLlama emissions. Shorts execute on SoDEX perps from{" "}
-            </span>
-            <a
-              className="underline decoration-dotted underline-offset-4 hover:text-fg"
-              href="/signals"
-            >
-              Live Signals →
-            </a>
+            Data: DefiLlama emissions · executes on SoDEX perps. These are their
+            own trades — separate from Live Signals.
           </p>
         </header>
 

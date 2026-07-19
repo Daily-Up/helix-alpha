@@ -74,9 +74,9 @@ SoSoValue OpenAPI  →  News ingestion  →  AI classification
 
 ### Token unlocks — a tradable catalyst (Wave 3) ✓
 
-- **Unlock calendar** (`/unlocks`) — a forward schedule of token supply unlocks, sourced **keyless** from DefiLlama's emissions datasets (no new paid API). Per unlock we compute USD value (tokens × live price), **% of circulating float** (the sell-pressure proxy), recipient tranche (insiders / private-sale), and the countdown.
-- **Short signals into unlocks** — a standalone generator fires a **SHORT** on the perp for large, near-term unlocks (a scheduled cliff = predictable, datable sell pressure), with conviction scaled by % of float. Signals land in the normal `signals` table, so they render on `/signals` and execute one-click through the unchanged SoDEX perps flow. Only tokens tradable as a SoDEX mainnet perp become signals.
-- Runs daily via GitHub Actions; the whole path — ingest → calendar → short signal → execute — is live.
+- **Unlock calendar** (`/unlocks`) — a forward schedule of token supply unlocks, sourced **keyless** from DefiLlama's emissions datasets (no new paid API). Per unlock we compute USD value (tokens × live price), **% of circulating float** (the sell-pressure proxy), recipient tranche (team / investor / community), and the countdown.
+- **Short trade plans, timed to the anticipation.** Empirically the negative impact is front-loaded (price bleeds into a known unlock, the date is often the anticlimax, pressure eases within 1–3 weeks). So instead of an always-on signal, each **eligible** unlock — a **team/investor cliff ≥1% of float on a SoDEX perp** — gets a plan: **arm a short T−7/10/14d** (by size) and **cover ~T+3d**, with conviction from recipient × materiality. A candidate in its entry window is a **one-click short on the perp, executed right on `/unlocks`** — deliberately *separate* from the Live Signals feed. Community/airdrop unlocks and anything <1% of float are calendar-only.
+- Runs daily via GitHub Actions; the plan is computed at read time, so retuning the timing needs no re-ingest.
 
 ### Interface & data (Wave 3)
 

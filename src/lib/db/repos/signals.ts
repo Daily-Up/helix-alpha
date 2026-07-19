@@ -243,21 +243,6 @@ export async function existsForEventAsset(
   return (r?.n ?? 0) > 0;
 }
 
-export async function existsForEventChain(
-  eventChainId: string,
-): Promise<boolean> {
-  // INTENT: "Did we EVER fire a signal for this exact event chain?" Used by
-  // sources that have no triggering news_event (e.g. the calendar-driven
-  // token-unlock generator, where `triggered_by_event_id` is null and the
-  // stable key is `event_chain_id = "unlock:<slug>-<date>"`). Idempotent
-  // across daily reruns regardless of the prior signal's status.
-  const r = await get<{ n: number }>(
-    `SELECT COUNT(*) AS n FROM signals WHERE event_chain_id = ?`,
-    [eventChainId],
-  );
-  return (r?.n ?? 0) > 0;
-}
-
 export async function existsRecentForAssetDirection(
   assetId: string,
   direction: "long" | "short",
