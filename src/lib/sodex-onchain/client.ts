@@ -437,24 +437,28 @@ export async function placeOrderBatch(opts: {
     // flat body → "Orders required"). So we send the single order at the top
     // level and mirror it into orders[]. Perps are quantity-based (no funds).
     // Field order matters for the signed payloadHash — keep it stable.
-    const leg = {
-      symbolID: first.symbolID,
+    // EXACT perps NewOrderParams shape from the SoDEX docs:
+    //   {accountID, symbolID, orders:[{clOrdID, modifier, side, type,
+    //    timeInForce, quantity, reduceOnly, positionSide}]}
+    // symbolID sits at the TOP level (not per-order). Field ORDER is
+    // load-bearing: the gateway re-hashes the marshaled struct, so a wrong
+    // order → wrong recovered signer → "API key not found". Every order flag
+    // (modifier=NORMAL 1, reduceOnly=false, positionSide=BOTH 1) must be
+    // present, even at zero.
+    const order = {
       clOrdID: first.clOrdID,
+      modifier: first.modifier ?? 1,
       side: first.side,
       type: first.type,
       timeInForce: first.timeInForce,
       quantity: first.quantity,
-      // Perps REQUIRE these (spot ignores them). "modifier is invalid" fires
-      // when they're absent: NORMAL order (1), one-way mode so positionSide
-      // is BOTH (1), and we're opening so not reduce-only.
-      modifier: first.modifier ?? 1,
       reduceOnly: first.reduceOnly ?? false,
       positionSide: first.positionSide ?? 1,
     };
     const params = {
       accountID: batch.accountID,
-      ...leg,
-      orders: [leg],
+      symbolID: first.symbolID,
+      orders: [order],
     };
     action = { type: "newOrder", params };
     body = params;
