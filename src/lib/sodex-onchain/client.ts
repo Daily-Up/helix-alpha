@@ -394,20 +394,38 @@ export async function placeOrderBatch(opts: {
   const { chainId, spotEndpoint, perpsEndpoint } = SODEX_NETWORKS[network];
   const endpoint = market === "futures" ? perpsEndpoint : spotEndpoint;
 
-  // Action type MUST be "batchNewOrder" for the /trade/orders/batch
-  // endpoint — not "newOrder". Reverse-engineered from sodex.com's
-  // bundle (features-DstP3doC.js, see `vE` action builder):
-  //   var fE = "batchNewOrder"; var pE = "batchCancelOrder";
-  //   function vE(e) { return { type: fE, params: {...} }; }
-  // The docs say "newOrder" but that's the SINGLE-order action; batch
-  // uses the dedicated batch* type. Sending "newOrder" through the
-  // batch endpoint produces a payloadHash that doesn't match what the
-  // gateway computes, so the recovered signer differs from the
-  // registered public key and the gateway returns "API key not found".
-  const action: SodexAction<SodexNewOrderBatch> = {
-    type: "batchNewOrder",
-    params: batch,
-  };
+  // SPOT batches to /trade/orders/batch with the "batchNewOrder" action.
+  // PERPS expose only /trade/orders and expect a SINGLE FLAT order
+  // ("NewOrderParams") — a batch body fails with
+  //   "invalid request body: NewOrderParams.SymbolID … required"
+  // because SymbolID is nested inside orders[]. So for futures we unwrap
+  // the (single) order and sign the "newOrder" action. The action type
+  // for the batch path is "batchNewOrder"; single is "newOrder" (docs).
+  let action: SodexAction;
+  let body: unknown;
+  let path: string;
+  if (market === "futures") {
+    const first = batch.orders[0];
+    // Flat single-order params: accountID + the order fields. Perps are
+    // quantity-based (no `funds`). Field order matters for the signed
+    // payloadHash — keep it stable.
+    const params = {
+      accountID: batch.accountID,
+      symbolID: first.symbolID,
+      clOrdID: first.clOrdID,
+      side: first.side,
+      type: first.type,
+      timeInForce: first.timeInForce,
+      quantity: first.quantity,
+    };
+    action = { type: "newOrder", params };
+    body = params;
+    path = "/trade/orders";
+  } else {
+    action = { type: "batchNewOrder", params: batch };
+    body = batch;
+    path = "/trade/orders/batch";
+  }
 
   const { apiSign, nonce } = await signWithApiKey({
     privateKey,
@@ -423,14 +441,10 @@ export async function placeOrderBatch(opts: {
   };
   if (apiKeyName) headers["X-API-Key"] = apiKeyName;
 
-  // Perps expose the order endpoint at /trade/orders (no /batch suffix —
-  // /perps/trade/orders/batch 404s); spot uses the dedicated batch path.
-  const path =
-    market === "futures" ? "/trade/orders" : "/trade/orders/batch";
   const res = await fetch(`${endpoint}${path}`, {
     method: "POST",
     headers,
-    body: JSON.stringify(batch),
+    body: JSON.stringify(body),
   });
   return handle<unknown>(res);
 }
