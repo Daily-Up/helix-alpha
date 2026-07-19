@@ -86,8 +86,16 @@ export interface SodexPerpsAccountState {
    * (available), NOT the spot `t`/`l` shape — reading `t` here yields 0.
    */
   B: Array<{ i: number; a: string; wb: string; aw?: string; am?: string }>;
-  /** Open positions. */
-  P: unknown[];
+  /** Open positions. sz is signed (positive long / negative short / 0 closed). */
+  P: Array<{
+    i: number;
+    s: string;
+    sz: string;
+    ep: string;
+    ps: number;
+    cr?: string;
+    m?: number;
+  }>;
   /** Open orders. */
   O: unknown[];
   /** Subaccounts. */

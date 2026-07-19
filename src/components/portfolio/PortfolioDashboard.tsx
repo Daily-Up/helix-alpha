@@ -9,6 +9,7 @@
 
 import Link from "next/link";
 import { useTradeMode } from "@/lib/sodex-onchain/useTradeMode";
+import { LivePositionsPanel } from "@/components/sodex/LivePositionsPanel";
 import { LiveOrdersPanel } from "@/components/sodex/LiveOrdersPanel";
 
 export function PortfolioDashboard() {
@@ -20,7 +21,12 @@ export function PortfolioDashboard() {
   if (!tm.hasKey) {
     return <ConnectPrompt />;
   }
-  return <LiveOrdersPanel />;
+  return (
+    <div className="flex flex-col gap-5">
+      <LivePositionsPanel />
+      <LiveOrdersPanel />
+    </div>
+  );
 }
 
 function ConnectPrompt() {

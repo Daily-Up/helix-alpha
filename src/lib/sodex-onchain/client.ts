@@ -180,6 +180,8 @@ export interface SodexTicker {
   lastPx: string;
   askPx?: string;
   bidPx?: string;
+  /** Perps only — the mark price used for PnL / liquidation. */
+  markPrice?: string;
 }
 export async function getTicker(
   network: SodexNetwork,
