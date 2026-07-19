@@ -327,7 +327,7 @@ export function ExecuteLiveButton({ signal }: Props) {
                   modifier: SodexModifier.STOP,
                   stopPrice: trigger.toFixed(pxDp),
                   stopType,
-                  triggerType: 1,
+                  triggerType: 2, // MARK_PRICE (1=LAST was rejected; docs trigger on mark)
                   reduceOnly: true,
                   positionSide: 1,
                 },
