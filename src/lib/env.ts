@@ -36,6 +36,14 @@ const EnvSchema = z.object({
     .string()
     .default("wss://mainnet-gw.sodex.dev/ws/perps"),
 
+  // DefiLlama — keyless emissions/unlocks datasets + coins price API.
+  // Defaulted so no new secret is required; overridable if the CDN moves.
+  DEFILLAMA_DATASETS_URL: z
+    .string()
+    .url()
+    .default("https://defillama-datasets.llama.fi"),
+  DEFILLAMA_COINS_URL: z.string().url().default("https://coins.llama.fi"),
+
   // Anthropic
   ANTHROPIC_API_KEY: z.string().min(1, "ANTHROPIC_API_KEY is required"),
   /** Reasoning-heavy model (agents, briefing). Default: Sonnet 4.5. */

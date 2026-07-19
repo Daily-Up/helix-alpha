@@ -34,6 +34,7 @@ const NAV: Array<{ section: string; items: NavItem[] }> = [
     section: "Markets",
     items: [
       { href: "/events", label: "Event Stream" },
+      { href: "/unlocks", label: "Token Unlocks" },
       { href: "/sectors", label: "Sector Rotation" },
       { href: "/etfs", label: "ETF Flows" },
       { href: "/treasuries", label: "Treasury Watch" },

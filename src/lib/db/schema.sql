@@ -876,6 +876,42 @@ CREATE INDEX IF NOT EXISTS idx_hist_catalysts_category ON historical_catalysts(c
 CREATE INDEX IF NOT EXISTS idx_hist_catalysts_ts       ON historical_catalysts(ts_ms DESC);
 CREATE INDEX IF NOT EXISTS idx_hist_catalysts_asset    ON historical_catalysts(asset);
 
+-- ── 23b. Token unlock schedule (Wave 3 — supply-unlock catalyst) ──────────
+-- Forward calendar of scheduled cliff/linear supply unlocks per token,
+-- sourced from DefiLlama's keyless emissions datasets. One row per
+-- (protocol, unlock event). Feeds the standalone SHORT-signal generator
+-- (a large unlock = predictable sell pressure) and the /unlocks calendar.
+-- asset_id + sodex_symbol are set only for tokens that map to a SoDEX-
+-- tradable PERP (shortable); the rest are stored for calendar completeness
+-- with those columns NULL. Placed ABOVE the bare ALTERs below so a full
+-- schema bootstrap creates it even on an already-migrated prod DB (which
+-- aborts at the first ALTER). Prod applies it via scripts/apply-token-unlocks.mjs.
+CREATE TABLE IF NOT EXISTS token_unlocks (
+  id                  TEXT PRIMARY KEY,               -- "<slug>-<YYYY-MM-DD>" e.g. "arbitrum-2026-08-14"
+  protocol_slug       TEXT NOT NULL,                  -- DefiLlama slug ("arbitrum")
+  token_id            TEXT,                           -- DefiLlama metadata.token ("coingecko:aptos" | "arbitrum:0x…")
+  symbol              TEXT NOT NULL,                  -- resolved ticker, UPPERCASE ("ARB")
+  asset_id            TEXT,                           -- Helix asset id ("tok-arb"); NULL if not in universe
+  sodex_symbol        TEXT,                           -- perp symbol "ARB-USD"; NULL when not perp-tradable
+  tradable_perp       INTEGER NOT NULL DEFAULT 0,     -- 1 when a SoDEX futures market resolves
+  unlock_at           INTEGER NOT NULL,               -- ms epoch of the unlock
+  unlock_date         TEXT NOT NULL,                  -- YYYY-MM-DD (UTC) for grouping
+  unlock_kind         TEXT,                           -- 'cliff' | 'linear' | 'mixed'
+  tokens_unlocked     REAL,                           -- discrete cliff amount (summary.totalTokensCliff)
+  unlock_value_usd    REAL,                           -- tokens_unlocked * price (feed's USD chart is empty)
+  price_usd           REAL,                           -- price used for the USD calc
+  pct_of_circulating  REAL,                           -- sell-pressure proxy, PERCENT (e.g. 1.66)
+  pct_of_max_supply   REAL,                           -- secondary dilution proxy, PERCENT
+  categories_json     TEXT,                           -- JSON: recipient categories (insiders/privateSale/…)
+  source              TEXT,                           -- 'defillama'
+  raw_json            TEXT,                           -- trimmed provider payload for audit
+  ingested_at         INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+  updated_at          INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+);
+CREATE INDEX IF NOT EXISTS idx_token_unlocks_at       ON token_unlocks(unlock_at);
+CREATE INDEX IF NOT EXISTS idx_token_unlocks_tradable ON token_unlocks(tradable_perp, unlock_at);
+CREATE INDEX IF NOT EXISTS idx_token_unlocks_asset    ON token_unlocks(asset_id, unlock_at);
+
 -- Regime snapshot at the moment of each catalyst (backfilled from
 -- historical_klines_hourly by scripts/backfill-catalyst-regime.mjs).
 -- Lets `query_similar_catalyst` answer "how did X events perform when

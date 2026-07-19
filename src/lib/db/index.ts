@@ -34,6 +34,11 @@ export * as IndexFund from "./repos/index-fund";
 export * as Postmortem from "./repos/postmortem";
 export * as Briefings from "./repos/briefings";
 export * as Treasuries from "./repos/treasuries";
+export * as TokenUnlocks from "./repos/token-unlocks";
+export type {
+  TokenUnlockRow,
+  NewTokenUnlock,
+} from "./repos/token-unlocks";
 export * as Outcomes from "./repos/outcomes";
 export * as Alerts from "./repos/alerts";
 export * as ShadowPortfolio from "./repos/shadow-portfolio";

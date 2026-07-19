@@ -72,6 +72,12 @@ SoSoValue OpenAPI  →  News ingestion  →  AI classification
 - **Autonomous daily rebalancing** — cadence-guarded, tick-driven via a GitHub Actions cron.
 - **One-click "Deploy to SoDEX"** — splits available USDC across the live index weights as a single signed batch.
 
+### Token unlocks — a tradable catalyst (Wave 3) ✓
+
+- **Unlock calendar** (`/unlocks`) — a forward schedule of token supply unlocks, sourced **keyless** from DefiLlama's emissions datasets (no new paid API). Per unlock we compute USD value (tokens × live price), **% of circulating float** (the sell-pressure proxy), recipient tranche (insiders / private-sale), and the countdown.
+- **Short signals into unlocks** — a standalone generator fires a **SHORT** on the perp for large, near-term unlocks (a scheduled cliff = predictable, datable sell pressure), with conviction scaled by % of float. Signals land in the normal `signals` table, so they render on `/signals` and execute one-click through the unchanged SoDEX perps flow. Only tokens tradable as a SoDEX mainnet perp become signals.
+- Runs daily via GitHub Actions; the whole path — ingest → calendar → short signal → execute — is live.
+
 ### Interface & data (Wave 3)
 
 - Full design pass across all 21 screens onto a shared primitive set (magnitude-bar tables, one number-precision policy, click-to-copy addresses), real **asset logos** (crypto + crypto-stocks + ETFs), and a viewport-fit, product-first dashboard. A ratchet guard (`tests/ui-primitives-guard.test.ts`) blocks regressions.
@@ -82,7 +88,7 @@ SoSoValue OpenAPI  →  News ingestion  →  AI classification
 
 | Feature | Status | Wave |
 |---|---|---|
-| **Token unlocks as a tradable catalyst** — ingest vesting/unlock schedules, generate (mostly short) signals ahead of large unlocks, surface an unlock calendar; routes into the perps short side | Design; building next | Wave 4 |
+| **Unlock signals — measure + refine** — grade unlock-short outcomes in the calibration engine (does front-running unlocks work?), size by float + volume, widen token coverage beyond the current perp universe | Next | Wave 4 |
 | Two-sided delta rebalance for AlphaIndex live deploy (sells to trim, not just cash-deploy) | Planned | Wave 4 / 5 |
 | Opt-in automated execution for AUTO-tier + high-conviction signals | Planned | Wave 5 |
 | Calibration / Learnings / Pattern Library pages (hit rate, conviction curves, per-subtype stats) | Architecture complete; sample size warming up | Wave 4 |

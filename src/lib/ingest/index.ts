@@ -47,3 +47,10 @@ export {
   type MacroIngestSummary,
   type MacroIngestOptions,
 } from "./macro";
+
+export {
+  runUnlocksIngest,
+  runUnlocksIngestWithAudit,
+  type UnlocksIngestSummary,
+  type UnlocksIngestOptions,
+} from "./unlocks";
