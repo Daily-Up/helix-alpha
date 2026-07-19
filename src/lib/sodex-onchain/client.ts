@@ -69,6 +69,8 @@ export interface SodexSymbolMeta {
   market: SodexMarket;
   /** Decimal places allowed on `quantity` (e.g. DASH perp = 2). */
   quantityPrecision?: number;
+  /** Decimal places allowed on price / stopPrice (e.g. DASH perp = 3). */
+  pricePrecision?: number;
   /** Quantity step, decimal string (e.g. "0.01"). */
   stepSize?: string;
   minQuantity?: string;
@@ -98,6 +100,7 @@ async function loadSymbolMap(
         symbol?: string;
         displayName?: string;
         quantityPrecision?: number;
+        pricePrecision?: number;
         stepSize?: string;
         minQuantity?: string;
         minNotional?: string;
@@ -111,6 +114,7 @@ async function loadSymbolMap(
           id,
           market,
           quantityPrecision: s.quantityPrecision,
+          pricePrecision: s.pricePrecision,
           stepSize: s.stepSize,
           minQuantity: s.minQuantity,
           minNotional: s.minNotional,
@@ -454,24 +458,25 @@ export async function placeOrderBatch(opts: {
     // flat body → "Orders required"). So we send the single order at the top
     // level and mirror it into orders[]. Perps are quantity-based (no funds).
     // Field order matters for the signed payloadHash — keep it stable.
-    // EXACT perps NewOrderParams shape from the SoDEX docs:
-    //   {accountID, symbolID, orders:[{clOrdID, modifier, side, type,
-    //    timeInForce, quantity, reduceOnly, positionSide}]}
-    // symbolID sits at the TOP level (not per-order). Field ORDER is
-    // load-bearing: the gateway re-hashes the marshaled struct, so a wrong
-    // order → wrong recovered signer → "API key not found". Every order flag
-    // (modifier=NORMAL 1, reduceOnly=false, positionSide=BOTH 1) must be
-    // present, even at zero.
-    const order = {
-      clOrdID: first.clOrdID,
-      modifier: first.modifier ?? 1,
-      side: first.side,
-      type: first.type,
-      timeInForce: first.timeInForce,
-      quantity: first.quantity,
-      reduceOnly: first.reduceOnly ?? false,
-      positionSide: first.positionSide ?? 1,
-    };
+    // PerpsOrderItem in the DOCUMENTED field order (from SoDEX docs):
+    //   clOrdID, modifier, side, type, timeInForce, price, quantity, funds,
+    //   stopPrice, stopType, triggerType, reduceOnly, positionSide
+    // Field order is load-bearing for the signed payloadHash (wrong order →
+    // wrong recovered signer → "API key not found"); optional (omitempty)
+    // fields MUST be omitted when unset. symbolID sits at the TOP level.
+    const order: Record<string, unknown> = { clOrdID: first.clOrdID };
+    order.modifier = first.modifier ?? 1;
+    order.side = first.side;
+    order.type = first.type;
+    order.timeInForce = first.timeInForce;
+    if (first.price != null) order.price = first.price;
+    if (first.quantity != null) order.quantity = first.quantity;
+    if (first.funds != null) order.funds = first.funds;
+    if (first.stopPrice != null) order.stopPrice = first.stopPrice;
+    if (first.stopType != null) order.stopType = first.stopType;
+    if (first.triggerType != null) order.triggerType = first.triggerType;
+    order.reduceOnly = first.reduceOnly ?? false;
+    order.positionSide = first.positionSide ?? 1;
     const params = {
       accountID: batch.accountID,
       symbolID: first.symbolID,

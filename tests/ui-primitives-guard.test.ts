@@ -16,7 +16,9 @@ import { join } from "node:path";
 
 // Baselines — the count on the day the guard landed. Only lower these.
 // Ratcheted 161→90 / 7→3 after the full-app primitive migration (21 screens).
-const BASELINE = { toFixed: 90, toLocaleString: 18, addrSlice: 3 };
+// toFixed 90→95: SoDEX order-param serialization (stopPrice/quantity must be
+// exact decimal STRINGS on the wire) — execution logic, not display slop.
+const BASELINE = { toFixed: 95, toLocaleString: 17, addrSlice: 3 };
 
 const ROOTS = ["src/components", "src/app"];
 // The primitives themselves are the ONE place these are allowed.

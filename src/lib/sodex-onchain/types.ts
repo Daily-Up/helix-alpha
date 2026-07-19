@@ -112,6 +112,12 @@ export interface SodexNewOrderEntry {
   funds?: string;
   /** Required on perps; optional/ignored on spot. */
   modifier?: number;
+  /** Trigger price for STOP / take-profit orders (DecimalString). */
+  stopPrice?: string;
+  /** Stop-order variant (SL vs TP). Enum values not published — test. */
+  stopType?: number;
+  /** Trigger reference (mark / last / index). Enum not published — test. */
+  triggerType?: number;
   reduceOnly?: boolean;
   positionSide?: number;
 }

@@ -42,6 +42,7 @@ import {
 } from "@/lib/sodex-onchain/local-keys";
 import { fmtSodexSymbol } from "@/lib/format";
 import {
+  SodexModifier,
   SodexOrderType,
   SodexSide,
   SodexTimeInForce,
@@ -56,9 +57,11 @@ export interface ExecuteLiveSignal {
   /** Optional SoDEX numeric symbolID — resolved at runtime if absent. */
   symbol_id?: number;
   side: "buy" | "sell";
-  /** Suggested size in USD (informational — the LIVE order uses the
-   *  user's configured per-trade size, not this). */
+  /** Suggested size in USD — pre-fills the editable size field. */
   suggested_size_usd: number;
+  /** Suggested stop-loss / take-profit %, pre-fill the SL/TP fields. */
+  stop_pct?: number | null;
+  target_pct?: number | null;
   /** Current market price used for the optimistic display. */
   price_usd: number;
 }
@@ -78,9 +81,17 @@ export function ExecuteLiveButton({ signal }: Props) {
   const [identityAddress, setIdentityAddress] = useState<
     `0x${string}` | null
   >(null);
-  const [orderSizeUsd, setOrderSizeUsd] = useState(11);
   const [maxDaily, setMaxDaily] = useState(3);
   const [tradesToday, setTradesToday] = useState(0);
+  // Editable order params — pre-filled from the signal, then user-adjustable
+  // in the confirm panel. Strings so the inputs can be cleared/typed freely.
+  const [sizeInput, setSizeInput] = useState("");
+  const [stopInput, setStopInput] = useState(
+    signal.stop_pct != null ? String(signal.stop_pct) : "",
+  );
+  const [targetInput, setTargetInput] = useState(
+    signal.target_pct != null ? String(signal.target_pct) : "",
+  );
 
   const refreshState = useCallback(() => {
     const key = readLocalKey(network);
@@ -90,10 +101,16 @@ export function ExecuteLiveButton({ signal }: Props) {
     const limits = readSafetyLimits(network);
     setReady(!!key && limits.acceptedDisclaimer);
     setIdentityAddress(key?.address ?? null);
-    setOrderSizeUsd(limits.maxPositionUsd);
+    // Seed size from the signal's suggestion, falling back to the per-trade
+    // safety size. Only when empty so we don't clobber the user's edit.
+    setSizeInput((prev) =>
+      prev !== ""
+        ? prev
+        : String(signal.suggested_size_usd || limits.maxPositionUsd || 11),
+    );
     setMaxDaily(limits.maxDailyTrades);
     setTradesToday(readTradesToday(network));
-  }, [network, connectedMaster]);
+  }, [network, connectedMaster, signal.suggested_size_usd]);
 
   useEffect(() => {
     refreshState();
@@ -107,21 +124,14 @@ export function ExecuteLiveButton({ signal }: Props) {
   // or network call happens here.
   const requestExecute = useCallback(() => {
     const limits = readSafetyLimits(network);
-    if (limits.maxPositionUsd < SODEX_MIN_NOTIONAL_USD) {
-      setMsg(
-        `✗ Your live order size ($${limits.maxPositionUsd}) is below SoDEX's ~$${SODEX_MIN_NOTIONAL_USD} minimum. Raise it on /settings/connect-sodex.`,
-      );
-      return;
-    }
     const used = readTradesToday(network);
     if (used >= limits.maxDailyTrades) {
       setMsg(
-        `✗ Daily live-trade limit reached (${used}/${limits.maxDailyTrades}). Resets at 00:00 UTC — or raise it on /settings/connect-sodex.`,
+        `✗ Daily live-trade limit reached (${used}/${limits.maxDailyTrades}). Resets 00:00 UTC — or raise it on /settings/connect-sodex.`,
       );
       return;
     }
     setMsg(null);
-    setOrderSizeUsd(limits.maxPositionUsd);
     setConfirming(true);
   }, [network]);
 
@@ -134,12 +144,11 @@ export function ExecuteLiveButton({ signal }: Props) {
       return;
     }
     const limits = readSafetyLimits(network);
-    // The live order size is the user's configured per-trade size — the
-    // SAME number the button and confirm panel display. No hidden constant.
-    const sizeUsd = limits.maxPositionUsd;
-    if (sizeUsd < SODEX_MIN_NOTIONAL_USD) {
+    // Size the user typed in the confirm panel (pre-filled from the signal).
+    const sizeUsd = Number.parseFloat(sizeInput);
+    if (!Number.isFinite(sizeUsd) || sizeUsd < SODEX_MIN_NOTIONAL_USD) {
       setMsg(
-        `✗ Your live order size ($${sizeUsd}) is below SoDEX's ~$${SODEX_MIN_NOTIONAL_USD} minimum.`,
+        `✗ Size must be at least SoDEX's ~$${SODEX_MIN_NOTIONAL_USD} minimum.`,
       );
       setConfirming(false);
       return;
@@ -287,8 +296,75 @@ export function ExecuteLiveButton({ signal }: Props) {
         }),
       });
 
+      // ── Attach SL / TP as reduce-only stop orders (perps only). The entry
+      //    already filled; these are best-effort so a bracket failure never
+      //    unwinds a successful entry — we just surface it.
+      let bracket = "";
+      if (market === "futures" && referencePrice > 0) {
+        const stopPct = Number.parseFloat(stopInput);
+        const targetPct = Number.parseFloat(targetInput);
+        const pxDp = resolved.pricePrecision ?? 4;
+        const closeSide = isBuy ? SodexSide.SELL : SodexSide.BUY;
+        const placeStop = async (tag: string, trigger: number, stopType: number) => {
+          const clid = `helix-${tag}${Date.now().toString(36)}${Math.random()
+            .toString(36)
+            .slice(2, 4)}`.slice(0, 36);
+          await placeOrderBatch({
+            network,
+            apiKeyName: key.name || undefined,
+            privateKey: key.privateKey,
+            market,
+            batch: {
+              accountID: state.aid,
+              orders: [
+                {
+                  symbolID: symbolId,
+                  clOrdID: clid,
+                  side: closeSide,
+                  type: SodexOrderType.MARKET,
+                  timeInForce: SodexTimeInForce.IOC,
+                  quantity: qty,
+                  modifier: SodexModifier.STOP,
+                  stopPrice: trigger.toFixed(pxDp),
+                  stopType,
+                  triggerType: 1,
+                  reduceOnly: true,
+                  positionSide: 1,
+                },
+              ],
+            },
+          });
+        };
+        const placed: string[] = [];
+        const failed: string[] = [];
+        if (Number.isFinite(stopPct) && stopPct > 0) {
+          const trig = isBuy
+            ? referencePrice * (1 - stopPct / 100)
+            : referencePrice * (1 + stopPct / 100);
+          try {
+            await placeStop("sl", trig, 1);
+            placed.push(`SL ${stopPct}%`);
+          } catch (e) {
+            failed.push(`SL: ${(e as Error).message}`);
+          }
+        }
+        if (Number.isFinite(targetPct) && targetPct > 0) {
+          const trig = isBuy
+            ? referencePrice * (1 + targetPct / 100)
+            : referencePrice * (1 - targetPct / 100);
+          try {
+            await placeStop("tp", trig, 2);
+            placed.push(`TP ${targetPct}%`);
+          } catch (e) {
+            failed.push(`TP: ${(e as Error).message}`);
+          }
+        }
+        if (placed.length) bracket += ` · ${placed.join(" · ")}`;
+        if (failed.length) bracket += ` · ⚠ ${failed.join("; ")}`;
+      }
+
       setMsg(
-        `✓ Order placed — ${signal.side.toUpperCase()} $${sizeUsd} ${fmtSodexSymbol(signal.symbol)} on ${SODEX_NETWORKS[network].label}`,
+        `✓ ${signal.side.toUpperCase()} $${sizeUsd} ${fmtSodexSymbol(signal.symbol)} on ${SODEX_NETWORKS[network].label}${bracket}`,
       );
     } catch (err) {
       const errMsg = (err as Error).message;
@@ -317,7 +393,15 @@ export function ExecuteLiveButton({ signal }: Props) {
       setBusy(false);
       setConfirming(false);
     }
-  }, [network, signal, identityAddress, connectedMaster]);
+  }, [
+    network,
+    signal,
+    identityAddress,
+    connectedMaster,
+    sizeInput,
+    stopInput,
+    targetInput,
+  ]);
 
   if (!ready) {
     const hasKey = identityAddress != null;
@@ -346,10 +430,8 @@ export function ExecuteLiveButton({ signal }: Props) {
       {confirming ? (
         // ── Explicit confirmation — a REAL order is one click away ──
         <div className="rounded border border-accent/40 bg-accent/10 p-2.5 text-xs">
-          <div className="font-medium text-fg">
-            Place a real order?
-          </div>
-          <div className="mt-1 text-fg-muted">
+          <div className="text-fg-muted">
+            Real{" "}
             <span
               className={cn(
                 "font-medium",
@@ -358,9 +440,35 @@ export function ExecuteLiveButton({ signal }: Props) {
             >
               {sideLabel}
             </span>{" "}
-            <span className="font-medium text-fg">${orderSizeUsd}</span> of{" "}
-            {symLabel} — <span className="text-fg">real funds</span> on{" "}
-            {SODEX_NETWORKS[network].label}.
+            on {symLabel} — <span className="text-fg">real funds</span> on{" "}
+            {SODEX_NETWORKS[network].label}. Stop / target become reduce-only
+            brackets on perps.
+          </div>
+          <div className="mt-2 grid grid-cols-3 gap-2">
+            {(
+              [
+                ["Size $", sizeInput, setSizeInput, "text-fg", undefined],
+                ["Stop %", stopInput, setStopInput, "text-negative", "off"],
+                ["Target %", targetInput, setTargetInput, "text-positive", "off"],
+              ] as const
+            ).map(([label, val, setter, color, ph]) => (
+              <label key={label} className="flex flex-col gap-0.5">
+                <span className="font-[var(--font-jetbrains-mono)] text-[9px] uppercase tracking-wider text-fg-dim">
+                  {label}
+                </span>
+                <input
+                  value={val}
+                  onChange={(e) => setter(e.target.value)}
+                  inputMode="decimal"
+                  placeholder={ph}
+                  disabled={busy}
+                  className={cn(
+                    "w-full rounded border border-line bg-surface px-1.5 py-1 text-xs tabular-nums outline-none focus:border-accent/50",
+                    color,
+                  )}
+                />
+              </label>
+            ))}
           </div>
           <div className="mt-2 flex items-center gap-2">
             <button
@@ -373,7 +481,7 @@ export function ExecuteLiveButton({ signal }: Props) {
                   : "border-accent bg-accent text-[#0b0b0e] hover:bg-accent-2",
               )}
             >
-              {busy ? "Signing…" : `Confirm · $${orderSizeUsd}`}
+              {busy ? "Signing…" : `Confirm · $${sizeInput}`}
             </button>
             <button
               onClick={() => setConfirming(false)}
@@ -392,9 +500,9 @@ export function ExecuteLiveButton({ signal }: Props) {
             "inline-flex items-center gap-2 rounded border px-2.5 py-1 text-xs font-medium transition-colors",
             "border-accent/40 bg-accent/15 text-accent-2 hover:bg-accent/25",
           )}
-          title={`${SODEX_NETWORKS[network].label} · ${sideLabel} $${orderSizeUsd} ${symLabel} (your per-trade size)`}
+          title={`${SODEX_NETWORKS[network].label} · ${sideLabel} ${symLabel} — set size, stop & target on confirm`}
         >
-          {`▶ Execute live · $${orderSizeUsd}`}
+          {`▶ Execute live · $${sizeInput}`}
         </button>
       )}
       {msg ? (

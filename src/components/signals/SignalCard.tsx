@@ -623,6 +623,8 @@ export function SignalCard({
                 symbol: sig.sodex_symbol,
                 side: dirIsLong ? "buy" : "sell",
                 suggested_size_usd: sig.suggested_size_usd,
+                stop_pct: sig.suggested_stop_pct,
+                target_pct: sig.suggested_target_pct,
                 price_usd: 0, // resolved at click-time from quotes; 0 means market-order rules
               }}
             />
