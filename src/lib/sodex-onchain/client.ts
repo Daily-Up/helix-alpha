@@ -194,7 +194,18 @@ export async function getLivePrice(
 }
 
 async function handle<T>(res: Response): Promise<T> {
-  const json = (await res.json()) as SodexResponse<T>;
+  // Read as text first so a non-JSON body (e.g. a gateway "404 page not
+  // found") surfaces a clean message instead of an "Unexpected non-
+  // whitespace character after JSON" parse crash.
+  const raw = await res.text();
+  let json: SodexResponse<T>;
+  try {
+    json = JSON.parse(raw) as SodexResponse<T>;
+  } catch {
+    throw new Error(
+      `SoDEX ${res.status}: ${raw.slice(0, 160).trim() || "non-JSON response"}`,
+    );
+  }
   if (json.code !== 0) {
     // Surface whichever message field the endpoint used. Helpful
     // distinguishing "Nonce out of window" vs "invalid signature"
@@ -412,7 +423,11 @@ export async function placeOrderBatch(opts: {
   };
   if (apiKeyName) headers["X-API-Key"] = apiKeyName;
 
-  const res = await fetch(`${endpoint}/trade/orders/batch`, {
+  // Perps expose the order endpoint at /trade/orders (no /batch suffix —
+  // /perps/trade/orders/batch 404s); spot uses the dedicated batch path.
+  const path =
+    market === "futures" ? "/trade/orders" : "/trade/orders/batch";
+  const res = await fetch(`${endpoint}${path}`, {
     method: "POST",
     headers,
     body: JSON.stringify(batch),
