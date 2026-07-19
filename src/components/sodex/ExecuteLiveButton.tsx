@@ -28,7 +28,8 @@ import {
 import {
   placeOrderBatch,
   getAccountState,
-  getSymbolId,
+  getPerpsAccountState,
+  resolveSymbol,
   getLivePrice,
 } from "@/lib/sodex-onchain/client";
 import {
@@ -153,10 +154,28 @@ export function ExecuteLiveButton({ signal }: Props) {
     try {
       const accountLookupAddress =
         key.masterAddress ?? connectedMaster ?? key.address;
-      const state = await getAccountState(network, accountLookupAddress);
+
+      // Resolve the symbol across BOTH venues. Perp-only assets (DASH-USD…)
+      // are absent from the spot catalog — a spot-only lookup wrongly says
+      // "not listed". resolveSymbol finds the market and we route to it.
+      const resolved = await resolveSymbol(network, signal.symbol);
+      if (!resolved) {
+        throw new Error(
+          `Symbol ${fmtSodexSymbol(signal.symbol)} not listed on ${SODEX_NETWORKS[network].label} (spot or perps).`,
+        );
+      }
+      const { id: symbolId, market } = resolved;
+
+      // Account (aid) comes from the matching venue — spot vs perps.
+      const state =
+        market === "futures"
+          ? await getPerpsAccountState(network, accountLookupAddress)
+          : await getAccountState(network, accountLookupAddress);
       if (!state.aid) {
         throw new Error(
-          "SoDEX account not found for this wallet. Connect your master wallet (the one you used on /settings/connect-sodex) — Helix will self-heal and you can click Execute again.",
+          market === "futures"
+            ? "No SoDEX perps account for this wallet yet — open it on SoDEX (deposit margin) once, then Execute again."
+            : "SoDEX account not found for this wallet. Connect your master wallet (the one you used on /settings/connect-sodex) — Helix will self-heal and you can click Execute again.",
         );
       }
       if (!key.masterAddress && accountLookupAddress !== key.address) {
@@ -164,15 +183,6 @@ export function ExecuteLiveButton({ signal }: Props) {
           ...key,
           masterAddress: accountLookupAddress,
         });
-      }
-      let symbolId = signal.symbol_id;
-      if (symbolId == null) {
-        symbolId = await getSymbolId(network, signal.symbol);
-      }
-      if (symbolId == null) {
-        throw new Error(
-          `Symbol ${fmtSodexSymbol(signal.symbol)} not listed on ${SODEX_NETWORKS[network].label}.`,
-        );
       }
       // clOrdID must match ^[0-9a-zA-Z_-]{1,36}$ and be unique across an
       // account's open orders. Pack: helix-{8 of id}-{base36 ms}{4 rnd}.
@@ -186,10 +196,15 @@ export function ExecuteLiveButton({ signal }: Props) {
         );
       }
       const isBuy = signal.side === "buy";
-      // Market order — resolve the reference price from SoDEX's live
-      // ticker (best ask for buys, best bid for sells). signal.price_usd
+      // Market order — resolve the reference price from the matching venue's
+      // live ticker (best ask for buys, best bid for sells). signal.price_usd
       // is a last-ditch fallback.
-      let referencePrice = await getLivePrice(network, signal.symbol, signal.side);
+      let referencePrice = await getLivePrice(
+        network,
+        signal.symbol,
+        signal.side,
+        market,
+      );
       if (!referencePrice && signal.price_usd > 0) {
         referencePrice = signal.price_usd;
       }
@@ -204,30 +219,42 @@ export function ExecuteLiveButton({ signal }: Props) {
           `Computed quantity ${qty} is zero — increase position size or check the price feed.`,
         );
       }
-      // Market orders accept EXACTLY ONE of {quantity, funds}:
-      //   BUY  → funds (USD spend); SELL → quantity (base size).
-      const order: SodexNewOrderEntry = isBuy
-        ? {
-            symbolID: symbolId,
-            clOrdID,
-            side: SodexSide.BUY,
-            type: SodexOrderType.MARKET,
-            timeInForce: SodexTimeInForce.IOC,
-            funds: sizeUsd.toString(),
-          }
-        : {
-            symbolID: symbolId,
-            clOrdID,
-            side: SodexSide.SELL,
-            type: SodexOrderType.MARKET,
-            timeInForce: SodexTimeInForce.IOC,
-            quantity: qty,
-          };
+      // Order params by venue. Spot MARKET accepts exactly one of
+      // {funds, quantity}: BUY→funds (USD), SELL→quantity. Futures (perps)
+      // are quantity-based for both sides — the side alone sets long/short.
+      const order: SodexNewOrderEntry =
+        market === "futures"
+          ? {
+              symbolID: symbolId,
+              clOrdID,
+              side: isBuy ? SodexSide.BUY : SodexSide.SELL,
+              type: SodexOrderType.MARKET,
+              timeInForce: SodexTimeInForce.IOC,
+              quantity: qty,
+            }
+          : isBuy
+            ? {
+                symbolID: symbolId,
+                clOrdID,
+                side: SodexSide.BUY,
+                type: SodexOrderType.MARKET,
+                timeInForce: SodexTimeInForce.IOC,
+                funds: sizeUsd.toString(),
+              }
+            : {
+                symbolID: symbolId,
+                clOrdID,
+                side: SodexSide.SELL,
+                type: SodexOrderType.MARKET,
+                timeInForce: SodexTimeInForce.IOC,
+                quantity: qty,
+              };
 
       const sodexResp = await placeOrderBatch({
         network,
         apiKeyName: key.name || undefined,
         privateKey: key.privateKey,
+        market,
         batch: {
           accountID: state.aid,
           orders: [order],

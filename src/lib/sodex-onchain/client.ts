@@ -60,45 +60,77 @@ interface SodexResponse<T> {
  * legacy `symbol` field doesn't exist on this endpoint, but we accept
  * both shapes so callers passing either format still resolve.
  */
-const _symbolMapCache = new Map<SodexNetwork, Map<string, number>>();
+/** Which SoDEX venue a symbol trades on. "futures" = perps. */
+export type SodexMarket = "spot" | "futures";
+
+// Cached per `${network}:${market}` — spot and futures have separate catalogs.
+const _symbolMapCache = new Map<string, Map<string, number>>();
+
+async function loadSymbolMap(
+  network: SodexNetwork,
+  market: SodexMarket,
+): Promise<Map<string, number>> {
+  const cacheKey = `${network}:${market}`;
+  const cached = _symbolMapCache.get(cacheKey);
+  if (cached) return cached;
+  const map = new Map<string, number>();
+  try {
+    const net = SODEX_NETWORKS[network];
+    const endpoint = market === "futures" ? net.perpsEndpoint : net.spotEndpoint;
+    const res = await fetch(`${endpoint}/markets/symbols`);
+    const json = (await res.json()) as {
+      code: number;
+      data?: Array<{
+        id?: number;
+        name?: string;
+        symbol?: string;
+        displayName?: string;
+      }>;
+    };
+    if (json.code === 0 && json.data) {
+      for (const s of json.data) {
+        const id = s.id;
+        if (id == null) continue;
+        // Index under `name` (canonical), `symbol` (legacy) and
+        // `displayName` so a caller can search by "BTC/USDC" too.
+        for (const key of [s.name, s.symbol, s.displayName]) {
+          const k = (key ?? "").toUpperCase();
+          if (k) map.set(k, id);
+        }
+      }
+    }
+  } catch {
+    /* fall back to empty map; caller will get undefined */
+  }
+  _symbolMapCache.set(cacheKey, map);
+  return map;
+}
+
+/** Numeric symbolID on a SPECIFIC market (default spot). */
 export async function getSymbolId(
   network: SodexNetwork,
   symbol: string,
+  market: SodexMarket = "spot",
 ): Promise<number | undefined> {
-  const norm = symbol.toUpperCase();
-  let map = _symbolMapCache.get(network);
-  if (!map) {
-    map = new Map();
-    try {
-      const { spotEndpoint } = SODEX_NETWORKS[network];
-      const res = await fetch(`${spotEndpoint}/markets/symbols`);
-      const json = (await res.json()) as {
-        code: number;
-        data?: Array<{
-          id?: number;
-          name?: string;
-          symbol?: string;
-          displayName?: string;
-        }>;
-      };
-      if (json.code === 0 && json.data) {
-        for (const s of json.data) {
-          const id = s.id;
-          if (id == null) continue;
-          // Index under `name` (canonical), `symbol` (legacy fallback)
-          // and `displayName` so a caller can search by "BTC/USDC" too.
-          for (const key of [s.name, s.symbol, s.displayName]) {
-            const k = (key ?? "").toUpperCase();
-            if (k) map.set(k, id);
-          }
-        }
-      }
-    } catch {
-      /* fall back to empty map; caller will get undefined */
-    }
-    _symbolMapCache.set(network, map);
-  }
-  return map.get(norm);
+  const map = await loadSymbolMap(network, market);
+  return map.get(symbol.toUpperCase());
+}
+
+/**
+ * Resolve a textual symbol to {id, market}, checking SPOT first then
+ * FUTURES (perps). Perp-only assets (e.g. DASH-USD) are absent from the
+ * spot catalog, so a spot-only lookup wrongly reports "not listed" — this
+ * finds them on the futures venue and tells the caller which one to hit.
+ */
+export async function resolveSymbol(
+  network: SodexNetwork,
+  symbol: string,
+): Promise<{ id: number; market: SodexMarket } | undefined> {
+  const spot = await getSymbolId(network, symbol, "spot");
+  if (spot != null) return { id: spot, market: "spot" };
+  const fut = await getSymbolId(network, symbol, "futures");
+  if (fut != null) return { id: fut, market: "futures" };
+  return undefined;
 }
 
 /**
@@ -122,9 +154,11 @@ export interface SodexTicker {
 export async function getTicker(
   network: SodexNetwork,
   symbolName: string,
+  market: SodexMarket = "spot",
 ): Promise<SodexTicker | undefined> {
-  const { spotEndpoint } = SODEX_NETWORKS[network];
-  const res = await fetch(`${spotEndpoint}/markets/tickers`);
+  const net = SODEX_NETWORKS[network];
+  const endpoint = market === "futures" ? net.perpsEndpoint : net.spotEndpoint;
+  const res = await fetch(`${endpoint}/markets/tickers`);
   const json = (await res.json()) as {
     code: number;
     data?: Array<SodexTicker>;
@@ -146,8 +180,9 @@ export async function getLivePrice(
   network: SodexNetwork,
   symbolName: string,
   side: "buy" | "sell",
+  market: SodexMarket = "spot",
 ): Promise<number | null> {
-  const t = await getTicker(network, symbolName);
+  const t = await getTicker(network, symbolName, market);
   if (!t) return null;
   const pick = side === "buy" ? t.askPx : t.bidPx;
   const candidates = [pick, t.lastPx].filter(Boolean) as string[];
@@ -341,9 +376,12 @@ export async function placeOrderBatch(opts: {
   apiKeyName?: string;
   privateKey: Hex;
   batch: SodexNewOrderBatch;
+  /** "futures" routes to the perps gateway + "futures" signing domain. */
+  market?: SodexMarket;
 }): Promise<unknown> {
-  const { network, apiKeyName, privateKey, batch } = opts;
-  const { chainId, spotEndpoint } = SODEX_NETWORKS[network];
+  const { network, apiKeyName, privateKey, batch, market = "spot" } = opts;
+  const { chainId, spotEndpoint, perpsEndpoint } = SODEX_NETWORKS[network];
+  const endpoint = market === "futures" ? perpsEndpoint : spotEndpoint;
 
   // Action type MUST be "batchNewOrder" for the /trade/orders/batch
   // endpoint — not "newOrder". Reverse-engineered from sodex.com's
@@ -362,7 +400,7 @@ export async function placeOrderBatch(opts: {
 
   const { apiSign, nonce } = await signWithApiKey({
     privateKey,
-    domainName: "spot",
+    domainName: market === "futures" ? "futures" : "spot",
     chainId,
     action,
   });
@@ -374,7 +412,7 @@ export async function placeOrderBatch(opts: {
   };
   if (apiKeyName) headers["X-API-Key"] = apiKeyName;
 
-  const res = await fetch(`${spotEndpoint}/trade/orders/batch`, {
+  const res = await fetch(`${endpoint}/trade/orders/batch`, {
     method: "POST",
     headers,
     body: JSON.stringify(batch),
