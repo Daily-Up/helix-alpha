@@ -406,17 +406,23 @@ export async function placeOrderBatch(opts: {
   let path: string;
   if (market === "futures") {
     const first = batch.orders[0];
-    // Flat single-order params: accountID + the order fields. Perps are
-    // quantity-based (no `funds`). Field order matters for the signed
-    // payloadHash — keep it stable.
-    const params = {
-      accountID: batch.accountID,
+    // SoDEX perps NewOrderParams validation requires BOTH a top-level order
+    // AND an `orders` array (an orders-only body → "SymbolID required"; a
+    // flat body → "Orders required"). So we send the single order at the top
+    // level and mirror it into orders[]. Perps are quantity-based (no funds).
+    // Field order matters for the signed payloadHash — keep it stable.
+    const leg = {
       symbolID: first.symbolID,
       clOrdID: first.clOrdID,
       side: first.side,
       type: first.type,
       timeInForce: first.timeInForce,
       quantity: first.quantity,
+    };
+    const params = {
+      accountID: batch.accountID,
+      ...leg,
+      orders: [leg],
     };
     action = { type: "newOrder", params };
     body = params;
