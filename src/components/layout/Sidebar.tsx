@@ -26,7 +26,7 @@ const NAV: Array<{ section: string; items: NavItem[] }> = [
   {
     section: "Portfolio",
     items: [
-      { href: "/portfolio", label: "Paper Portfolio" },
+      { href: "/portfolio", label: "Portfolio" },
       { href: "/index-fund", label: "AlphaIndex" },
     ],
   },

@@ -6,10 +6,10 @@ export default function PortfolioPage() {
     <Shell>
       <div className="dash-page-enter flex flex-col gap-5">
         <header>
-          <h1 className="dash-title">Paper Portfolio</h1>
+          <h1 className="dash-title">Portfolio</h1>
           <p className="mt-2 dash-description">
-            Simulated trades. Real SoDEX prices, simulated fills. Equity
-            marked-to-market every 10 seconds against live tickers.
+            Your live SoDEX orders on mainnet — real funds, scoped to the
+            connected account.
           </p>
         </header>
 
