@@ -213,7 +213,10 @@ export function ExecuteLiveButton({ signal }: Props) {
           `Couldn't fetch a live price for ${fmtSodexSymbol(signal.symbol)} from SoDEX. Try again in a moment.`,
         );
       }
-      const qty = (sizeUsd / referencePrice).toFixed(5);
+      // Round to the market's own quantity precision — perps reject anything
+      // finer (DASH = 2dp / 0.01 step → "quantity is invalid" on 5dp).
+      const qtyPrecision = resolved.quantityPrecision ?? 5;
+      const qty = (sizeUsd / referencePrice).toFixed(qtyPrecision);
       if (Number(qty) <= 0) {
         throw new Error(
           `Computed quantity ${qty} is zero — increase position size or check the price feed.`,

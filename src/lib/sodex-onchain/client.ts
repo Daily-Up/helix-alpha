@@ -63,17 +63,29 @@ interface SodexResponse<T> {
 /** Which SoDEX venue a symbol trades on. "futures" = perps. */
 export type SodexMarket = "spot" | "futures";
 
+/** Resolved market metadata — id + the sizing constraints an order must obey. */
+export interface SodexSymbolMeta {
+  id: number;
+  market: SodexMarket;
+  /** Decimal places allowed on `quantity` (e.g. DASH perp = 2). */
+  quantityPrecision?: number;
+  /** Quantity step, decimal string (e.g. "0.01"). */
+  stepSize?: string;
+  minQuantity?: string;
+  minNotional?: string;
+}
+
 // Cached per `${network}:${market}` — spot and futures have separate catalogs.
-const _symbolMapCache = new Map<string, Map<string, number>>();
+const _symbolMapCache = new Map<string, Map<string, SodexSymbolMeta>>();
 
 async function loadSymbolMap(
   network: SodexNetwork,
   market: SodexMarket,
-): Promise<Map<string, number>> {
+): Promise<Map<string, SodexSymbolMeta>> {
   const cacheKey = `${network}:${market}`;
   const cached = _symbolMapCache.get(cacheKey);
   if (cached) return cached;
-  const map = new Map<string, number>();
+  const map = new Map<string, SodexSymbolMeta>();
   try {
     const net = SODEX_NETWORKS[network];
     const endpoint = market === "futures" ? net.perpsEndpoint : net.spotEndpoint;
@@ -85,17 +97,29 @@ async function loadSymbolMap(
         name?: string;
         symbol?: string;
         displayName?: string;
+        quantityPrecision?: number;
+        stepSize?: string;
+        minQuantity?: string;
+        minNotional?: string;
       }>;
     };
     if (json.code === 0 && json.data) {
       for (const s of json.data) {
         const id = s.id;
         if (id == null) continue;
+        const meta: SodexSymbolMeta = {
+          id,
+          market,
+          quantityPrecision: s.quantityPrecision,
+          stepSize: s.stepSize,
+          minQuantity: s.minQuantity,
+          minNotional: s.minNotional,
+        };
         // Index under `name` (canonical), `symbol` (legacy) and
         // `displayName` so a caller can search by "BTC/USDC" too.
         for (const key of [s.name, s.symbol, s.displayName]) {
           const k = (key ?? "").toUpperCase();
-          if (k) map.set(k, id);
+          if (k) map.set(k, meta);
         }
       }
     }
@@ -113,23 +137,25 @@ export async function getSymbolId(
   market: SodexMarket = "spot",
 ): Promise<number | undefined> {
   const map = await loadSymbolMap(network, market);
-  return map.get(symbol.toUpperCase());
+  return map.get(symbol.toUpperCase())?.id;
 }
 
 /**
- * Resolve a textual symbol to {id, market}, checking SPOT first then
- * FUTURES (perps). Perp-only assets (e.g. DASH-USD) are absent from the
- * spot catalog, so a spot-only lookup wrongly reports "not listed" — this
- * finds them on the futures venue and tells the caller which one to hit.
+ * Resolve a textual symbol to its market metadata, checking SPOT first then
+ * FUTURES (perps). Perp-only assets (e.g. DASH-USD) are absent from the spot
+ * catalog, so a spot-only lookup wrongly reports "not listed" — this finds
+ * them on the futures venue and returns the id + sizing constraints.
  */
 export async function resolveSymbol(
   network: SodexNetwork,
   symbol: string,
-): Promise<{ id: number; market: SodexMarket } | undefined> {
-  const spot = await getSymbolId(network, symbol, "spot");
-  if (spot != null) return { id: spot, market: "spot" };
-  const fut = await getSymbolId(network, symbol, "futures");
-  if (fut != null) return { id: fut, market: "futures" };
+): Promise<SodexSymbolMeta | undefined> {
+  const spot = (await loadSymbolMap(network, "spot")).get(symbol.toUpperCase());
+  if (spot) return spot;
+  const fut = (await loadSymbolMap(network, "futures")).get(
+    symbol.toUpperCase(),
+  );
+  if (fut) return fut;
   return undefined;
 }
 
