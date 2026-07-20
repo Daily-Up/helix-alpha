@@ -95,7 +95,20 @@ function CandidateCard({ u }: { u: UnlockRowWithPlan }) {
         <Metric label="From" value={RECIPIENT_LABEL[p.recipientClass] ?? "—"} />
       </div>
 
-      <p className="mt-3 text-[11px] leading-relaxed text-fg-muted">{p.note}</p>
+      {p.amplifiers.length > 0 && (
+        <div className="mt-2.5 flex flex-wrap gap-1.5">
+          {p.amplifiers.map((a) => (
+            <span
+              key={a}
+              className="rounded-[3px] bg-negative/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.08em] text-negative"
+            >
+              {a}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <p className="mt-2.5 text-[11px] leading-relaxed text-fg-muted">{p.note}</p>
 
       <div className="mt-2.5">
         <ExecuteLiveButton
@@ -252,7 +265,7 @@ export function UnlocksDashboard() {
       <Card>
         <CardHeader>
           <CardTitle>Unlock calendar</CardTitle>
-          <span className="text-[11px] text-fg-dim">DefiLlama emissions · daily</span>
+          <span className="text-[11px] text-fg-dim">SoSoValue + DefiLlama · daily</span>
         </CardHeader>
         <CardBody className="!p-0">
           {err && rows == null ? (

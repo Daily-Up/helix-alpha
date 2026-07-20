@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS token_unlocks (
   price_usd           REAL,
   pct_of_circulating  REAL,
   pct_of_max_supply   REAL,
+  unlock_vs_volume    REAL,
+  float_pct           REAL,
   categories_json     TEXT,
   source              TEXT,
   raw_json            TEXT,
@@ -48,11 +50,31 @@ CREATE INDEX IF NOT EXISTS idx_token_unlocks_tradable ON token_unlocks(tradable_
 CREATE INDEX IF NOT EXISTS idx_token_unlocks_asset    ON token_unlocks(asset_id, unlock_at);
 `;
 
+// Columns added after the table first shipped — applied idempotently so a
+// prod table created by an earlier run picks them up (ALTER … ADD COLUMN
+// has no IF NOT EXISTS in SQLite, so we tolerate "duplicate column").
+const ADD_COLUMNS = [
+  "ALTER TABLE token_unlocks ADD COLUMN unlock_vs_volume REAL",
+  "ALTER TABLE token_unlocks ADD COLUMN float_pct REAL",
+];
+
 console.log(`→ connecting to ${url}`);
 const client = createClient({ url, authToken });
 
 try {
   await client.executeMultiple(DDL);
+  for (const sql of ADD_COLUMNS) {
+    try {
+      await client.execute(sql);
+      console.log(`  + ${sql.split("ADD COLUMN ")[1]}`);
+    } catch (e) {
+      if (/duplicate column/i.test(e.message)) {
+        console.log(`  = ${sql.split("ADD COLUMN ")[1]} (already present)`);
+      } else {
+        throw e;
+      }
+    }
+  }
   const cols = await client.execute("PRAGMA table_info(token_unlocks)");
   console.log(`✓ token_unlocks ready — ${cols.rows.length} columns:`);
   for (const c of cols.rows) console.log(`   • ${c.name} ${c.type}`);

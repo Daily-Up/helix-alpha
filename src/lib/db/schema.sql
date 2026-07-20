@@ -902,8 +902,10 @@ CREATE TABLE IF NOT EXISTS token_unlocks (
   price_usd           REAL,                           -- price used for the USD calc
   pct_of_circulating  REAL,                           -- sell-pressure proxy, PERCENT (e.g. 1.66)
   pct_of_max_supply   REAL,                           -- secondary dilution proxy, PERCENT
+  unlock_vs_volume    REAL,                           -- unlock USD ÷ SoSoValue 24h turnover (days of ADV)
+  float_pct           REAL,                           -- circulating ÷ max supply × 100 (float tightness)
   categories_json     TEXT,                           -- JSON: recipient categories (insiders/privateSale/…)
-  source              TEXT,                           -- 'defillama'
+  source              TEXT,                           -- 'defillama+sosovalue' | 'defillama'
   raw_json            TEXT,                           -- trimmed provider payload for audit
   ingested_at         INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
   updated_at          INTEGER NOT NULL DEFAULT (unixepoch() * 1000)

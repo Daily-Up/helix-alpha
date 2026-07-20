@@ -74,7 +74,7 @@ SoSoValue OpenAPI  →  News ingestion  →  AI classification
 
 ### Token unlocks — a tradable catalyst (Wave 3) ✓
 
-- **Unlock calendar** (`/unlocks`) — a forward schedule of token supply unlocks, sourced **keyless** from DefiLlama's emissions datasets (no new paid API). Per unlock we compute USD value (tokens × live price), **% of circulating float** (the sell-pressure proxy), recipient tranche (team / investor / community), and the countdown.
+- **Unlock calendar** (`/unlocks`) — a forward schedule of token supply unlocks. **Token economics come from SoSoValue** (`/currencies/{id}/market-snapshot` → price, circulating supply, 24h volume, FDV); the **dated schedule + recipient tranches come from DefiLlama emissions** (SoSoValue's unlock timeline is dateless). Per unlock we compute USD value, **% of circulating float**, unlock-vs-24h-volume, float tightness, and recipient tranche (team / investor / community).
 - **Short trade plans, timed to the anticipation.** Empirically the negative impact is front-loaded (price bleeds into a known unlock, the date is often the anticlimax, pressure eases within 1–3 weeks). So instead of an always-on signal, each **eligible** unlock — a **team/investor cliff ≥1% of float on a SoDEX perp** — gets a plan: **arm a short T−7/10/14d** (by size) and **cover ~T+3d**, with conviction from recipient × materiality. A candidate in its entry window is a **one-click short on the perp, executed right on `/unlocks`** — deliberately *separate* from the Live Signals feed. Community/airdrop unlocks and anything <1% of float are calendar-only.
 - Runs daily via GitHub Actions; the plan is computed at read time, so retuning the timing needs no re-ingest.
 

@@ -36,6 +36,9 @@ export interface UnlockPlanInput {
   categories_json: string | null;
   tradable_perp: number;
   sodex_symbol: string | null;
+  /** SoSoValue-derived amplifiers (optional). */
+  unlock_vs_volume?: number | null; // unlock USD ÷ 24h turnover (days of ADV)
+  float_pct?: number | null; // circulating ÷ max supply × 100 (low = thin float)
 }
 
 export interface UnlockTradePlan {
@@ -45,6 +48,10 @@ export interface UnlockTradePlan {
   pctFloat: number;
   isCliff: boolean;
   conviction: number; // 0..1
+  /** Amplifiers used (for display), e.g. ["2.1× daily vol", "thin float 31%"]. */
+  amplifiers: string[];
+  unlockVsVolume: number | null;
+  floatPct: number | null;
   priority: "high" | "medium" | "low";
   entryLeadDays: number;
   coverTailDays: number;
@@ -134,7 +141,25 @@ export function computeUnlockTradePlan(
           ? 0.85
           : 0.6;
   const kindMult = isCliff ? 1.0 : 0.8;
-  const conviction = Math.max(0.3, Math.min(0.9, recBase * sizeMult * kindMult));
+
+  // SoSoValue-derived amplifiers: an unlock large vs daily volume, and a thin
+  // circulating float, both empirically deepen the move.
+  const vsVol = row.unlock_vs_volume ?? null;
+  const floatPct = row.float_pct ?? null;
+  const amplifiers: string[] = [];
+  let ampBump = 0;
+  if (vsVol != null && vsVol >= 0.5) {
+    ampBump += Math.min(0.15, 0.08 * vsVol);
+    amplifiers.push(`${vsVol.toFixed(1)}× daily vol`);
+  }
+  if (floatPct != null && floatPct < 40) {
+    ampBump += floatPct < 25 ? 0.12 : 0.06;
+    amplifiers.push(`thin float ${floatPct.toFixed(0)}%`);
+  }
+  const conviction = Math.max(
+    0.3,
+    Math.min(0.9, recBase * sizeMult * kindMult + ampBump),
+  );
   const priority =
     conviction >= 0.7 ? "high" : conviction >= 0.5 ? "medium" : "low";
 
@@ -171,6 +196,9 @@ export function computeUnlockTradePlan(
     pctFloat,
     isCliff,
     conviction,
+    amplifiers,
+    unlockVsVolume: vsVol,
+    floatPct,
     priority,
     entryLeadDays,
     coverTailDays,

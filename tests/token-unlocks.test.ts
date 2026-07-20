@@ -137,6 +137,8 @@ describe("token_unlocks repo", () => {
         price_usd: 0.0886,
         pct_of_circulating: 1.66,
         pct_of_max_supply: 0.93,
+        unlock_vs_volume: 0.5,
+        float_pct: 66,
         categories_json: "[]",
         source: "defillama",
         raw_json: "{}",
@@ -157,6 +159,8 @@ describe("token_unlocks repo", () => {
         price_usd: 0.1,
         pct_of_circulating: 0.01,
         pct_of_max_supply: 0.01,
+        unlock_vs_volume: null,
+        float_pct: null,
         categories_json: "[]",
         source: "defillama",
         raw_json: "{}",
@@ -222,6 +226,15 @@ describe("computeUnlockTradePlan (pure)", () => {
     expect(huge.entryLeadDays).toBe(14);
     expect(huge.conviction).toBeGreaterThan(modest.conviction);
     expect(huge.targetPct).toBeGreaterThan(modest.targetPct);
+  });
+
+  it("SoSoValue amplifiers raise conviction (thin float + high vs-volume)", () => {
+    const plain = computeUnlockTradePlan(base({ pct_of_circulating: 2 }));
+    const amped = computeUnlockTradePlan(
+      base({ pct_of_circulating: 2, unlock_vs_volume: 2, float_pct: 20 }),
+    );
+    expect(amped.conviction).toBeGreaterThan(plain.conviction);
+    expect(amped.amplifiers.length).toBe(2);
   });
 
   it("phase reflects the entry window relative to now", () => {

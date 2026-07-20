@@ -1,17 +1,20 @@
 /**
- * Token-unlock ingest.
+ * Token-unlock ingest — hybrid data source.
  *
  *   For each curated (ticker → DefiLlama slug):
- *     1. pull /emissions/{slug}          → upcoming unlock events
- *     2. price the token via coins.llama  → USD value of each unlock
- *     3. resolve the SoDEX mainnet perp   → mark shortable rows
+ *     1. DefiLlama /emissions/{slug}   → the DATED unlock schedule + recipient
+ *        tranches (SoSoValue's unlock_timeline is dateless, so dates come here)
+ *     2. SoSoValue /market-snapshot    → price, circulating_supply, 24h volume,
+ *        FDV, max supply (the token economics; keyed by currency_id). DefiLlama
+ *        coins price + circulating proxy are the fallback when SoSoValue doesn't
+ *        list the token.
+ *     3. resolve the SoDEX mainnet perp → mark shortable rows
  *     4. upsert into token_unlocks (idempotent on "<slug>-<date>")
  *
- * Data source is keyless (DefiLlama datasets CDN). Only cliff (discrete)
- * unlocks become rows — linear vesting is a rate change, not a lump, and
- * doesn't represent a datable sell-pressure event. Idempotent + safe to run
- * daily. The short trade plan (eligibility, entry/cover timing) is derived
- * at read time from each row by lib/unlocks/plan.ts — nothing to "generate".
+ * Only cliff (discrete) unlocks become rows — linear vesting is a rate change,
+ * not a datable lump. Idempotent + safe to run daily. The short trade plan
+ * (eligibility, entry/cover timing) is derived at read time from each row by
+ * lib/unlocks/plan.ts — nothing to "generate".
  */
 
 import { Assets, TokenUnlocks } from "@/lib/db";
@@ -19,9 +22,47 @@ import type { NewTokenUnlock } from "@/lib/db";
 import { Cron } from "@/lib/db";
 import { Unlocks, UNLOCK_SLUG_BY_TICKER } from "@/lib/unlocks";
 import type { LlamaPrice } from "@/lib/unlocks";
-import { findAsset } from "@/lib/universe";
+import { findAsset, resolveCurrencyId } from "@/lib/universe";
+import { Currencies } from "@/lib/sosovalue";
 import { resolveSymbol } from "@/lib/sodex-onchain/client";
 import type { SodexNetwork } from "@/lib/sodex-onchain/chains";
+
+/** Token economics from SoSoValue market-snapshot (the sponsor data source). */
+interface SosoMarket {
+  price: number | null;
+  circulating: number | null;
+  turnover24h: number | null;
+  maxSupply: number | null;
+  fdv: number | null;
+}
+
+const numPos = (v: unknown): number | null => {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+};
+
+/** SoSoValue price + supply + 24h volume for a ticker, or null if unlisted. */
+async function fetchSosoMarket(ticker: string): Promise<SosoMarket | null> {
+  try {
+    const cid = await resolveCurrencyId(ticker);
+    if (!cid) return null;
+    const s = (await Currencies.getCurrencyMarketSnapshot(cid)) as Record<
+      string,
+      unknown
+    >;
+    const price = numPos(s.price);
+    if (!price) return null;
+    return {
+      price,
+      circulating: numPos(s.circulating_supply),
+      turnover24h: numPos(s.turnover_24h),
+      maxSupply: numPos(s.max_supply),
+      fdv: numPos(s.fdv),
+    };
+  } catch {
+    return null;
+  }
+}
 
 export interface UnlocksIngestSummary {
   protocols_processed: number;
@@ -80,8 +121,6 @@ export async function runUnlocksIngest(
         (e) => Number(e.timestamp) * 1000 <= now + horizonMs,
       );
 
-      const circulating = Unlocks.circulatingAtNow(detail, now);
-      const maxSupply = Number(detail.supplyMetrics?.maxSupply) || 0;
       const tokenId = detail.metadata?.token ?? null;
 
       // Resolve the SoDEX mainnet perp + Helix asset once per token.
@@ -106,9 +145,10 @@ export async function runUnlocksIngest(
         }
       }
 
-      // Price this token (single id).
-      let price: number | null = null;
-      if (tokenId) {
+      // ── Token economics: SoSoValue first, DefiLlama as fallback ──
+      const soso = await fetchSosoMarket(ticker);
+      let price: number | null = soso?.price ?? null;
+      if (price == null && tokenId) {
         try {
           const priced: Record<string, LlamaPrice> =
             await Unlocks.getTokenPrices([tokenId]);
@@ -120,6 +160,13 @@ export async function runUnlocksIngest(
           errors.push({ slug: `${slug}:price`, error: (err as Error).message });
         }
       }
+      const circulating = soso?.circulating ?? Unlocks.circulatingAtNow(detail, now);
+      const maxSupply =
+        soso?.maxSupply ?? (Number(detail.supplyMetrics?.maxSupply) || 0);
+      const turnover24h = soso?.turnover24h ?? null;
+      const floatPct =
+        circulating > 0 && maxSupply > 0 ? (100 * circulating) / maxSupply : null;
+      const dataSource = soso ? "defillama+sosovalue" : "defillama";
 
       const rows: NewTokenUnlock[] = within
         .map((e) => ({
@@ -153,8 +200,11 @@ export async function runUnlocksIngest(
               circulating > 0 ? (100 * e.tokens) / circulating : null,
             pct_of_max_supply:
               maxSupply > 0 ? (100 * e.tokens) / maxSupply : null,
+            unlock_vs_volume:
+              usd != null && turnover24h ? usd / turnover24h : null,
+            float_pct: floatPct,
             categories_json: JSON.stringify(e.categories),
-            source: "defillama",
+            source: dataSource,
             raw_json: JSON.stringify({
               slug,
               tokens: e.tokens,

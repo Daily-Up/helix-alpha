@@ -33,7 +33,10 @@ interface UnlockDbRow {
   price_usd: number | null;
   pct_of_circulating: number | null;
   pct_of_max_supply: number | null;
+  unlock_vs_volume: number | null;
+  float_pct: number | null;
   categories_json: string | null;
+  source: string | null;
   asset_name: string | null;
   asset_kind: string | null;
 }
@@ -49,7 +52,8 @@ export async function GET(req: Request): Promise<NextResponse> {
       `SELECT u.id, u.symbol, u.protocol_slug, u.asset_id, u.sodex_symbol,
               u.tradable_perp, u.unlock_at, u.unlock_date, u.unlock_kind,
               u.tokens_unlocked, u.unlock_value_usd, u.price_usd,
-              u.pct_of_circulating, u.pct_of_max_supply, u.categories_json,
+              u.pct_of_circulating, u.pct_of_max_supply, u.unlock_vs_volume,
+              u.float_pct, u.categories_json, u.source,
               a.name AS asset_name, a.kind AS asset_kind
        FROM token_unlocks u
        LEFT JOIN assets a ON a.id = u.asset_id

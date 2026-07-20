@@ -27,6 +27,8 @@ export interface TokenUnlockRow {
   price_usd: number | null;
   pct_of_circulating: number | null; // percent
   pct_of_max_supply: number | null; // percent
+  unlock_vs_volume: number | null; // unlock USD ÷ 24h turnover (days of ADV)
+  float_pct: number | null; // circulating ÷ max supply × 100
   categories_json: string | null;
   source: string | null;
   raw_json: string | null;
@@ -42,9 +44,9 @@ export type NewTokenUnlock = Omit<
 const UPSERT_SQL = `INSERT INTO token_unlocks (
     id, protocol_slug, token_id, symbol, asset_id, sodex_symbol, tradable_perp,
     unlock_at, unlock_date, unlock_kind, tokens_unlocked, unlock_value_usd,
-    price_usd, pct_of_circulating, pct_of_max_supply, categories_json,
-    source, raw_json, updated_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch() * 1000)
+    price_usd, pct_of_circulating, pct_of_max_supply, unlock_vs_volume,
+    float_pct, categories_json, source, raw_json, updated_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch() * 1000)
   ON CONFLICT(id) DO UPDATE SET
     protocol_slug      = excluded.protocol_slug,
     token_id           = excluded.token_id,
@@ -60,6 +62,8 @@ const UPSERT_SQL = `INSERT INTO token_unlocks (
     price_usd          = excluded.price_usd,
     pct_of_circulating = excluded.pct_of_circulating,
     pct_of_max_supply  = excluded.pct_of_max_supply,
+    unlock_vs_volume   = excluded.unlock_vs_volume,
+    float_pct          = excluded.float_pct,
     categories_json    = excluded.categories_json,
     source             = excluded.source,
     raw_json           = excluded.raw_json,
@@ -82,6 +86,8 @@ function toArgs(u: NewTokenUnlock): (string | number | null)[] {
     u.price_usd ?? null,
     u.pct_of_circulating ?? null,
     u.pct_of_max_supply ?? null,
+    u.unlock_vs_volume ?? null,
+    u.float_pct ?? null,
     u.categories_json ?? null,
     u.source ?? null,
     u.raw_json ?? null,

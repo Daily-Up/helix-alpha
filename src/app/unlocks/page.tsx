@@ -22,8 +22,9 @@ export default function UnlocksPage() {
             here.
           </p>
           <p className="mt-3 text-[12px] text-fg-muted">
-            Data: DefiLlama emissions · executes on SoDEX perps. These are their
-            own trades — separate from Live Signals.
+            Token economics (price, float, 24h volume, FDV) from SoSoValue;
+            unlock dates from DefiLlama. Executes on SoDEX perps — their own
+            trades, separate from Live Signals.
           </p>
         </header>
 
