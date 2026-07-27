@@ -45,8 +45,8 @@ export async function GET() {
     const [
       totalEvents,
       totalClassified,
-      skipped,
-      duplicates,
+      skipped24h,
+      duplicates24h,
       events24h,
       sentimentBreakdown,
       eventTypeBreakdown,
@@ -54,10 +54,19 @@ export async function GET() {
     ] = await Promise.all([
       guard(countQuery("SELECT COUNT(*) AS n FROM news_events"), 0),
       guard(countQuery("SELECT COUNT(*) AS n FROM classifications"), 0),
-      guard(countQuery("SELECT COUNT(*) AS n FROM skipped_pre_classify"), 0),
+      // 24h counts via indexes (idx_skipped_pre_classify_at / idx_news_release_time)
+      // — reliably fast, unlike a full-table scan that can spike past the guard.
       guard(
         countQuery(
-          "SELECT COUNT(*) AS n FROM news_events WHERE duplicate_of IS NOT NULL",
+          "SELECT COUNT(*) AS n FROM skipped_pre_classify WHERE skipped_at >= ?",
+          [dayAgo],
+        ),
+        0,
+      ),
+      guard(
+        countQuery(
+          "SELECT COUNT(*) AS n FROM news_events WHERE release_time >= ? AND duplicate_of IS NOT NULL",
+          [dayAgo],
         ),
         0,
       ),
@@ -107,12 +116,14 @@ export async function GET() {
       ),
     ]);
 
-    // Pending ≈ everything that isn't classified, skipped, or a duplicate.
-    // Cheap subtraction instead of a multi-table anti-join. Approximate at
-    // the margins (category overlap), which is fine for a throughput tile.
+    // Pending = last-24h classification backlog: events in the window that
+    // aren't yet classified, pre-skipped, or duplicates. All three counts are
+    // index-backed 24h queries (fast + reliable), so pending never inflates
+    // from a timed-out full-table scan. classified_24h = Σ sentiment buckets.
+    const classified24h = sentimentBreakdown.reduce((s, r) => s + r.n, 0);
     const unclassified = Math.max(
       0,
-      totalEvents - totalClassified - skipped - duplicates,
+      events24h - classified24h - skipped24h - duplicates24h,
     );
 
     return NextResponse.json({
