@@ -1,17 +1,18 @@
 name: Helix data refresh (ETF / macro / treasuries)
 
-# Refreshes the SoSoValue-sourced datasets that the tick does NOT touch.
-# The tick ingests news + snapshots sectors, and separate crons handle
-# news + klines — but ingest-etf, ingest-macro, and ingest-btc-treasuries
-# had NO schedule at all (not in vercel.json crons, not in any workflow),
-# so ETF Flows / Macro Bridge / Treasury Watch went stale (data frozen
-# around May). This workflow is their scheduler.
+# Refreshes the SoSoValue-sourced datasets that the tick does NOT touch:
+# ETF Flows, Macro Bridge, Treasury Watch.
 #
-# Scheduled at 11:00 UTC — before the 13:20 briefing — so the Daily
-# Briefing synthesizes against fresh ETF/macro data. A second evening run
-# adds resilience against GitHub Actions cron throttling and transient
-# SoSoValue/API hiccups.
+# Why the pacing below: these are THREE separate Vercel functions, each with
+# its own per-process SoSoValue rate limiter — so firing them back-to-back
+# bursts past SoSoValue's server-side per-minute cap. ETF (~20 calls) + macro
+# (~14) exhaust the minute budget, so treasuries (last, ~56 companies) used to
+# get a 429 on its very first call and fail the whole job. Fix: run each
+# endpoint in its OWN minute window (sleep 60 between), retry once on a
+# transient non-200, and cap treasuries' per-run company detail calls so it
+# also fits Vercel's 60s function limit.
 #
+# Scheduled at 11:00 UTC (before the 13:20 briefing) + an evening run.
 # Uses the existing CRON_SECRET repo secret (same as tick + briefing).
 
 on:
@@ -23,7 +24,7 @@ on:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Refresh SoSoValue-sourced data (ETF, macro, treasuries)
         env:
@@ -31,22 +32,37 @@ jobs:
           BASE_URL: https://helix-alpha-kappa.vercel.app
         run: |
           fail=0
-          # Treasuries defaults to a 600ms pacing delay per company, which
-          # blows past Vercel's 60s function limit; delayMs=100 keeps it
-          # well inside the budget while staying polite to the SoSoValue API.
-          for ep in "ingest-etf" "ingest-macro" "ingest-btc-treasuries?delayMs=100"; do
-            name="${ep%%\?*}"
+          # Hit one cron endpoint; retry ONCE after 40s on a non-200 (a 429
+          # from SoSoValue clears within a minute). -sS (not -f) so the body
+          # prints instead of aborting.
+          hit() {
+            local ep="$1"
+            local name="${ep%%\?*}"
             echo "--- $name ---"
-            # -sS (not -f) so a non-2xx prints the body instead of aborting
-            # the loop; each endpoint is independent.
-            code=$(curl -sS -o /tmp/out.json -w "%{http_code}" -X POST \
-              -H "Authorization: Bearer $CRON_SECRET" \
-              -H "Accept: application/json" \
-              --max-time 90 \
-              "$BASE_URL/api/cron/$ep") || true
-            echo "  HTTP $code"
-            cat /tmp/out.json 2>/dev/null | head -c 400; echo
-            if [ "$code" != "200" ]; then fail=1; fi
-          done
-          echo "data refresh complete"
+            for attempt in 1 2; do
+              code=$(curl -sS -o /tmp/out.json -w "%{http_code}" -X POST \
+                -H "Authorization: Bearer $CRON_SECRET" \
+                -H "Accept: application/json" \
+                --max-time 100 \
+                "$BASE_URL/api/cron/$ep") || true
+              echo "  attempt $attempt: HTTP $code"
+              cat /tmp/out.json 2>/dev/null | head -c 300; echo
+              [ "$code" = "200" ] && return 0
+              [ "$attempt" = "1" ] && { echo "  non-200 — retrying in 40s"; sleep 40; }
+            done
+            return 1
+          }
+
+          # Each endpoint in its own SoSoValue minute-window.
+          hit "ingest-etf" || fail=1
+          sleep 60
+          hit "ingest-macro" || fail=1
+          sleep 60
+          # Cap company-detail calls so treasuries stays within the ~20-call
+          # burst (no rate-limiter throttling) and fits Vercel's 60s limit.
+          # The full company LIST is still upserted; only per-company detail
+          # is bounded to the ~15 largest holders.
+          hit "ingest-btc-treasuries?delayMs=100&maxCompanies=15" || fail=1
+
+          echo "data refresh complete (fail=$fail)"
           exit $fail

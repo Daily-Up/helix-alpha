@@ -33,6 +33,14 @@ export interface TreasuriesIngestOptions {
   onlyTickers?: string[];
   /** Cap purchases pulled per company. API caps at 50 per page. */
   pageSize?: number;
+  /**
+   * Cap how many companies get a /purchase-history call this run. The full
+   * company LIST is still upserted; only the per-company detail loop is
+   * bounded. Keeps the run inside Vercel's 60s function limit + SoSoValue's
+   * per-minute rate budget (56 calls, each retrying on 429, overruns both).
+   * Unset = all companies (fine for local/CLI runs).
+   */
+  maxCompanies?: number;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -70,7 +78,11 @@ export async function runTreasuriesIngest(
   }
 
   // ── 2. Per-company purchase history ────────────────────────────
-  for (const company of filtered) {
+  // Bound the SoSoValue-heavy loop so a run stays inside the 60s function
+  // limit + rate budget. The company list above is already fully upserted.
+  const historyTargets =
+    opts.maxCompanies != null ? filtered.slice(0, opts.maxCompanies) : filtered;
+  for (const company of historyTargets) {
     try {
       const purchases = await TreasuriesAPI.getBTCPurchaseHistory(
         company.ticker,

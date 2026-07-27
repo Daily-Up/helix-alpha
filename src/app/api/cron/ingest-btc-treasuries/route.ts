@@ -28,11 +28,13 @@ async function handle(req: Request): Promise<NextResponse> {
   const url = new URL(req.url);
   const onlyTickers = url.searchParams.get("tickers");
   const delayMs = url.searchParams.get("delayMs");
+  const maxCompanies = url.searchParams.get("maxCompanies");
 
   try {
     const summary = await runTreasuriesIngestWithAudit({
       onlyTickers: onlyTickers ? onlyTickers.split(",") : undefined,
       delayMs: delayMs ? Number(delayMs) : undefined,
+      maxCompanies: maxCompanies ? Number(maxCompanies) : undefined,
     });
     return NextResponse.json({ ok: true, ...summary });
   } catch (err) {
