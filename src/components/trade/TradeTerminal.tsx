@@ -242,9 +242,11 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
         </button>
       </div>
 
-      {/* ── Body: chart | book | ticket ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_240px] xl:grid-cols-[minmax(0,1fr)_240px_288px]">
-        <div className="border-line px-3 py-2 lg:border-r">
+      {/* ── Body: chart | book | ticket. On narrow screens the order
+          ticket sits right under the chart (before the long book) so it's
+          never buried; from lg up it's the right-hand column. ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_210px_284px]">
+        <div className="order-1 border-line px-3 py-2 lg:border-r">
           {sodexSymbol ? (
             <PriceChart
               symbol={sodexSymbol}
@@ -259,7 +261,7 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
           )}
         </div>
 
-        <div className="border-t border-line lg:border-t-0">
+        <div className="order-3 border-t border-line lg:order-2 lg:border-t-0">
           <OrderBook
             bids={bids}
             asks={asks}
@@ -270,7 +272,7 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
           />
         </div>
 
-        <div className="border-t border-line xl:border-l xl:border-t-0">
+        <div className="order-2 border-t border-line lg:order-3 lg:border-l lg:border-t-0">
           {selected && sodexSymbol ? (
             <OrderPanel
               symbol={selected.symbol}
