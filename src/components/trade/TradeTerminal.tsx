@@ -10,9 +10,10 @@
  * and draws its levels on the chart. Bottom: positions/balances tabs.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "@/components/ui/cn";
 import { AssetLogo } from "@/components/ui/AssetLogo";
+import { AssetPicker } from "./AssetPicker";
 import { SetupCard, type SetupResponse } from "./SetupCard";
 import { PriceChart } from "./PriceChart";
 import { OrderBook, type BookLevel } from "./OrderBook";
@@ -41,13 +42,6 @@ interface Ticker {
   fundingRate?: string;
   nextFundingTime?: number;
 }
-
-const GROUPS: Array<{ label: string; kinds: string[] }> = [
-  { label: "Crypto", kinds: ["token", "rwa"] },
-  { label: "Equities", kinds: ["stock"] },
-  { label: "Indices", kinds: ["index"] },
-  { label: "Other", kinds: ["treasury", "macro"] },
-];
 
 const num = (v: string | undefined) => (v == null ? null : Number(v));
 const fmt = (v: number | null, d = 2) =>
@@ -176,15 +170,6 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
     }
   }
 
-  const grouped = useMemo(
-    () =>
-      GROUPS.map((g) => ({
-        label: g.label,
-        items: assets.filter((a) => g.kinds.includes(a.kind)),
-      })).filter((g) => g.items.length > 0),
-    [assets],
-  );
-
   return (
     <div className="overflow-hidden rounded-xl border border-line bg-surface">
       {/* ── Header stat row ── */}
@@ -193,27 +178,14 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
           {selected ? <AssetLogo symbol={selected.symbol} size={28} /> : null}
           <div className="flex flex-col">
             <div className="flex items-center gap-2">
-              <div className="relative inline-flex items-center">
-                <select
-                  value={assetId}
-                  onChange={(e) => {
-                    setAssetId(e.target.value);
-                    setSetupError(null);
-                  }}
-                  className="cursor-pointer appearance-none bg-transparent pr-5 text-[16px] font-semibold text-fg outline-none"
-                >
-                  {grouped.map((g) => (
-                    <optgroup key={g.label} label={g.label}>
-                      {g.items.map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {a.symbol} · {a.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
-                <span className="pointer-events-none absolute right-0 text-fg-dim">▾</span>
-              </div>
+              <AssetPicker
+                assets={assets}
+                value={assetId}
+                onChange={(id) => {
+                  setAssetId(id);
+                  setSetupError(null);
+                }}
+              />
               {selected?.market ? (
                 <span className="rounded border border-line bg-surface px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-fg-dim">
                   {isPerp ? "perp" : "spot"}
