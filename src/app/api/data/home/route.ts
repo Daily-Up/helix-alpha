@@ -27,11 +27,13 @@ export async function GET() {
     avg_conf: number | null;
   }
   const sigStats = await get<SigStats>(
+    // COALESCE the SUMs — with zero pending rows SQLite returns NULL for a
+    // bare SUM, which rendered as "null auto · null review · null info".
     `SELECT
        COUNT(*) AS total_pending,
-       SUM(CASE WHEN tier = 'auto' THEN 1 ELSE 0 END) AS auto,
-       SUM(CASE WHEN tier = 'review' THEN 1 ELSE 0 END) AS review,
-       SUM(CASE WHEN tier = 'info' THEN 1 ELSE 0 END) AS info,
+       COALESCE(SUM(CASE WHEN tier = 'auto' THEN 1 ELSE 0 END), 0) AS auto,
+       COALESCE(SUM(CASE WHEN tier = 'review' THEN 1 ELSE 0 END), 0) AS review,
+       COALESCE(SUM(CASE WHEN tier = 'info' THEN 1 ELSE 0 END), 0) AS info,
        AVG(confidence) AS avg_conf
      FROM signals
      WHERE status = 'pending'`,

@@ -438,7 +438,7 @@ INSERT OR IGNORE INTO indexes (id, name, description, starting_nav)
 VALUES (
   'alphacore',
   'AlphaCore',
-  'AI-managed crypto index. Rebalances based on news signals, sector momentum, and ETF flows.',
+  'AI-managed multi-asset index — crypto majors, mega-cap equities and gold. Rebalances on news signals, 30d momentum, and SoSoValue ETF-flow fundamentals.',
   10000
 );
 

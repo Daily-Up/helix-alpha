@@ -36,16 +36,34 @@ export async function GET(req: Request) {
 
   const t0 = Date.now();
   const opts = { window_days: window, frameworkVersion };
+  // These queries are all async — they MUST be awaited. Assigning the bare
+  // Promises serializes each to `{}`, which crashed the dashboard
+  // (`data.by_tier.reduce is not a function`). Run them in parallel.
+  const [
+    by_tier,
+    by_subtype,
+    calibration_curve,
+    pnl_grid,
+    extremes,
+    framework_summary,
+  ] = await Promise.all([
+    hitRateByTier(opts),
+    hitRateByCatalystSubtype(opts),
+    convictionCalibrationCurve(opts),
+    pnlBySubtypeAndAssetClass(opts),
+    topWinnersAndLosers({ ...opts, limit: 10 }),
+    getFrameworkSummary({ window_days: window }),
+  ]);
   const payload = {
     window_days: window,
     framework_version: frameworkVersion ?? null,
     generated_at: Date.now(),
-    by_tier: hitRateByTier(opts),
-    by_subtype: hitRateByCatalystSubtype(opts),
-    calibration_curve: convictionCalibrationCurve(opts),
-    pnl_grid: pnlBySubtypeAndAssetClass(opts),
-    extremes: topWinnersAndLosers({ ...opts, limit: 10 }),
-    framework_summary: getFrameworkSummary({ window_days: window }),
+    by_tier,
+    by_subtype,
+    calibration_curve,
+    pnl_grid,
+    extremes,
+    framework_summary,
     latency_ms: Date.now() - t0,
   };
   return NextResponse.json(payload);

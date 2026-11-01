@@ -8,11 +8,12 @@ export default function IndexFundPage() {
         <header>
           <h1 className="dash-title">AlphaIndex</h1>
           <p className="mt-2 dash-description">
-            One-person BlackRock. AI-managed crypto index that allocates
-            across BTC/ETH/L1s/RWA/sector indexes/perps based on accumulated
-            news signals, sector momentum, and ETF flows. Rebalance reasoning
-            written by Claude. Paper trades — real SoDEX prices, simulated
-            fills.
+            One-person BlackRock. AI-managed multi-asset index that allocates
+            across crypto majors (BTC/ETH/HYPE), mega-cap equities (NVDA/GOOGL/
+            MSFT), gold and SoSoValue index products — weighted by news signals,
+            30-day momentum, and SoSoValue ETF-flow fundamentals. Rebalance
+            reasoning written by Claude. Paper trades — real SoDEX prices,
+            simulated fills.
           </p>
         </header>
 

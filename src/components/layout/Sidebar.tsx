@@ -20,7 +20,6 @@ const NAV: Array<{ section: string; items: NavItem[] }> = [
       { href: "/app", label: "Dashboard" },
       { href: "/signals", label: "Live Signals" },
       { href: "/briefing", label: "Daily Briefing" },
-      { href: "/signals/performance", label: "Track Record" },
     ],
   },
   {

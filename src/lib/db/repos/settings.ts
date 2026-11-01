@@ -90,7 +90,7 @@ const DEFAULTS: SettingsSnapshot = {
   index_cash_reserve_pct: 5,
   index_rebalance_threshold_pct: 1,
   index_review_with_claude: true,
-  index_framework_version: "v2",
+  index_framework_version: "v1",
   index_rebalance_interval_hours: 24,
 };
 

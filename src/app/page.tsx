@@ -61,7 +61,7 @@ export default function HelixLandingPage() {
               className="font-[var(--font-jetbrains-mono)] text-[11px] uppercase"
               style={{ color: TEXT_MUTED, letterSpacing: "0.1em" }}
             >
-              AI TRADING INTELLIGENCE · LIVE ON SODEX · VERIFIED TRACK RECORD
+              AI TRADING INTELLIGENCE · LIVE ON SODEX · EVENT-DRIVEN ALPHA
             </div>
 
             <h1

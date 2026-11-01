@@ -6,15 +6,20 @@
  * ARB and OP each to 16% — multi-year downtrend assets sized like majors.
  *
  * v2 design principles:
- *   1. ANCHOR by market cap. BTC, ETH, SOL, gold and MAG7 always get a
- *      base allocation regardless of signals.
+ *   1. ANCHOR across asset classes. A diversified core of crypto majors
+ *      (BTC, ETH, SOL, HYPE…), mega-cap equities (NVDA, GOOGL, MSFT…) and
+ *      gold always gets a base allocation regardless of signals. Every
+ *      anchor is tradable on SoDEX (crypto spot + tokenised-equity perps).
  *   2. MOMENTUM = 30-day return, not 24h sector flicker. Long-term price
  *      action is what matters for "is this asset healthy".
- *   3. SIGNALS tilt within constraints. Strong signals add ±50% to base
- *      weight, never more.
- *   4. CAP non-anchor assets at 5%. Even with the strongest signal an
- *      altcoin can't exceed 5%, preventing concentration risk.
- *   5. HARD FLOOR — assets with sustained -20%+ 30d return AND no positive
+ *   3. SIGNALS tilt within constraints. Strong news signals add ±50% to
+ *      base weight, never more.
+ *   4. FUNDAMENTALS tilt from SoSoValue data. Recent spot-ETF net flows
+ *      (the /etfs dataset) nudge the crypto majors ±25%: real money moving
+ *      in/out is a fundamental tailwind the price hasn't fully expressed.
+ *   5. CAP non-anchor assets at 5%. Even with the strongest signal a
+ *      tilt pick can't exceed 5%, preventing concentration risk.
+ *   6. HARD FLOOR — assets with sustained -20%+ 30d return AND no positive
  *      signals are excluded entirely. Don't fight a downtrend.
  */
 
@@ -23,19 +28,31 @@ import type { Asset } from "@/lib/universe";
 import type { CandidatePortfolio, CandidateScore } from "./types";
 
 // ─────────────────────────────────────────────────────────────────────────
-// Anchor allocation — always-in-the-portfolio assets, market-cap-weighted.
-// Sums to 76%, leaving 24% for tilts (capped per-asset at 5%).
+// Anchor allocation — always-in-the-portfolio core, diversified across
+// crypto, mega-cap equities and gold. Sums to 76%, leaving 24% for tilts
+// (capped per-asset at 5%). Every id here is SoDEX-tradable: crypto on spot
+// (vBTC_vUSDC…), equities on perps (NVDA-USD…), MAG7.ssi on spot.
 // ─────────────────────────────────────────────────────────────────────────
 
 const ANCHOR_WEIGHTS: Record<string, number> = {
-  "tok-btc":     0.28,
-  "tok-eth":     0.16,
-  "tok-sol":     0.07,
-  "tok-bnb":     0.05,
-  "rwa-xaut":    0.07, // Gold — uncorrelated hedge
-  "idx-ssimag7": 0.07, // Crypto Magnificent 7
-  "tok-xrp":     0.03,
-  "tok-link":    0.03,
+  // ── Crypto majors (≈40%) ──
+  "tok-btc":     0.15,
+  "tok-eth":     0.09,
+  "tok-sol":     0.04,
+  "tok-hype":    0.04, // Hyperliquid
+  "tok-bnb":     0.02,
+  "tok-xrp":     0.02,
+  "idx-ssimag7": 0.04, // MAG7.ssi — crypto Magnificent-7 index
+  // ── Mega-cap equities (≈30%) — tokenised stocks, SoDEX perps ──
+  "stk-nvda":    0.06,
+  "stk-googl":   0.05,
+  "stk-msft":    0.05,
+  "stk-aapl":    0.04,
+  "stk-meta":    0.04,
+  "stk-amzn":    0.03,
+  "stk-tsla":    0.03,
+  // ── Hedge (≈6%) ──
+  "rwa-xaut":    0.06, // Gold — uncorrelated hedge
 };
 
 function sum(xs: number[]): number {
@@ -145,6 +162,51 @@ function signalsToMultiplier(signedScore: number): number {
   return 1 + 0.5 * Math.tanh(signedScore / 2);
 }
 
+/**
+ * Fundamental tilt from SoSoValue spot-ETF flows — the same dataset that
+ * powers /etfs. For each underlying with a US spot-ETF complex (BTC, ETH,
+ * SOL, XRP, …) we take the trailing-5d net inflow as a fraction of AUM:
+ * sustained inflows are a fundamental tailwind (real allocation the spot
+ * price may lag), outflows a headwind. Returns symbol(UPPER) → signed rate.
+ * Assets with no ETF complex simply aren't in the map (→ neutral ×1.0).
+ */
+async function loadEtfFlowRates(): Promise<Map<string, number>> {
+  interface Row {
+    symbol: string;
+    net_5d: number;
+    latest_aum: number;
+  }
+  const rows = await all<Row>(
+    `WITH ranked AS (
+       SELECT symbol, total_net_inflow, total_net_assets,
+              ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
+       FROM etf_aggregate_daily
+       WHERE country_code = 'US'
+     )
+     SELECT symbol,
+            SUM(total_net_inflow)                           AS net_5d,
+            MAX(CASE WHEN rn = 1 THEN total_net_assets END) AS latest_aum
+     FROM ranked
+     WHERE rn <= 5
+     GROUP BY symbol`,
+  );
+  const out = new Map<string, number>();
+  for (const r of rows) {
+    if (!r.latest_aum || r.latest_aum <= 0) continue;
+    out.set(r.symbol.toUpperCase(), r.net_5d / r.latest_aum);
+  }
+  return out;
+}
+
+/**
+ * Translate a 5d ETF flow rate (net inflow / AUM) into a tilt multiplier in
+ * roughly [0.75, 1.25]. A ~2% of AUM 5d inflow lands near ×1.1.
+ */
+function flowToMultiplier(rate: number | undefined): number {
+  if (rate == null) return 1.0;
+  return 1 + 0.25 * Math.tanh(rate * 20);
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Public API
 // ─────────────────────────────────────────────────────────────────────────
@@ -169,6 +231,7 @@ export async function computeCandidatePortfolio(
     ? new Map<string, SignalAggRow>()
     : await aggregateSignals(windowMs);
   const momentum = await loadMomentum30d();
+  const flowRates = await loadEtfFlowRates();
   const cashFrac = settings.index_cash_reserve_pct / 100;
 
   // ── Step 1: Anchor weights ────────────────────────────────────
@@ -181,10 +244,12 @@ export async function computeCandidatePortfolio(
 
     const sig = signalAgg.get(assetId);
     const ret30 = momentum.get(assetId);
+    const flowRate = flowRates.get(asset.symbol.toUpperCase());
     const mMom = momentumToMultiplier(ret30);
     const mSig = signalsToMultiplier(sig?.signed_score ?? 0);
+    const mFlow = flowToMultiplier(flowRate);
 
-    const tilted = baseW * mMom * mSig;
+    const tilted = baseW * mMom * mSig * mFlow;
     const capped = Math.min(tilted, ANCHOR_MAX);
     anchorWeights[assetId] = capped;
 
@@ -196,12 +261,16 @@ export async function computeCandidatePortfolio(
       drivers.push(
         `${sig.count} signal${sig.count !== 1 ? "s" : ""} (×${mSig.toFixed(2)})`,
       );
+    if (flowRate != null)
+      drivers.push(
+        `ETF 5d ${flowRate >= 0 ? "+" : ""}${(flowRate * 100).toFixed(1)}% AUM (×${mFlow.toFixed(2)})`,
+      );
 
     scores.push({
       asset,
       signal_score: sig?.signed_score ?? 0,
       sector_score: ret30 ?? 0,
-      flow_score: 0,
+      flow_score: flowRate ?? 0,
       composite_score: tilted,
       drivers,
     });
@@ -272,6 +341,7 @@ export async function computeCandidatePortfolio(
       tiltWeights[c.asset.id] = take;
       remaining -= take;
 
+      const flowRate = flowRates.get(c.asset.symbol.toUpperCase());
       const drivers: string[] = [];
       if (c.ret30 != null)
         drivers.push(`30d ${(c.ret30 * 100).toFixed(1)}%`);
@@ -279,11 +349,15 @@ export async function computeCandidatePortfolio(
         drivers.push(
           `${c.sigCount} signal${c.sigCount !== 1 ? "s" : ""} (${c.sigScore >= 0 ? "+" : ""}${c.sigScore.toFixed(2)})`,
         );
+      if (flowRate != null)
+        drivers.push(
+          `ETF 5d ${flowRate >= 0 ? "+" : ""}${(flowRate * 100).toFixed(1)}% AUM`,
+        );
       scores.push({
         asset: c.asset,
         signal_score: c.sigScore,
         sector_score: c.ret30 ?? 0,
-        flow_score: 0,
+        flow_score: flowRate ?? 0,
         composite_score: c.score,
         drivers,
       });
