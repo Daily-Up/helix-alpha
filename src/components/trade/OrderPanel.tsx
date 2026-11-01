@@ -35,7 +35,7 @@ export function OrderPanel({
   const sizeNum = Number(size) || 0;
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-line bg-surface p-4">
+    <div className="flex h-full flex-col gap-3 p-4">
       {/* Buy/Long – Sell/Short */}
       <div className="grid grid-cols-2 gap-1 rounded-md border border-line p-1">
         <button

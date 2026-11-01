@@ -35,16 +35,15 @@ export default async function TradePage() {
 
   return (
     <Shell>
-      <div className="dash-page-enter flex flex-col gap-5">
-        <header>
-          <h1 className="dash-title">Trade Terminal</h1>
-          <p className="mt-2 dash-description">
-            Pick an asset and run a Setup — Helix reads the latest SoSoValue
-            news and price action and calls the bias, the levels, and the
-            reasoning. Then trade it live on SoDEX. Every setup cites the
-            headlines behind it.
-          </p>
-        </header>
+      <div className="dash-page-enter flex flex-col gap-3">
+        <div className="flex items-baseline justify-between">
+          <h1 className="font-[var(--font-jetbrains-mono)] text-[11px] uppercase tracking-[0.18em] text-fg-dim">
+            Trade Terminal · Live on SoDEX
+          </h1>
+          <span className="text-[11px] text-fg-dim">
+            News-grounded setups · one-signature execution
+          </span>
+        </div>
 
         <TradeTerminal assets={assets} />
       </div>

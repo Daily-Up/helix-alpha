@@ -1,9 +1,10 @@
 "use client";
 
 /**
- * PriceChart — candlestick chart for the Trade Terminal, fed by
- * /api/sodex/candles (SoDEX OHLCV). lightweight-charts is imported
- * dynamically inside the effect so it never runs during SSR.
+ * PriceChart — TradingView-grade candlestick + volume chart for the Trade
+ * Terminal, fed by live SoDEX klines. OHLC legend tracks the crosshair,
+ * volume sits in the lower band, and Setup levels draw as price lines.
+ * lightweight-charts is imported inside the effect so it never SSRs.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -19,16 +20,27 @@ interface Candle {
   high: number;
   low: number;
   close: number;
+  volume: number;
 }
+
+const UP = "#26a69a";
+const DOWN = "#ef5350";
+
+const fmt = (n: number | null, d = 2) =>
+  n == null
+    ? "—"
+    : n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
 
 export function PriceChart({
   symbol,
+  label,
   market,
   levels,
 }: {
   symbol: string;
+  /** Display label e.g. "GOOGL · 1h". */
+  label: string;
   market: "spot" | "perp";
-  /** Optional Setup levels to draw as horizontal price lines. */
   levels?: SetupLevel[];
 }) {
   const [interval, setIntervalSel] = useState<Interval>("1h");
@@ -36,22 +48,28 @@ export function PriceChart({
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const [legend, setLegend] = useState<Candle | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const chartRef = useRef<any>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const seriesRef = useRef<any>(null);
+  const candleRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const volRef = useRef<any>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const priceLinesRef = useRef<any[]>([]);
+  const candlesRef = useRef<Candle[]>([]);
 
-  // Fetch candles on symbol / market / interval change.
+  const digits = (candles[candles.length - 1]?.close ?? 1) < 10 ? 4 : 2;
+
+  // Fetch candles.
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setErr(null);
     fetch(
-      `/api/sodex/candles?symbol=${encodeURIComponent(symbol)}&market=${market}&interval=${interval}&limit=200`,
+      `/api/sodex/candles?symbol=${encodeURIComponent(symbol)}&market=${market}&interval=${interval}&limit=300`,
     )
       .then((r) => r.json())
       .then((j) => {
@@ -59,18 +77,14 @@ export function PriceChart({
         if (!j.ok) throw new Error(j.error ?? "candles failed");
         setCandles(j.candles as Candle[]);
       })
-      .catch((e) => {
-        if (!cancelled) setErr((e as Error).message);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+      .catch((e) => !cancelled && setErr((e as Error).message))
+      .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
   }, [symbol, market, interval]);
 
-  // Create the chart once.
+  // Create chart once.
   useEffect(() => {
     let disposed = false;
     (async () => {
@@ -81,32 +95,59 @@ export function PriceChart({
       const chart = LWC.createChart(containerRef.current, {
         layout: {
           background: { type: LWC.ColorType.Solid, color: "transparent" },
-          textColor: "rgba(200,200,200,0.55)",
+          textColor: "rgba(190,190,195,0.55)",
           fontSize: 11,
+          fontFamily: "var(--font-jetbrains-mono), monospace",
         },
         grid: {
-          vertLines: { color: "rgba(255,255,255,0.04)" },
-          horzLines: { color: "rgba(255,255,255,0.04)" },
+          vertLines: { color: "rgba(255,255,255,0.03)" },
+          horzLines: { color: "rgba(255,255,255,0.03)" },
         },
-        rightPriceScale: { borderColor: "rgba(255,255,255,0.08)" },
+        rightPriceScale: {
+          borderColor: "rgba(255,255,255,0.06)",
+          scaleMargins: { top: 0.08, bottom: 0.26 },
+        },
         timeScale: {
-          borderColor: "rgba(255,255,255,0.08)",
+          borderColor: "rgba(255,255,255,0.06)",
           timeVisible: true,
           secondsVisible: false,
         },
-        crosshair: { mode: LWC.CrosshairMode.Normal },
+        crosshair: {
+          mode: LWC.CrosshairMode.Normal,
+          vertLine: { color: "rgba(255,255,255,0.2)", labelBackgroundColor: "#2a2a2e" },
+          horzLine: { color: "rgba(255,255,255,0.2)", labelBackgroundColor: "#2a2a2e" },
+        },
         autoSize: true,
       });
-      const series = chart.addCandlestickSeries({
-        upColor: "#34c39a",
-        downColor: "#e5575f",
-        borderUpColor: "#34c39a",
-        borderDownColor: "#e5575f",
-        wickUpColor: "#34c39a",
-        wickDownColor: "#e5575f",
+      const candle = chart.addCandlestickSeries({
+        upColor: UP,
+        downColor: DOWN,
+        borderUpColor: UP,
+        borderDownColor: DOWN,
+        wickUpColor: UP,
+        wickDownColor: DOWN,
+      });
+      const vol = chart.addHistogramSeries({
+        priceFormat: { type: "volume" },
+        priceScaleId: "vol",
+      });
+      chart.priceScale("vol").applyOptions({
+        scaleMargins: { top: 0.82, bottom: 0 },
       });
       chartRef.current = chart;
-      seriesRef.current = series;
+      candleRef.current = candle;
+      volRef.current = vol;
+
+      chart.subscribeCrosshairMove((param: { time?: unknown }) => {
+        const data = candlesRef.current;
+        if (!param.time) {
+          setLegend(data[data.length - 1] ?? null);
+          return;
+        }
+        const hit = data.find((c) => c.time === param.time);
+        if (hit) setLegend(hit);
+      });
+
       setReady(true);
     })();
     return () => {
@@ -114,15 +155,17 @@ export function PriceChart({
       if (chartRef.current) {
         chartRef.current.remove();
         chartRef.current = null;
-        seriesRef.current = null;
+        candleRef.current = null;
+        volRef.current = null;
       }
     };
   }, []);
 
-  // Push data once both the chart and candles are available.
+  // Push data.
   useEffect(() => {
-    if (!ready || !seriesRef.current || candles.length === 0) return;
-    seriesRef.current.setData(
+    candlesRef.current = candles;
+    if (!ready || !candleRef.current || candles.length === 0) return;
+    candleRef.current.setData(
       candles.map((c) => ({
         time: c.time,
         open: c.open,
@@ -131,12 +174,20 @@ export function PriceChart({
         close: c.close,
       })),
     );
+    volRef.current?.setData(
+      candles.map((c) => ({
+        time: c.time,
+        value: c.volume,
+        color: c.close >= c.open ? "rgba(38,166,154,0.35)" : "rgba(239,83,80,0.35)",
+      })),
+    );
     chartRef.current?.timeScale().fitContent();
+    setLegend(candles[candles.length - 1] ?? null);
   }, [candles, ready]);
 
-  // Draw / redraw Setup levels as horizontal price lines.
+  // Setup levels → price lines.
   useEffect(() => {
-    const series = seriesRef.current;
+    const series = candleRef.current;
     if (!ready || !series) return;
     for (const pl of priceLinesRef.current) {
       try {
@@ -147,41 +198,69 @@ export function PriceChart({
     }
     priceLinesRef.current = [];
     for (const lv of levels ?? []) {
-      const line = series.createPriceLine({
-        price: lv.price,
-        color: lv.kind === "support" ? "#34c39a" : "#e5575f",
-        lineWidth: 1,
-        lineStyle: 2, // dashed
-        axisLabelVisible: true,
-        title: lv.label.slice(0, 22),
-      });
-      priceLinesRef.current.push(line);
+      priceLinesRef.current.push(
+        series.createPriceLine({
+          price: lv.price,
+          color: lv.kind === "support" ? UP : DOWN,
+          lineWidth: 1,
+          lineStyle: 2,
+          axisLabelVisible: true,
+          title: lv.label.slice(0, 20),
+        }),
+      );
     }
   }, [levels, ready, candles]);
 
+  const up = legend ? legend.close >= legend.open : true;
+  const chg = legend ? legend.close - legend.open : 0;
+  const chgPct = legend && legend.open ? (chg / legend.open) * 100 : 0;
+
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-1">
+    <div className="flex flex-col">
+      {/* Timeframe controls */}
+      <div className="flex items-center gap-0.5 border-b border-line px-1 pb-2">
         {INTERVALS.map((iv) => (
           <button
             key={iv}
             onClick={() => setIntervalSel(iv)}
             className={cn(
-              "rounded border px-2 py-0.5 text-[11px] transition-colors",
+              "rounded px-2 py-1 text-[11px] font-medium transition-colors",
               iv === interval
-                ? "border-accent/40 bg-accent/15 text-accent-2"
-                : "border-line text-fg-muted hover:border-line-2 hover:text-fg",
+                ? "bg-surface-2 text-fg"
+                : "text-fg-dim hover:text-fg-muted",
             )}
           >
             {iv}
           </button>
         ))}
-        {loading ? (
-          <span className="ml-2 text-[11px] text-fg-dim">loading…</span>
-        ) : null}
+        <span className="ml-2 text-[10px] text-fg-dim">
+          {loading ? "loading…" : ""}
+        </span>
       </div>
+
+      {/* Chart with OHLC legend overlay */}
       <div className="relative">
-        <div ref={containerRef} className="h-[360px] w-full" />
+        <div className="pointer-events-none absolute left-2 top-2 z-10 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-[var(--font-jetbrains-mono)] text-[11px]">
+          <span className="text-fg-muted">{label}</span>
+          {legend ? (
+            <>
+              <span className="text-fg-dim">O</span>
+              <span className={up ? "text-positive" : "text-negative"}>{fmt(legend.open, digits)}</span>
+              <span className="text-fg-dim">H</span>
+              <span className={up ? "text-positive" : "text-negative"}>{fmt(legend.high, digits)}</span>
+              <span className="text-fg-dim">L</span>
+              <span className={up ? "text-positive" : "text-negative"}>{fmt(legend.low, digits)}</span>
+              <span className="text-fg-dim">C</span>
+              <span className={up ? "text-positive" : "text-negative"}>{fmt(legend.close, digits)}</span>
+              <span className={up ? "text-positive" : "text-negative"}>
+                {chg >= 0 ? "+" : ""}
+                {fmt(chg, digits)} ({chgPct >= 0 ? "+" : ""}
+                {chgPct.toFixed(2)}%)
+              </span>
+            </>
+          ) : null}
+        </div>
+        <div ref={containerRef} className="h-[420px] w-full" />
         {err ? (
           <div className="absolute inset-0 flex items-center justify-center text-sm text-fg-dim">
             Chart unavailable — {err}
