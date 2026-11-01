@@ -92,7 +92,10 @@ export const sodexTestnet = defineChain({
 // min(user-approved max, engine cap) — spot caps at 2000 (2%), perps at 200
 // (0.2%) — and is 0 until the user approves it, so routing is always safe.
 const BUILDER_ID: Record<SodexNetwork, number> = {
-  mainnet: Number(process.env.NEXT_PUBLIC_SODEX_BUILDER_ID_MAINNET ?? "0") || 0,
+  // Helix's funded builder account (Daily-Up) — wallet
+  // 0xEeb813d8C68CdC2Dfcecc3c7ECa71f17c830902d, aid 8409. Public account id,
+  // so hardcoded as the default; NEXT_PUBLIC_SODEX_BUILDER_ID_MAINNET overrides.
+  mainnet: Number(process.env.NEXT_PUBLIC_SODEX_BUILDER_ID_MAINNET ?? "8409") || 8409,
   testnet: Number(process.env.NEXT_PUBLIC_SODEX_BUILDER_ID_TESTNET ?? "0") || 0,
 };
 const BUILDER_FEE_TENTHS_BP =
