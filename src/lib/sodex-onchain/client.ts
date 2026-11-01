@@ -12,7 +12,12 @@
  */
 
 import type { Hex } from "viem";
-import { SODEX_NETWORKS, getBuilderCode, type SodexNetwork } from "./chains";
+import {
+  SODEX_NETWORKS,
+  getBuilderCode,
+  valueChainAddParams,
+  type SodexNetwork,
+} from "./chains";
 import {
   signAddAPIKeyAction,
   signApproveBuilderFeeAction,
@@ -380,6 +385,59 @@ export async function addApiKey(opts: {
 }
 
 /**
+ * Make sure the wallet is on ValueChain (SoDEX's EVM chain) before signing an
+ * account-level action whose EIP-712 domain uses that chain id. Switches via
+ * wallet_switchEthereumChain, adding the network (EIP-3085) first if the wallet
+ * doesn't recognise it. Best-effort: if the provider can't report or switch
+ * chains we let signing proceed (it may still work, or fail clearly).
+ */
+async function ensureWalletOnSodexChain(
+  provider: Eip1193Provider,
+  network: SodexNetwork,
+): Promise<void> {
+  const target = SODEX_NETWORKS[network].chainId;
+  let current: number | null = null;
+  try {
+    current = parseInt(
+      (await provider.request({ method: "eth_chainId", params: [] })) as string,
+      16,
+    );
+  } catch {
+    return;
+  }
+  if (current === target) return;
+
+  const params = valueChainAddParams(network);
+  try {
+    await provider.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: params.chainId }],
+    });
+  } catch (err) {
+    const code = (err as { code?: number }).code;
+    const msg = (err as Error).message ?? "";
+    // 4902 (or an equivalent message) = the chain isn't in the wallet yet.
+    if (code === 4902 || /unrecognized|not been added|add.*chain/i.test(msg)) {
+      await provider.request({
+        method: "wallet_addEthereumChain",
+        params: [params],
+      });
+      // addEthereumChain usually leaves the wallet on the new chain; make sure.
+      try {
+        await provider.request({
+          method: "wallet_switchEthereumChain",
+          params: [{ chainId: params.chainId }],
+        });
+      } catch {
+        /* added + already switched */
+      }
+    } else {
+      throw err;
+    }
+  }
+}
+
+/**
  * Approve Helix's builder fee — signed ONCE by the master wallet. After this,
  * orders routed by Helix that carry its `builder` code share a fee up to
  * `maxFeeRate` (tenths of a bp; capped per engine: spot ≤2000, perps ≤200).
@@ -407,6 +465,12 @@ export async function approveBuilderFee(opts: {
   // Gateway root is the spot endpoint without the /api/v1/spot suffix; the
   // account-level endpoints (…/user/…) hang off the root, not an engine.
   const gatewayRoot = spotEndpoint.replace(/\/api\/v1\/spot\/?$/, "");
+
+  // The approval's EIP-712 domain uses the ValueChain chain id, so the wallet
+  // must be ON ValueChain to produce (and for the gateway to recover) a valid
+  // signature. Switch the wallet there first — adding the network if the user
+  // doesn't have it yet — so they don't have to do it by hand.
+  await ensureWalletOnSodexChain(provider, network);
 
   const { apiSign, nonce } = await signApproveBuilderFeeAction({
     provider,

@@ -54,31 +54,62 @@ export const SODEX_NETWORKS: Record<SodexNetwork, SodexNetworkConfig> = {
  * gateway's host for the rpcUrl — it isn't used for trading (we POST
  * via REST), only for wallet bookkeeping.
  */
+// ValueChain is SoDEX's own EVM chain — the chain the wallet must be ON to
+// sign account-level actions (addAPIKey / builder-fee approval) whose EIP-712
+// domain uses the ValueChain chain id. RPC + explorer from the ValueChain EVM
+// docs; SOSO is the native gas token (18 decimals).
 export const sodexMainnet = defineChain({
   id: 286623,
-  name: "SoDEX Mainnet",
-  nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+  name: "ValueChain",
+  nativeCurrency: { name: "SOSO", symbol: "SOSO", decimals: 18 },
   rpcUrls: {
-    default: { http: ["https://mainnet-gw.sodex.dev"] },
+    default: { http: ["https://mainnet.valuechain.xyz"] },
   },
   blockExplorers: {
-    default: { name: "SoDEX", url: "https://sodex.com" },
+    default: { name: "ValueScan", url: "https://main-scan.valuechain.xyz" },
   },
   testnet: false,
 });
 
 export const sodexTestnet = defineChain({
   id: 138565,
-  name: "SoDEX Testnet",
-  nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+  name: "ValueChain Testnet",
+  nativeCurrency: { name: "SOSO", symbol: "SOSO", decimals: 18 },
   rpcUrls: {
-    default: { http: ["https://testnet-gw.sodex.dev"] },
+    default: { http: ["https://testnet.valuechain.xyz"] },
   },
   blockExplorers: {
-    default: { name: "SoDEX", url: "https://sodex.com" },
+    default: { name: "ValueScan", url: "https://test-scan.valuechain.xyz" },
   },
   testnet: true,
 });
+
+/**
+ * EIP-3085 params for `wallet_addEthereumChain` — used to switch (or add) the
+ * user's wallet to ValueChain before signing account-level actions.
+ */
+export function valueChainAddParams(network: SodexNetwork): {
+  chainId: string;
+  chainName: string;
+  nativeCurrency: { name: string; symbol: string; decimals: number };
+  rpcUrls: string[];
+  blockExplorerUrls: string[];
+} {
+  const isMain = network === "mainnet";
+  return {
+    chainId: `0x${SODEX_NETWORKS[network].chainId.toString(16)}`,
+    chainName: isMain ? "ValueChain" : "ValueChain Testnet",
+    nativeCurrency: { name: "SOSO", symbol: "SOSO", decimals: 18 },
+    rpcUrls: [
+      isMain ? "https://mainnet.valuechain.xyz" : "https://testnet.valuechain.xyz",
+    ],
+    blockExplorerUrls: [
+      isMain
+        ? "https://main-scan.valuechain.xyz"
+        : "https://test-scan.valuechain.xyz",
+    ],
+  };
+}
 
 // ── Builder code (fee sharing) ─────────────────────────────────────────────
 // SoDEX "builder codes" let the app that routes an order earn a fee on the
