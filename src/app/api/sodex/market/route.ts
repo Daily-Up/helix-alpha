@@ -24,9 +24,9 @@ export async function GET(req: Request) {
   try {
     const [book, tickers] = await Promise.all([
       Market.getOrderBook(symbol, market, 20),
-      Market.getTickers(market),
+      Market.getTickers(market, symbol),
     ]);
-    const ticker = tickers.find((t) => t.symbol === symbol) ?? null;
+    const ticker = tickers.find((t) => t.symbol === symbol) ?? tickers[0] ?? null;
     return NextResponse.json({
       ok: true,
       symbol,

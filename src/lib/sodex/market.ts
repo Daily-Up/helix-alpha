@@ -42,9 +42,17 @@ export function getCoins(): Promise<SodexCoin[]> {
   return spotGet<SodexCoin[]>("/markets/coins");
 }
 
-/** GET /markets/tickers on the chosen market. */
-export function getTickers(market: SodexMarket = "spot"): Promise<SodexTicker[]> {
+/**
+ * GET /markets/tickers on the chosen market. Pass `symbol` to let SoDEX
+ * filter server-side (one row) — perps rows carry markPrice, indexPrice,
+ * openInterest, fundingRate and nextFundingTime.
+ */
+export function getTickers(
+  market: SodexMarket = "spot",
+  symbol?: string,
+): Promise<SodexTicker[]> {
   return spotGet<SodexTicker[]>("/markets/tickers", {
+    query: symbol ? { symbol } : undefined,
     baseOverride: baseFor(market),
   });
 }

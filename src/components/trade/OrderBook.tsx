@@ -2,8 +2,8 @@
 
 /**
  * OrderBook — SoDEX L2 ladder (asks on top, spread, bids below) with
- * cumulative depth bars. Sits inside the terminal frame, so no outer
- * border of its own. Fed by /api/sodex/market (polled in the parent).
+ * Price / Size / Total columns and cumulative depth bars. Sits inside the
+ * terminal frame. Fed by /api/sodex/market (polled in the parent).
  */
 
 import { cn } from "@/components/ui/cn";
@@ -14,25 +14,26 @@ export interface BookLevel {
 }
 
 const n = (v: string) => Number(v);
-const fmtPx = (v: number) =>
-  v.toLocaleString(undefined, {
-    minimumFractionDigits: v < 10 ? 4 : 2,
-    maximumFractionDigits: v < 10 ? 4 : 2,
-  });
 const fmtSz = (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 4 });
 
 function Rows({
   levels,
   side,
   max,
+  priceDigits,
 }: {
   levels: BookLevel[];
   side: "ask" | "bid";
   max: number;
+  priceDigits: number;
 }) {
+  const fmtPx = (v: number) =>
+    v.toLocaleString(undefined, {
+      minimumFractionDigits: priceDigits,
+      maximumFractionDigits: priceDigits,
+    });
   // asks: best (lowest) ask nearest the spread → render high→low.
   const ordered = side === "ask" ? [...levels].reverse() : levels;
-  // cumulative from the best price outward
   const cum = new Map<string, number>();
   let c = 0;
   for (const l of levels) {
@@ -41,24 +42,28 @@ function Rows({
   }
   return (
     <div className="flex flex-col">
-      {ordered.map((l, i) => (
-        <div
-          key={i}
-          className="relative flex justify-between px-3 py-[2.5px] font-[var(--font-jetbrains-mono)] text-[11px]"
-        >
+      {ordered.map((l, i) => {
+        const total = cum.get(l.price) ?? 0;
+        return (
           <div
-            className={cn(
-              "absolute inset-y-0 right-0",
-              side === "ask" ? "bg-negative/10" : "bg-positive/10",
-            )}
-            style={{ width: `${Math.min(100, ((cum.get(l.price) ?? 0) / max) * 100)}%` }}
-          />
-          <span className={cn("relative", side === "ask" ? "text-negative" : "text-positive")}>
-            {fmtPx(n(l.price))}
-          </span>
-          <span className="relative text-fg-muted">{fmtSz(n(l.size))}</span>
-        </div>
-      ))}
+            key={i}
+            className="relative grid grid-cols-[1fr_1fr_1fr] px-3 py-[2.5px] font-[var(--font-jetbrains-mono)] text-[10.5px]"
+          >
+            <div
+              className={cn(
+                "absolute inset-y-0 right-0",
+                side === "ask" ? "bg-negative/10" : "bg-positive/10",
+              )}
+              style={{ width: `${Math.min(100, (total / max) * 100)}%` }}
+            />
+            <span className={cn("relative", side === "ask" ? "text-negative" : "text-positive")}>
+              {fmtPx(n(l.price))}
+            </span>
+            <span className="relative text-right text-fg-muted">{fmtSz(n(l.size))}</span>
+            <span className="relative text-right text-fg-dim">{fmtSz(total)}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -69,12 +74,14 @@ export function OrderBook({
   markPrice,
   loading,
   symbol,
+  digits,
 }: {
   bids: BookLevel[];
   asks: BookLevel[];
   markPrice: number | null;
   loading: boolean;
   symbol: string;
+  digits: number;
 }) {
   const bestBid = bids[0] ? n(bids[0].price) : null;
   const bestAsk = asks[0] ? n(asks[0].price) : null;
@@ -86,6 +93,8 @@ export function OrderBook({
     1,
   );
   const up = markPrice != null && bestBid != null ? markPrice >= bestBid : true;
+  const fmtPx = (v: number) =>
+    v.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
   return (
     <div className="flex h-full flex-col">
@@ -99,9 +108,10 @@ export function OrderBook({
           title={loading ? "live" : "idle"}
         />
       </div>
-      <div className="flex justify-between px-3 py-1 text-[9px] uppercase tracking-wider text-fg-dim">
+      <div className="grid grid-cols-[1fr_1fr_1fr] px-3 py-1 text-[9px] uppercase tracking-wider text-fg-dim">
         <span>Price</span>
-        <span>Size ({symbol})</span>
+        <span className="text-right">Size</span>
+        <span className="text-right">Total</span>
       </div>
       {asks.length === 0 && bids.length === 0 ? (
         <div className="px-3 py-10 text-center text-[11px] text-fg-dim">
@@ -109,7 +119,7 @@ export function OrderBook({
         </div>
       ) : (
         <>
-          <Rows levels={asks} side="ask" max={maxCum} />
+          <Rows levels={asks} side="ask" max={maxCum} priceDigits={digits} />
           <div className="flex items-center justify-between border-y border-line bg-surface-2/50 px-3 py-1.5">
             <span
               className={cn(
@@ -125,7 +135,7 @@ export function OrderBook({
                 : ""}
             </span>
           </div>
-          <Rows levels={bids} side="bid" max={maxCum} />
+          <Rows levels={bids} side="bid" max={maxCum} priceDigits={digits} />
         </>
       )}
     </div>
