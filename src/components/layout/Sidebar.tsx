@@ -18,6 +18,7 @@ const NAV: Array<{ section: string; items: NavItem[] }> = [
     section: "Trade",
     items: [
       { href: "/app", label: "Dashboard" },
+      { href: "/trade", label: "Trade Terminal" },
       { href: "/signals", label: "Live Signals" },
       { href: "/briefing", label: "Daily Briefing" },
     ],
