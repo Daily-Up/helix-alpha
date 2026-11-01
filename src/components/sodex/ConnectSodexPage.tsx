@@ -324,6 +324,38 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
     ],
   );
 
+  // One-click builder-fee approval for wallets that connected BEFORE this
+  // shipped (the create-key flow approves it for new connects). Signs the
+  // same one-time ApproveBuilderFee action with the master wallet.
+  const onApproveBuilderFee = useCallback(async () => {
+    if (!isConnected || !address || !provider || !accountState) return;
+    const builder = getBuilderCode(network);
+    if (!builder) {
+      setError("Builder fee isn't configured for this network.");
+      return;
+    }
+    setBusy("builder");
+    setError(null);
+    setActionMsg(null);
+    try {
+      await sodexApproveBuilderFee({
+        network,
+        provider,
+        account: address,
+        accountID: accountState.aid,
+        builderID: builder.id,
+        maxFeeRate: builder.fee,
+      });
+      setActionMsg(
+        `✓ Builder fee approved (${builder.fee / 10} bp) — Helix now shares the SoDEX fee on your routed trades`,
+      );
+    } catch (err) {
+      setError(`Failed to approve builder fee: ${(err as Error).message}`);
+    } finally {
+      setBusy(null);
+    }
+  }, [isConnected, address, provider, accountState, network]);
+
   // Balance display now lives inside `SodexBalancesTable`, which
   // renders a SoDEX-style table grouped by coin with spot + futures
   // sub-rows and live USD valuation for the priced coins.
@@ -676,6 +708,23 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
 
       {isConnected && localKey ? (
         <ReadyBanner identity={localKey} network={network} />
+      ) : null}
+
+      {isConnected && localKey && getBuilderCode(network) ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded border border-line bg-surface/40 px-3.5 py-2.5 text-xs">
+          <span className="text-fg-muted">
+            Already connected? Approve Helix&apos;s builder fee once (
+            {(getBuilderCode(network)!.fee ?? 0) / 10} bp) so routed trades share
+            the SoDEX fee. One signature, nothing per trade.
+          </span>
+          <button
+            onClick={onApproveBuilderFee}
+            disabled={busy === "builder"}
+            className="shrink-0 rounded border border-accent/40 bg-accent/10 px-2.5 py-1 font-medium text-accent-2 transition-colors hover:bg-accent/20 disabled:opacity-50"
+          >
+            {busy === "builder" ? "Approving…" : "Enable builder fee"}
+          </button>
+        </div>
       ) : null}
     </>
   );
