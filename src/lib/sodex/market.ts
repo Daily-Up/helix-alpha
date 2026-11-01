@@ -49,27 +49,67 @@ export function getTickers(market: SodexMarket = "spot"): Promise<SodexTicker[]>
   });
 }
 
-/** GET /markets/orderbook?symbol= on the chosen market. */
-export function getOrderBook(
+/**
+ * GET /markets/{symbol}/orderbook?limit= — L2 depth for one pair.
+ * SoDEX returns bids/asks as [price, size] string tuples; we normalize
+ * to the SodexOrderBook {price, size} level shape.
+ */
+export async function getOrderBook(
   symbol: string,
   market: SodexMarket = "spot",
   depth?: number,
 ): Promise<SodexOrderBook> {
-  return spotGet<SodexOrderBook>("/markets/orderbook", {
-    query: { symbol, depth },
+  const raw = await spotGet<{
+    bids: [string, string][];
+    asks: [string, string][];
+    blockTime?: number;
+  }>(`/markets/${encodeURIComponent(symbol)}/orderbook`, {
+    query: { limit: depth },
     baseOverride: baseFor(market),
   });
+  return {
+    symbol,
+    timestamp: raw.blockTime ?? Date.now(),
+    bids: (raw.bids ?? []).map(([price, size]) => ({ price, size })),
+    asks: (raw.asks ?? []).map(([price, size]) => ({ price, size })),
+  };
 }
 
-/** GET /markets/candles — historical OHLCV candles. */
-export function getCandles(
+/**
+ * GET /markets/{symbol}/klines?interval=&limit= — historical OHLCV.
+ * SoDEX returns short-key rows {t,o,h,l,c,v,q,n}; we map to SodexCandle.
+ */
+export async function getCandles(
   query: CandlesQuery,
   market: SodexMarket = "spot",
 ): Promise<SodexCandle[]> {
-  return spotGet<SodexCandle[]>("/markets/candles", {
-    query,
+  const { symbol, interval, startTime, endTime, limit } = query;
+  const raw = await spotGet<
+    Array<{
+      t: number;
+      o: string;
+      h: string;
+      l: string;
+      c: string;
+      v: string;
+      q: string;
+      n?: number;
+    }>
+  >(`/markets/${encodeURIComponent(symbol)}/klines`, {
+    query: { interval, startTime, endTime, limit },
     baseOverride: baseFor(market),
   });
+  return (raw ?? []).map((k) => ({
+    openTime: k.t,
+    closeTime: k.t,
+    open: k.o,
+    high: k.h,
+    low: k.l,
+    close: k.c,
+    volume: k.v,
+    quoteVolume: k.q,
+    trades: k.n,
+  }));
 }
 
 /** Tickers (spot only) indexed by symbol. */
