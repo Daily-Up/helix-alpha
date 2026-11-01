@@ -28,7 +28,6 @@ import {
 import type {
   SodexAccountState,
   SodexAction,
-  SodexAddApiKeyParams,
   SodexApiKeyRow,
   SodexNewOrderBatch,
   SodexRevokeApiKeyParams,
