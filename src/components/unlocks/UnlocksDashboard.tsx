@@ -61,7 +61,7 @@ function ConvictionBadge({ u }: { u: UnlockRowWithPlan }) {
         : "bg-transparent text-fg-dim";
   return (
     <span className={cn("rounded-[3px] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em]", cls)}>
-      {p.priority} · {(p.conviction * 100).toFixed(0)}
+      {p.priority} · {Math.round(p.conviction * 100)}
     </span>
   );
 }

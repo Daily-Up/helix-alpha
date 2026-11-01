@@ -36,10 +36,12 @@ import { DataTable } from "@/components/ui/DataTable";
 import { fmtSodexSymbol } from "@/lib/format";
 import {
   SODEX_NETWORKS,
+  getBuilderCode,
   type SodexNetwork,
 } from "@/lib/sodex-onchain/chains";
 import {
   addApiKey as sodexAddApiKey,
+  approveBuilderFee as sodexApproveBuilderFee,
   getAccountState,
   getPerpsAccountState,
   listApiKeys,
@@ -238,8 +240,34 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
       });
       writeLocalKey(network, next);
       setLocalKey(next);
+
+      // One-time: approve Helix's builder fee in the SAME setup step (one
+      // extra master-wallet signature now, none per trade). Best-effort —
+      // the API key is already saved, so a builder-approval hiccup must not
+      // fail the connect. No-op when the builder code is unconfigured.
+      const builder = getBuilderCode(network);
+      let builderNote = "";
+      if (builder) {
+        try {
+          await sodexApproveBuilderFee({
+            network,
+            provider,
+            account: address,
+            accountID: accountState.aid,
+            builderID: builder.id,
+            maxFeeRate: builder.fee,
+          });
+          builderNote = ` · builder fee approved (${builder.fee / 10} bp)`;
+        } catch (e) {
+          console.warn(
+            "[sodex] builder fee approval failed (non-fatal):",
+            (e as Error).message,
+          );
+        }
+      }
+
       setActionMsg(
-        `✓ Created API key "${next.name}" — secret saved in this browser only`,
+        `✓ Created API key "${next.name}" — secret saved in this browser only${builderNote}`,
       );
       await refreshAccount();
     } catch (err) {

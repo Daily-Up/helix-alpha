@@ -234,6 +234,85 @@ export async function signAddAPIKeyAction(opts: {
 }
 
 /**
+ * Sign an ApproveBuilderFeeAction (builder-code fee sharing) with the master
+ * wallet. Same `universal` EIP-712 domain + 0x02 signature envelope as
+ * addAPIKey — only the typed struct differs. One-time: lets a builder earn a
+ * fee on the user's routed fills, up to `maxFeeRate`. SoDEX type string:
+ *   ApproveBuilderFeeAction(uint64 chainID,uint64 nonce,uint64 accountID,
+ *                           uint64 builderID,uint64 maxFeeRate)
+ * maxFeeRate is tenths of a bp (0–2000; 0 clears the approval).
+ */
+export async function signApproveBuilderFeeAction(opts: {
+  provider?: Eip1193Provider;
+  account: `0x${string}`;
+  /** SoDEX chain id (286623 mainnet / 138565 testnet). */
+  sodexChainId: number;
+  accountID: number;
+  builderID: number;
+  maxFeeRate: number;
+  nonce?: bigint;
+}): Promise<{ apiSign: Hex; nonce: bigint; walletChainId: number }> {
+  const provider = resolveProvider({ provider: opts.provider });
+  const nonce = opts.nonce ?? BigInt(Date.now());
+
+  const walletChainHex = (await provider.request({
+    method: "eth_chainId",
+    params: [],
+  })) as string;
+  const walletChainId = parseInt(walletChainHex, 16);
+
+  const message = {
+    chainID: opts.sodexChainId.toString(),
+    nonce: nonce.toString(),
+    accountID: opts.accountID.toString(),
+    builderID: opts.builderID.toString(),
+    maxFeeRate: opts.maxFeeRate.toString(),
+  };
+
+  const typedData = {
+    domain: {
+      name: "universal",
+      version: "1",
+      chainId: walletChainId,
+      verifyingContract: "0x0000000000000000000000000000000000000000",
+    },
+    types: {
+      EIP712Domain: [
+        { name: "name", type: "string" },
+        { name: "version", type: "string" },
+        { name: "chainId", type: "uint256" },
+        { name: "verifyingContract", type: "address" },
+      ],
+      ApproveBuilderFeeAction: [
+        { name: "chainID", type: "uint64" },
+        { name: "nonce", type: "uint64" },
+        { name: "accountID", type: "uint64" },
+        { name: "builderID", type: "uint64" },
+        { name: "maxFeeRate", type: "uint64" },
+      ],
+    },
+    primaryType: "ApproveBuilderFeeAction",
+    message,
+  };
+
+  let signature: Hex;
+  try {
+    signature = (await provider.request({
+      method: "eth_signTypedData_v4",
+      params: [opts.account, JSON.stringify(typedData)],
+    })) as Hex;
+  } catch (err) {
+    const m = (err as Error).message ?? String(err);
+    throw new Error(
+      `[universal] approveBuilderFee eth_signTypedData_v4 failed: ${m.slice(0, 300)}`,
+    );
+  }
+
+  const apiSign = wrapUniversalSignature(signature, 0x02);
+  return { apiSign, nonce, walletChainId };
+}
+
+/**
  * Wrap a 65-byte ECDSA signature into SoDEX's universal envelope:
  *   - normalize v: legacy 27/28 → recovery-id 0/1
  *   - prepend type byte indicating the signing scheme

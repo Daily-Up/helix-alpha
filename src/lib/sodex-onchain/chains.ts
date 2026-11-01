@@ -80,6 +80,43 @@ export const sodexTestnet = defineChain({
   testnet: true,
 });
 
+// ── Builder code (fee sharing) ─────────────────────────────────────────────
+// SoDEX "builder codes" let the app that routes an order earn a fee on the
+// fill. A builder is just a funded SoDEX account — no registration — and its
+// numeric account id (`aid`) IS the builder id; it must hold ≥100 vUSDC in
+// BOTH the spot and perps engines to be eligible. Set Helix's builder id below
+// (via env, or edit the fallback) once that account is funded. `0` = disabled:
+// no `builder` field is added to orders, so behaviour is identical to before.
+//
+// Fee is in TENTHS OF A BASIS POINT (10 = 1 bp = 0.01%). The charged rate is
+// min(user-approved max, engine cap) — spot caps at 2000 (2%), perps at 200
+// (0.2%) — and is 0 until the user approves it, so routing is always safe.
+const BUILDER_ID: Record<SodexNetwork, number> = {
+  mainnet: Number(process.env.NEXT_PUBLIC_SODEX_BUILDER_ID_MAINNET ?? "0") || 0,
+  testnet: Number(process.env.NEXT_PUBLIC_SODEX_BUILDER_ID_TESTNET ?? "0") || 0,
+};
+const BUILDER_FEE_TENTHS_BP =
+  Number(process.env.NEXT_PUBLIC_SODEX_BUILDER_FEE ?? "10") || 10;
+
+export interface SodexBuilderCode {
+  /** Helix's SoDEX builder account id. */
+  id: number;
+  /** Requested fee rate, tenths of a basis point. */
+  fee: number;
+}
+
+/**
+ * Helix's builder code for a network, or null when unconfigured (feature off).
+ * Fee is clamped to the lower (perps) engine cap so one value is safe on both
+ * engines; spot would allow up to 2%, but we keep it uniform + modest.
+ */
+export function getBuilderCode(network: SodexNetwork): SodexBuilderCode | null {
+  const id = BUILDER_ID[network];
+  if (!id || id <= 0) return null;
+  const fee = Math.max(1, Math.min(200, Math.round(BUILDER_FEE_TENTHS_BP)));
+  return { id, fee };
+}
+
 /** The default network we open with — testnet keeps judges risk-free. */
 export const DEFAULT_NETWORK: SodexNetwork = "testnet";
 

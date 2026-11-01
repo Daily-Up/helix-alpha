@@ -12,9 +12,10 @@
  */
 
 import type { Hex } from "viem";
-import { SODEX_NETWORKS, type SodexNetwork } from "./chains";
+import { SODEX_NETWORKS, getBuilderCode, type SodexNetwork } from "./chains";
 import {
   signAddAPIKeyAction,
+  signApproveBuilderFeeAction,
   signWithApiKey,
   signWithMasterWallet,
   type Eip1193Provider,
@@ -378,6 +379,65 @@ export async function addApiKey(opts: {
   return { name };
 }
 
+/**
+ * Approve Helix's builder fee — signed ONCE by the master wallet (universal
+ * domain, same /exchange path as addAPIKey). After this, orders routed by
+ * Helix that carry its `builder` code share a fee up to `maxFeeRate` (tenths
+ * of a bp; capped per engine: spot ≤2000, perps ≤200). Posted to BOTH engines
+ * since each keeps its own approval registry; perps is best-effort.
+ *
+ * NOTE: the EIP-712 struct is from SoDEX's docs; the wire envelope (POST
+ * /exchange, type "approveBuilderFee") mirrors addAPIKey and is confirmed
+ * against the live gateway on first use.
+ */
+export async function approveBuilderFee(opts: {
+  network: SodexNetwork;
+  provider: Eip1193Provider;
+  account: `0x${string}`;
+  accountID: number;
+  builderID: number;
+  /** Tenths of a basis point, 0–2000. 0 clears the approval. */
+  maxFeeRate: number;
+}): Promise<void> {
+  const { network, provider, account, accountID, builderID, maxFeeRate } = opts;
+  const { chainId, spotEndpoint, perpsEndpoint } = SODEX_NETWORKS[network];
+
+  const { apiSign, nonce, walletChainId } = await signApproveBuilderFeeAction({
+    provider,
+    account,
+    sodexChainId: chainId,
+    accountID,
+    builderID,
+    maxFeeRate,
+  });
+
+  const body = {
+    type: "approveBuilderFee",
+    params: { accountID, builderID, maxFeeRate },
+    nonce: Number(nonce),
+    signature: apiSign,
+    signatureChainID: walletChainId,
+  };
+
+  const res = await fetch(`${spotEndpoint}/exchange`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  await handle<unknown>(res);
+
+  try {
+    const perpsRes = await fetch(`${perpsEndpoint}/exchange`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    await handle<unknown>(perpsRes);
+  } catch {
+    /* perps approval is best-effort */
+  }
+}
+
 /** DELETE /accounts/api-keys — signed by master wallet. */
 export async function revokeApiKey(opts: {
   network: SodexNetwork;
@@ -443,6 +503,15 @@ export async function placeOrderBatch(opts: {
   const { chainId, spotEndpoint, perpsEndpoint } = SODEX_NETWORKS[network];
   const endpoint = market === "futures" ? perpsEndpoint : spotEndpoint;
 
+  // Helix's builder code (fee sharing). Null = unconfigured → no `builder`
+  // field is added, so the signed payload is byte-identical to before. When
+  // set, `builder` MUST be the LAST field of the signed params (id before
+  // fee) or the payload hash — and the recovered signer — change.
+  const builder = getBuilderCode(network);
+  const builderField = builder
+    ? { id: builder.id, fee: builder.fee }
+    : null;
+
   // SPOT batches to /trade/orders/batch with the "batchNewOrder" action.
   // PERPS expose only /trade/orders and expect a SINGLE FLAT order
   // ("NewOrderParams") — a batch body fails with
@@ -479,17 +548,23 @@ export async function placeOrderBatch(opts: {
     if (first.triggerType != null) order.triggerType = first.triggerType;
     order.reduceOnly = first.reduceOnly ?? false;
     order.positionSide = first.positionSide ?? 1;
-    const params = {
+    const params: Record<string, unknown> = {
       accountID: batch.accountID,
       symbolID: first.symbolID,
       orders: [order],
     };
+    // Perps take a batch-level default builder; append LAST, after `orders`.
+    if (builderField) params.builder = builderField;
     action = { type: "newOrder", params };
     body = params;
     path = "/trade/orders";
   } else {
-    action = { type: "batchNewOrder", params: batch };
-    body = batch;
+    // Spot carries the builder at the batch level, after `orders`.
+    const batchBody = builderField
+      ? { ...batch, builder: builderField }
+      : batch;
+    action = { type: "batchNewOrder", params: batchBody };
+    body = batchBody;
     path = "/trade/orders/batch";
   }
 
