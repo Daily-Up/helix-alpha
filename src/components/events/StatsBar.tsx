@@ -26,6 +26,10 @@ export function StatsBar() {
 
   useEffect(() => {
     const fetchStats = async () => {
+      // Don't poll a hidden tab — /api/data/stats COUNT(*)s big tables, and
+      // judges leave tabs open in the background. Skipping hidden tabs is the
+      // single biggest cut to DB read volume (protects the free-tier quota).
+      if (typeof document !== "undefined" && document.hidden) return;
       try {
         const res = await fetch("/api/data/stats");
         if (res.ok) setStats(await res.json());
@@ -34,7 +38,8 @@ export function StatsBar() {
       }
     };
     fetchStats();
-    const t = setInterval(fetchStats, 30_000);
+    // 2-min cadence (was 30s) — these are slow-moving totals.
+    const t = setInterval(fetchStats, 120_000);
     return () => clearInterval(t);
   }, []);
 
