@@ -15,6 +15,7 @@ import { Num } from "@/components/ui/Num";
 import { Timestamp } from "@/components/ui/Timestamp";
 import { AssetLogo } from "@/components/ui/AssetLogo";
 import { cn } from "@/components/ui/cn";
+import { LiveTradeCta } from "@/components/sodex/LiveTradeCta";
 import { fmtAssetSymbol, fmtRelative, fmtUsd } from "@/lib/format";
 
 interface HomeData {
@@ -160,6 +161,10 @@ export function HomePage() {
           </div>
         ) : null}
       </header>
+
+      {/* Convert demo visitors into live (fee-generating) SoDEX users —
+          hidden automatically once the browser is connected. */}
+      <LiveTradeCta context="dashboard" />
 
       {loading && !data ? (
         <div className="text-sm text-fg-dim">Loading live snapshot…</div>

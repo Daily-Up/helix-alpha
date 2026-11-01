@@ -21,6 +21,7 @@ import { SignalContributionPanel } from "./SignalContributionPanel";
 import { V2PreviewPanel } from "./V2PreviewPanel";
 import { FrameworkSelector } from "./FrameworkSelector";
 import { ExecuteIndexButton } from "@/components/sodex/ExecuteIndexButton";
+import { LiveTradeCta } from "@/components/sodex/LiveTradeCta";
 import { isPublicMode } from "@/lib/public-mode";
 
 interface IndexResponse {
@@ -187,6 +188,11 @@ export function IndexDashboard() {
           />
         </div>
       </div>
+
+      {/* Prominent go-live CTA — turns index browsers into real SoDEX
+          traders (each fill streams Helix's builder fee). Auto-hides once
+          the browser is connected. */}
+      <LiveTradeCta context="index" />
 
       {lastRebalanceMsg ? (
         <div className="rounded border border-info/30 bg-info/10 px-3 py-1.5 text-xs text-info">
