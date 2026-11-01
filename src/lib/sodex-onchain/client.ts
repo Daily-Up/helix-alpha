@@ -380,15 +380,18 @@ export async function addApiKey(opts: {
 }
 
 /**
- * Approve Helix's builder fee — signed ONCE by the master wallet (universal
- * domain, same /exchange path as addAPIKey). After this, orders routed by
- * Helix that carry its `builder` code share a fee up to `maxFeeRate` (tenths
- * of a bp; capped per engine: spot ≤2000, perps ≤200). Posted to BOTH engines
- * since each keeps its own approval registry; perps is best-effort.
+ * Approve Helix's builder fee — signed ONCE by the master wallet. After this,
+ * orders routed by Helix that carry its `builder` code share a fee up to
+ * `maxFeeRate` (tenths of a bp; capped per engine: spot ≤2000, perps ≤200).
  *
- * NOTE: the EIP-712 struct is from SoDEX's docs; the wire envelope (POST
- * /exchange, type "approveBuilderFee") mirrors addAPIKey and is confirmed
- * against the live gateway on first use.
+ * Unlike addAPIKey (which Helix sends via the /exchange envelope), the builder
+ * approval uses the gateway's account-level REST shape — matched to the
+ * official SoDEX SDK:
+ *   POST {gatewayRoot}/api/v1/user/{address}/builders
+ *   body:    { accountID, builderID, maxFeeRate }
+ *   headers: X-API-Sign (0x02‖r‖s‖v), X-API-Nonce, X-API-Chain = SoDEX chain id
+ * The EIP-712 domain is signed with the SoDEX chain id (NOT the wallet's), so
+ * X-API-Chain and the signature agree. One call covers both engines.
  */
 export async function approveBuilderFee(opts: {
   network: SodexNetwork;
@@ -400,9 +403,12 @@ export async function approveBuilderFee(opts: {
   maxFeeRate: number;
 }): Promise<void> {
   const { network, provider, account, accountID, builderID, maxFeeRate } = opts;
-  const { chainId, spotEndpoint, perpsEndpoint } = SODEX_NETWORKS[network];
+  const { chainId, spotEndpoint } = SODEX_NETWORKS[network];
+  // Gateway root is the spot endpoint without the /api/v1/spot suffix; the
+  // account-level endpoints (…/user/…) hang off the root, not an engine.
+  const gatewayRoot = spotEndpoint.replace(/\/api\/v1\/spot\/?$/, "");
 
-  const { apiSign, nonce, walletChainId } = await signApproveBuilderFeeAction({
+  const { apiSign, nonce } = await signApproveBuilderFeeAction({
     provider,
     account,
     sodexChainId: chainId,
@@ -411,31 +417,21 @@ export async function approveBuilderFee(opts: {
     maxFeeRate,
   });
 
-  const body = {
-    type: "approveBuilderFee",
-    params: { accountID, builderID, maxFeeRate },
-    nonce: Number(nonce),
-    signature: apiSign,
-    signatureChainID: walletChainId,
-  };
-
-  const res = await fetch(`${spotEndpoint}/exchange`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  await handle<unknown>(res);
-
-  try {
-    const perpsRes = await fetch(`${perpsEndpoint}/exchange`, {
+  const res = await fetch(
+    `${gatewayRoot}/api/v1/user/${account}/builders`,
+    {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    await handle<unknown>(perpsRes);
-  } catch {
-    /* perps approval is best-effort */
-  }
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-API-Sign": apiSign,
+        "X-API-Nonce": nonce.toString(),
+        "X-API-Chain": chainId.toString(),
+      },
+      body: JSON.stringify({ accountID, builderID, maxFeeRate }),
+    },
+  );
+  await handle<unknown>(res);
 }
 
 /** DELETE /accounts/api-keys — signed by master wallet. */

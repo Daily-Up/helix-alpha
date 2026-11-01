@@ -251,15 +251,9 @@ export async function signApproveBuilderFeeAction(opts: {
   builderID: number;
   maxFeeRate: number;
   nonce?: bigint;
-}): Promise<{ apiSign: Hex; nonce: bigint; walletChainId: number }> {
+}): Promise<{ apiSign: Hex; nonce: bigint }> {
   const provider = resolveProvider({ provider: opts.provider });
   const nonce = opts.nonce ?? BigInt(Date.now());
-
-  const walletChainHex = (await provider.request({
-    method: "eth_chainId",
-    params: [],
-  })) as string;
-  const walletChainId = parseInt(walletChainHex, 16);
 
   const message = {
     chainID: opts.sodexChainId.toString(),
@@ -273,7 +267,12 @@ export async function signApproveBuilderFeeAction(opts: {
     domain: {
       name: "universal",
       version: "1",
-      chainId: walletChainId,
+      // The /user/{addr}/builders endpoint verifies against X-API-Chain =
+      // the SoDEX chain id, so the EIP-712 domain MUST use 286623/138565 —
+      // NOT the wallet's active chain (which is what addAPIKey's /exchange
+      // path uses). Signing this on Ethereum with the wallet's chain id
+      // recovers the wrong signer and the gateway rejects it.
+      chainId: opts.sodexChainId,
       verifyingContract: "0x0000000000000000000000000000000000000000",
     },
     types: {
@@ -309,7 +308,7 @@ export async function signApproveBuilderFeeAction(opts: {
   }
 
   const apiSign = wrapUniversalSignature(signature, 0x02);
-  return { apiSign, nonce, walletChainId };
+  return { apiSign, nonce };
 }
 
 /**
