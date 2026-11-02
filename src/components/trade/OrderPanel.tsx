@@ -631,14 +631,25 @@ export function OrderPanel({
           label={type === "market" ? "Expected Price" : "Limit Price"}
           value={pxFmt(entryPrice, digits)}
         />
-        <Row
-          label={`Fee · ${feeKind}`}
-          value={
-            sizeUsd > 0
-              ? `${money(totalFeeUsd, 4)} · ${(totalRate * 100).toFixed(3)}%`
-              : `${(totalRate * 100).toFixed(3)}%`
-          }
-          tone="muted"
+      </div>
+
+      {/* Fee breakdown — exchange (maker/taker) + builder, kept separate */}
+      <div className="flex flex-col gap-1 border-t border-line pt-3">
+        <FeeRow
+          label={`Exchange fee (${feeKind})`}
+          rate={exchangeRate}
+          usd={sizeUsd > 0 ? exchangeFeeUsd : null}
+        />
+        <FeeRow
+          label="Builder fee"
+          rate={builderRate}
+          usd={sizeUsd > 0 ? builderFeeUsd : null}
+        />
+        <FeeRow
+          label="Total"
+          rate={totalRate}
+          usd={sizeUsd > 0 ? totalFeeUsd : null}
+          strong
         />
       </div>
 
@@ -738,20 +749,13 @@ function ConfirmStep(p: {
           />
         ) : null}
         <div className="my-1 border-t border-line" />
-        <CRow
+        <FeeRow
           label={`Exchange fee (${p.feeKind})`}
-          value={`${money(p.exchangeFeeUsd, 4)} · ${(p.exchangeRate * 100).toFixed(3)}%`}
-          tone="muted"
+          rate={p.exchangeRate}
+          usd={p.exchangeFeeUsd}
         />
-        <CRow
-          label="Builder fee"
-          value={`${money(p.builderFeeUsd, 4)} · ${(p.builderRate * 100).toFixed(3)}%`}
-          tone="muted"
-        />
-        <CRow
-          label="Total fee"
-          value={`${money(p.totalFeeUsd, 4)} · ${(p.totalRate * 100).toFixed(3)}%`}
-        />
+        <FeeRow label="Builder fee" rate={p.builderRate} usd={p.builderFeeUsd} />
+        <FeeRow label="Total" rate={p.totalRate} usd={p.totalFeeUsd} strong />
       </div>
       <p className="mt-2 text-[10px]" style={{ color: SHORT }}>
         ⚠ Real funds on SoDEX Mainnet.
@@ -776,6 +780,30 @@ function ConfirmStep(p: {
           Cancel
         </button>
       </div>
+    </div>
+  );
+}
+
+function FeeRow({
+  label,
+  rate,
+  usd,
+  strong,
+}: {
+  label: string;
+  rate: number;
+  usd: number | null;
+  strong?: boolean;
+}) {
+  const numCls = cn(
+    "text-right font-[var(--font-jetbrains-mono)] tabular-nums",
+    strong ? "text-fg" : "text-fg-muted",
+  );
+  return (
+    <div className="grid grid-cols-[1fr_52px_72px] items-center gap-2 text-[11.5px]">
+      <span className={strong ? "text-fg-muted" : "text-fg-dim"}>{label}</span>
+      <span className={numCls}>{(rate * 100).toFixed(3)}%</span>
+      <span className={numCls}>{usd != null ? money(usd, 4) : "—"}</span>
     </div>
   );
 }
