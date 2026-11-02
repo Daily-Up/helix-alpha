@@ -31,6 +31,7 @@ import type {
   SodexApiKeyRow,
   SodexCancelItem,
   SodexCancelOrderParams,
+  SodexFundingPayment,
   SodexNewOrderBatch,
   SodexOpenOrder,
   SodexRevokeApiKeyParams,
@@ -767,4 +768,25 @@ export async function getOpenOrders(
   const res = await fetch(`${endpoint}/accounts/${address}/orders`);
   const data = await handle<{ orders?: SodexOpenOrder[] }>(res);
   return data?.orders ?? [];
+}
+
+/**
+ * GET /accounts/{address}/fundings — realized funding payments for the account
+ * (most-recent first). Read-only (no signature). `limit` (default 50 upstream)
+ * and `symbol` are supported; the response `data` is the array directly.
+ */
+export async function getAccountFundings(
+  network: SodexNetwork,
+  address: `0x${string}`,
+  opts: { symbol?: string; limit?: number } = {},
+  market: SodexMarket = "futures",
+): Promise<SodexFundingPayment[]> {
+  const { spotEndpoint, perpsEndpoint } = SODEX_NETWORKS[network];
+  const endpoint = market === "futures" ? perpsEndpoint : spotEndpoint;
+  const qs = new URLSearchParams();
+  if (opts.symbol) qs.set("symbol", opts.symbol);
+  qs.set("limit", String(opts.limit ?? 100));
+  const res = await fetch(`${endpoint}/accounts/${address}/fundings?${qs}`);
+  const data = await handle<SodexFundingPayment[]>(res);
+  return data ?? [];
 }

@@ -18,6 +18,7 @@ import {
   SodexOrderType,
   type SodexPerpsAccountState,
   type SodexOpenOrder,
+  type SodexFundingPayment,
 } from "@/lib/sodex-onchain/types";
 
 export const BOTTOM_TABS = [
@@ -76,6 +77,15 @@ const fundingFmt = (v: number) => {
 // next funding time may arrive in seconds or ms; normalise to ms.
 const nextFundingMs = (next: number) =>
   next > 0 ? (next < 1e12 ? next * 1000 : next) : 0;
+// Compact local date + time for a funding settlement, e.g. "Nov 2, 21:00".
+const fmtDateTime = (t: number) =>
+  new Date(t < 1e12 ? t * 1000 : t).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
 // Display names use the -PERP convention everywhere, matching the header.
 const perpName = (s: string) => s.replace(/-USDC?$/i, "-PERP");
 const baseOf = (s: string) => s.split("-")[0] || s;
@@ -121,6 +131,7 @@ export function BottomPanel({
   markBySymbol,
   fundingBySymbol,
   fundingInterval,
+  accountFundings,
   now,
   selectedSymbol,
   tpsl,
@@ -146,6 +157,8 @@ export function BottomPanel({
   fundingBySymbol: Record<string, FundingInfo>;
   /** Funding interval in seconds, for the annualized rate. */
   fundingInterval: number;
+  /** Realized funding payments for the account (Funding tab, most-recent first). */
+  accountFundings: SodexFundingPayment[];
   /** Date.now() ms, ticking each second — for the funding countdown. */
   now: number;
   /** Currently-selected market symbol, for the "Current market only" filter. */
@@ -254,17 +267,14 @@ export function BottomPanel({
           // TODO: wire to /api/sodex/my-trades (Helix's executed-trade log).
           <Empty>Trade history coming soon.</Empty>
         ) : tab === "Funding" ? (
-          positions.length === 0 ? (
-            <Empty>No open positions.</Empty>
-          ) : (
-            <FundingView
-              positions={positions}
-              markBySymbol={markBySymbol}
-              fundingBySymbol={fundingBySymbol}
-              fundingInterval={fundingInterval}
-              now={now}
-            />
-          )
+          <FundingView
+            positions={positions}
+            markBySymbol={markBySymbol}
+            fundingBySymbol={fundingBySymbol}
+            fundingInterval={fundingInterval}
+            fundings={accountFundings}
+            now={now}
+          />
         ) : (
           // Order History — TODO: no SoDEX filled/cancelled/rejected history
           // endpoint yet; fall back to an empty state.
@@ -651,105 +661,190 @@ function FundingCell({
 
 const FUND_COLS =
   "minmax(96px,1.4fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1.1fr) minmax(0,0.9fr)";
+const FHIST_COLS =
+  "minmax(104px,1.2fr) minmax(72px,1fr) minmax(0,0.7fr) minmax(0,1fr)";
 
-/** Funding tab — per-position forward estimate: current rate, annualized rate,
- *  est. next funding, and the countdown. No realized history yet (see TODO). */
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="border-b border-line bg-surface-2/30 px-4 py-1 text-[9px] font-medium uppercase tracking-wider text-fg-dim">
+      {children}
+    </div>
+  );
+}
+
+/** Funding tab — "Upcoming" per-position forward estimate (rate, annualized,
+ *  est. next, countdown) over realized funding history pulled from the account
+ *  (/accounts/{addr}/fundings), with a net total. */
 function FundingView({
   positions,
   markBySymbol,
   fundingBySymbol,
   fundingInterval,
+  fundings,
   now,
 }: {
   positions: Position[];
   markBySymbol: Record<string, number>;
   fundingBySymbol: Record<string, FundingInfo>;
   fundingInterval: number;
+  fundings: SodexFundingPayment[];
   now: number;
 }) {
   const periodsPerYear =
     (365 * 24 * 3600) / (fundingInterval > 0 ? fundingInterval : 3600);
+  const net = fundings.reduce((s, f) => s + (Number(f.fundingFee) || 0), 0);
+  const hasPositions = positions.length > 0;
+  const hasHistory = fundings.length > 0;
+  if (!hasPositions && !hasHistory) {
+    return <Empty>No funding yet — open a position to start accruing funding.</Empty>;
+  }
   return (
     <div className="text-[11.5px]">
-      <div
-        className="grid gap-2 border-b border-line px-4 py-1.5 text-[9px] uppercase tracking-wider text-fg-dim"
-        style={{ gridTemplateColumns: FUND_COLS }}
-      >
-        <span>Market</span>
-        <span className="text-right">Funding Rate</span>
-        <span className="text-right">Annualized</span>
-        <span className="text-right">Est. Next Funding</span>
-        <span className="text-right">Next In</span>
-      </div>
-      {positions.map((p) => {
-        const sz = Number(p.sz);
-        const isLong = sz >= 0;
-        const abs = Math.abs(sz);
-        const mark = markBySymbol[p.s.toUpperCase()] ?? Number(p.ep);
-        const notional = abs * mark;
-        const f = fundingBySymbol[p.s.toUpperCase()];
-        const ratePct = f ? f.rate * 100 : null;
-        const annual = ratePct != null ? ratePct * periodsPerYear : null;
-        const est = f ? fundingEst(notional, isLong, f.rate) : null;
-        const nextMs = f ? nextFundingMs(f.next) : 0;
-        const cd = nextMs > 0 ? fmtCountdown(nextMs - now) : "—";
-        return (
+      {/* ── Upcoming (estimated) — only while holding positions ── */}
+      {hasPositions ? (
+        <>
+          <SectionLabel>Upcoming · estimated next funding</SectionLabel>
           <div
-            key={`${p.i}-${p.s}`}
-            className="grid items-center gap-2 px-4 py-1.5 font-[var(--font-jetbrains-mono)] tabular-nums hover:bg-surface-2/40"
+            className="grid gap-2 border-b border-line px-4 py-1.5 text-[9px] uppercase tracking-wider text-fg-dim"
             style={{ gridTemplateColumns: FUND_COLS }}
           >
-            <span className="flex min-w-0 items-center gap-2">
-              <AssetLogo symbol={p.s} size={16} />
-              <span className="truncate text-fg">{perpName(p.s)}</span>
-              <span
-                className={cn(
-                  "rounded px-1 text-[8.5px] font-semibold uppercase",
-                  isLong ? "bg-positive/15 text-positive" : "bg-negative/15 text-negative",
-                )}
-              >
-                {isLong ? "Long" : "Short"}
-              </span>
-            </span>
-            <span
-              className={cn(
-                "text-right",
-                ratePct == null ? "text-fg-dim" : ratePct >= 0 ? "text-positive" : "text-negative",
-              )}
-            >
-              {ratePct == null ? "—" : `${ratePct >= 0 ? "+" : ""}${ratePct.toFixed(4)}%`}
-            </span>
-            <span
-              className={cn(
-                "text-right",
-                annual == null ? "text-fg-dim" : annual >= 0 ? "text-positive" : "text-negative",
-              )}
-            >
-              {annual == null ? "—" : `${annual >= 0 ? "+" : ""}${annual.toFixed(2)}%`}
-            </span>
-            <span
-              className={cn(
-                "text-right",
-                est == null
-                  ? "text-fg-dim"
-                  : est > 0
-                    ? "text-positive"
-                    : est < 0
-                      ? "text-negative"
-                      : "text-fg-muted",
-              )}
-            >
-              {est == null ? "—" : fundingFmt(est)}
-            </span>
-            <span className="text-right text-fg-dim">{cd}</span>
+            <span>Market</span>
+            <span className="text-right">Funding Rate</span>
+            <span className="text-right">Annualized</span>
+            <span className="text-right">Est. Next Funding</span>
+            <span className="text-right">Next In</span>
           </div>
-        );
-      })}
-      {/* TODO(sodex): SoDEX exposes no funding-PAYMENT history endpoint yet.
-          Ask SoDEX for GET /accounts/{address}/funding (realized funding per
-          position/epoch); when it ships, render the history here. For now this
-          tab shows only the forward per-position estimate. */}
-      <p className="px-4 py-3 text-[11px] text-fg-dim">Funding history coming soon.</p>
+          {positions.map((p) => {
+            const sz = Number(p.sz);
+            const isLong = sz >= 0;
+            const abs = Math.abs(sz);
+            const mark = markBySymbol[p.s.toUpperCase()] ?? Number(p.ep);
+            const notional = abs * mark;
+            const f = fundingBySymbol[p.s.toUpperCase()];
+            const ratePct = f ? f.rate * 100 : null;
+            const annual = ratePct != null ? ratePct * periodsPerYear : null;
+            const est = f ? fundingEst(notional, isLong, f.rate) : null;
+            const nextMs = f ? nextFundingMs(f.next) : 0;
+            const cd = nextMs > 0 ? fmtCountdown(nextMs - now) : "—";
+            return (
+              <div
+                key={`${p.i}-${p.s}`}
+                className="grid items-center gap-2 px-4 py-1.5 font-[var(--font-jetbrains-mono)] tabular-nums hover:bg-surface-2/40"
+                style={{ gridTemplateColumns: FUND_COLS }}
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <AssetLogo symbol={p.s} size={16} />
+                  <span className="truncate text-fg">{perpName(p.s)}</span>
+                  <span
+                    className={cn(
+                      "rounded px-1 text-[8.5px] font-semibold uppercase",
+                      isLong ? "bg-positive/15 text-positive" : "bg-negative/15 text-negative",
+                    )}
+                  >
+                    {isLong ? "Long" : "Short"}
+                  </span>
+                </span>
+                <span
+                  className={cn(
+                    "text-right",
+                    ratePct == null ? "text-fg-dim" : ratePct >= 0 ? "text-positive" : "text-negative",
+                  )}
+                >
+                  {ratePct == null ? "—" : `${ratePct >= 0 ? "+" : ""}${ratePct.toFixed(4)}%`}
+                </span>
+                <span
+                  className={cn(
+                    "text-right",
+                    annual == null ? "text-fg-dim" : annual >= 0 ? "text-positive" : "text-negative",
+                  )}
+                >
+                  {annual == null ? "—" : `${annual >= 0 ? "+" : ""}${annual.toFixed(2)}%`}
+                </span>
+                <span
+                  className={cn(
+                    "text-right",
+                    est == null
+                      ? "text-fg-dim"
+                      : est > 0
+                        ? "text-positive"
+                        : est < 0
+                          ? "text-negative"
+                          : "text-fg-muted",
+                  )}
+                >
+                  {est == null ? "—" : fundingFmt(est)}
+                </span>
+                <span className="text-right text-fg-dim">{cd}</span>
+              </div>
+            );
+          })}
+        </>
+      ) : null}
+
+      {/* ── Realized funding history (from /accounts/{addr}/fundings) ── */}
+      <div className="flex items-center justify-between border-b border-t border-line bg-surface-2/30 px-4 py-1">
+        <span className="text-[9px] font-medium uppercase tracking-wider text-fg-dim">
+          History{hasHistory ? ` · last ${fundings.length}` : ""}
+        </span>
+        {hasHistory ? (
+          <span className="text-[10px] text-fg-dim">
+            Net{" "}
+            <span
+              className={cn(
+                "font-[var(--font-jetbrains-mono)] tabular-nums",
+                net >= 0 ? "text-positive" : "text-negative",
+              )}
+            >
+              {fundingFmt(net)}
+            </span>
+          </span>
+        ) : null}
+      </div>
+      {hasHistory ? (
+        <>
+          <div
+            className="grid gap-2 border-b border-line px-4 py-1 text-[9px] uppercase tracking-wider text-fg-dim"
+            style={{ gridTemplateColumns: FHIST_COLS }}
+          >
+            <span>Time</span>
+            <span>Market</span>
+            <span>Side</span>
+            <span className="text-right">Payment</span>
+          </div>
+          {fundings.map((f, i) => {
+            const amt = Number(f.fundingFee) || 0;
+            const isLong = (f.positionSide ?? "").toUpperCase() === "LONG";
+            return (
+              <div
+                key={`${f.positionID}-${f.timestamp}-${i}`}
+                className="grid items-center gap-2 px-4 py-1.5 font-[var(--font-jetbrains-mono)] tabular-nums hover:bg-surface-2/40"
+                style={{ gridTemplateColumns: FHIST_COLS }}
+              >
+                <span className="text-fg-dim">{fmtDateTime(f.timestamp)}</span>
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <AssetLogo symbol={f.symbol} size={15} />
+                  <span className="truncate text-fg">{baseOf(f.symbol)}</span>
+                </span>
+                <span className={isLong ? "text-positive" : "text-negative"}>
+                  {isLong ? "Long" : "Short"}
+                </span>
+                <span
+                  className={cn(
+                    "text-right",
+                    amt > 0 ? "text-positive" : amt < 0 ? "text-negative" : "text-fg-muted",
+                  )}
+                >
+                  {fundingFmt(amt)}
+                </span>
+              </div>
+            );
+          })}
+        </>
+      ) : (
+        <p className="px-4 py-3 text-[11px] text-fg-dim">
+          No funding payments yet — they appear here each time funding settles.
+        </p>
+      )}
     </div>
   );
 }

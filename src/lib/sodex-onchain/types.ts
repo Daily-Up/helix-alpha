@@ -182,6 +182,25 @@ export interface SodexOpenOrder {
 }
 
 /**
+ * A realized funding payment from GET /accounts/{address}/fundings.
+ * `fundingFee` is the signed amount in `feeCoin` (vUSDC): positive = the
+ * account RECEIVED funding, negative = the account PAID. Most-recent first.
+ */
+export interface SodexFundingPayment {
+  /** Full symbol, e.g. "BTC-USD". */
+  symbol: string;
+  positionID: number;
+  /** "LONG" | "SHORT". */
+  positionSide: string;
+  /** Signed decimal string — credit (+) / debit (−) in feeCoin. */
+  fundingFee: string;
+  /** Settlement coin, e.g. "vUSDC". */
+  feeCoin: string;
+  /** Settlement time, ms. */
+  timestamp: number;
+}
+
+/**
  * Inner params for an addAPIKey action. Type is the int32 enum
  * (EVM = 1). ExpiresAt is unix-seconds; 0 means never.
  */

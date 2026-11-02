@@ -26,6 +26,7 @@ import { useTradeMode } from "@/lib/sodex-onchain/useTradeMode";
 import {
   getPerpsAccountState,
   getOpenOrders,
+  getAccountFundings,
   cancelOrders,
 } from "@/lib/sodex-onchain/client";
 import { readLocalKey } from "@/lib/sodex-onchain/local-keys";
@@ -38,6 +39,7 @@ import { useAccount } from "wagmi";
 import type {
   SodexPerpsAccountState,
   SodexOpenOrder,
+  SodexFundingPayment,
 } from "@/lib/sodex-onchain/types";
 
 export interface TerminalAsset {
@@ -132,6 +134,11 @@ export function TradeTerminal({
   const [limitFill, setLimitFill] = useState<number | null>(null);
   const [account, setAccount] = useState<SodexPerpsAccountState | null>(null);
   const [openOrders, setOpenOrders] = useState<SodexOpenOrder[]>([]);
+  // Realized funding payments for the Funding tab (most-recent first). Fetched
+  // lazily — only while that tab is open — and refreshed on a slow interval.
+  const [accountFundings, setAccountFundings] = useState<SodexFundingPayment[]>(
+    [],
+  );
   // Live mark per symbol across ALL open positions (not just the selected
   // market), from the all-tickers poll below.
   const [allMarks, setAllMarks] = useState<Record<string, number>>({});
@@ -354,6 +361,31 @@ export function TradeTerminal({
     const t = setInterval(refreshOpenOrders, 5000);
     return () => clearInterval(t);
   }, [refreshOpenOrders]);
+
+  // Realized funding history — fetched only while the Funding tab is open
+  // (funding settles hourly, so a slow 60s refresh is plenty).
+  useEffect(() => {
+    if (bottomTab !== "Funding" || !tm.ready || !tm.address) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const rows = await getAccountFundings(
+          "mainnet",
+          tm.address as `0x${string}`,
+          { limit: 100 },
+        );
+        if (!cancelled) setAccountFundings(rows);
+      } catch {
+        /* keep last good */
+      }
+    };
+    load();
+    const t = setInterval(load, 60000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [bottomTab, tm.ready, tm.address]);
 
   // Cancel orders (per-row or cancel-all), then refresh. Signs with the local
   // API key. Orders can span multiple markets (account-wide fetch), so each
@@ -981,6 +1013,7 @@ export function TradeTerminal({
               markBySymbol={markBySymbol}
               fundingBySymbol={fundingBySymbol}
               fundingInterval={fundingInterval}
+              accountFundings={accountFundings}
               now={now}
               selectedSymbol={sodexSymbol}
               tpsl={tpslCtx}
