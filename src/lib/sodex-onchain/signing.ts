@@ -381,8 +381,11 @@ export async function signWithMasterWallet(opts: {
 
 /**
  * Sign with an API key (raw secp256k1 private key held in browser
- * localStorage). Used for all trading actions: newOrder, cancelOrder,
- * transferAsset, etc.
+ * localStorage). Used for trading actions like newOrder and cancelOrder.
+ *
+ * API keys cannot withdraw externally (confirmed by SoDEX). Internal
+ * spot↔perps transferAsset via API key: unverified. Helix never calls it
+ * with an agent key.
  */
 export async function signWithApiKey(opts: {
   privateKey: Hex;
