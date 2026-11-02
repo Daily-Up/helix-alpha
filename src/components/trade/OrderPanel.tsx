@@ -467,7 +467,7 @@ export function OrderPanel({
               onChange={(e) =>
                 setLimitPxInput(e.target.value.replace(/[^0-9.]/g, ""))
               }
-              className="w-full bg-transparent py-2 text-sm text-fg outline-none focus-visible:outline-none tabular-nums"
+              className="w-full bg-transparent py-2 text-sm text-fg outline-none focus-visible:[outline:none] tabular-nums"
               placeholder={markPrice != null ? pxFmt(markPrice, digits) : "0"}
             />
             <span className="text-[11px] text-fg-dim">USDC</span>
@@ -518,7 +518,7 @@ export function OrderPanel({
             inputMode="decimal"
             value={sizeInput}
             onChange={(e) => setSizeInput(e.target.value.replace(/[^0-9.]/g, ""))}
-            className="w-full bg-transparent py-2 text-sm text-fg outline-none focus-visible:outline-none tabular-nums"
+            className="w-full bg-transparent py-2 text-sm text-fg outline-none focus-visible:[outline:none] tabular-nums"
             placeholder="0"
           />
           <button
@@ -733,7 +733,7 @@ function BracketInput({
         value={value}
         onChange={(e) => onChange(e.target.value.replace(/[^0-9.]/g, ""))}
         placeholder="0"
-        className="rounded border border-line bg-surface-2 px-2 py-1 text-xs tabular-nums outline-none focus:border-[#3b82f6] focus-visible:outline-none"
+        className="rounded border border-line bg-surface-2 px-2 py-1 text-xs tabular-nums outline-none focus:border-[#3b82f6] focus-visible:[outline:none]"
       />
       <span className="text-[9px] tabular-nums" style={{ color }}>
         {price != null ? pxFmt(price, digits) : "—"}
