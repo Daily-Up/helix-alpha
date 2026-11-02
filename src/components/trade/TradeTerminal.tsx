@@ -48,6 +48,18 @@ export interface TerminalAsset {
   market: "spot" | "perp" | null;
 }
 
+/** Static per-symbol metadata from /markets/symbols (tick/step/fee/ID), keyed
+ *  by sodex symbol — lets TP/SL work for any open position, not just the
+ *  selected market. */
+export interface SymbolMeta {
+  symbolID: number;
+  tickSize: number;
+  stepSize: number;
+  pricePrecision: number;
+  quantityPrecision: number;
+  takerFee: number;
+}
+
 interface Ticker {
   lastPx: string;
   quoteVolume: string;
@@ -91,7 +103,13 @@ const clampBottom = (h: number) => {
   return Math.max(MIN_BOTTOM, Math.min(h, vh * 0.5));
 };
 
-export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
+export function TradeTerminal({
+  assets,
+  symbolMeta = {},
+}: {
+  assets: TerminalAsset[];
+  symbolMeta?: Record<string, SymbolMeta>;
+}) {
   const tm = useTradeMode("mainnet");
   const [assetId, setAssetId] = useState<string>(
     () => assets.find((a) => a.id === "tok-btc")?.id ?? assets[0]?.id ?? "",
@@ -496,14 +514,19 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
       }
       const key = readLocalKey("mainnet");
       const aid = account?.aid;
-      const sid = rules?.id;
-      if (!key || aid == null || sid == null) {
-        return { ok: false, error: "Connect a SoDEX key first." };
+      const meta = symbolMeta[(pos.s ?? "").toUpperCase()];
+      if (!key || aid == null || !meta) {
+        return {
+          ok: false,
+          error: meta
+            ? "Connect a SoDEX key first."
+            : "No market metadata for this symbol.",
+        };
       }
       const isLong = Number(pos.sz) >= 0;
-      const qty = Math.abs(Number(pos.sz)).toFixed(rules?.quantityPrecision ?? 5);
-      const pxDp = rules?.pricePrecision ?? 2;
-      const tick = rules && rules.tickSize > 0 ? rules.tickSize : 0;
+      const qty = Math.abs(Number(pos.sz)).toFixed(meta.quantityPrecision);
+      const pxDp = meta.pricePrecision;
+      const tick = meta.tickSize > 0 ? meta.tickSize : 0;
       const roundTick = (p: number) =>
         tick > 0 ? (Math.round(p / tick) * tick).toFixed(pxDp) : p.toFixed(pxDp);
       // Place NEW, then cancel OLD on success — never cancel first.
@@ -519,7 +542,7 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
             apiKeyName: key.name || undefined,
             privateKey: key.privateKey,
             accountID: aid,
-            symbolID: sid,
+            symbolID: meta.symbolID,
             positionIsLong: isLong,
             quantity: qty,
             stopPrice: roundTick(trigger),
@@ -535,7 +558,7 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
               apiKeyName: key.name || undefined,
               privateKey: key.privateKey,
               accountID: aid,
-              cancels: [{ symbolID: sid, orderID: oldId }],
+              cancels: [{ symbolID: meta.symbolID, orderID: oldId }],
             });
           } catch {
             /* new order is live; a stale old order is non-fatal */
@@ -557,27 +580,53 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
         setTpslBusy(false);
       }
     },
-    [account?.aid, rules, refreshOpenOrders],
+    [account?.aid, symbolMeta, refreshOpenOrders],
+  );
+
+  // Cancel one resting trigger order (the per-row "Remove" link). Cancellation
+  // is a separate, working path — not gated by the placement flag.
+  const onRemoveTrigger = useCallback(
+    async (
+      pos: SodexPerpsAccountState["P"][number],
+      orderID: number,
+    ): Promise<{ ok: boolean; error?: string }> => {
+      const key = readLocalKey("mainnet");
+      const aid = account?.aid;
+      const meta = symbolMeta[(pos.s ?? "").toUpperCase()];
+      if (!key || aid == null || !meta) {
+        return { ok: false, error: "Connect a SoDEX key first." };
+      }
+      setTpslBusy(true);
+      try {
+        await cancelOrders({
+          network: "mainnet",
+          apiKeyName: key.name || undefined,
+          privateKey: key.privateKey,
+          accountID: aid,
+          cancels: [{ symbolID: meta.symbolID, orderID }],
+        });
+        await refreshOpenOrders();
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: (e as Error).message };
+      } finally {
+        setTpslBusy(false);
+      }
+    },
+    [account?.aid, symbolMeta, refreshOpenOrders],
   );
 
   const tpslCtx = useMemo(
     () => ({
-      rules: rules
-        ? {
-            symbolID: rules.id,
-            tickSize: rules.tickSize,
-            stepSize: rules.stepSize,
-            pricePrecision: rules.pricePrecision,
-            quantityPrecision: rules.quantityPrecision,
-            takerFee: rules.takerFee,
-          }
-        : null,
+      meta: symbolMeta,
+      markBySymbol,
       builderRate,
       busy: tpslBusy,
       placementEnabled: TPSL_PLACEMENT_ENABLED,
       onSet: onSetTpSl,
+      onRemove: onRemoveTrigger,
     }),
-    [rules, builderRate, tpslBusy, onSetTpSl],
+    [symbolMeta, markBySymbol, builderRate, tpslBusy, onSetTpSl, onRemoveTrigger],
   );
   const oracle = num(ticker?.indexPrice);
   const lastPrice = num(ticker?.lastPx);

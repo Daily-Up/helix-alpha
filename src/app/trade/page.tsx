@@ -1,5 +1,9 @@
 import { Shell } from "@/components/layout/Shell";
-import { TradeTerminal, type TerminalAsset } from "@/components/trade/TradeTerminal";
+import {
+  TradeTerminal,
+  type TerminalAsset,
+  type SymbolMeta,
+} from "@/components/trade/TradeTerminal";
 import { Assets } from "@/lib/db";
 import { Market } from "@/lib/sodex";
 
@@ -91,9 +95,25 @@ export default async function TradePage() {
         x.symbol.localeCompare(y.symbol),
     );
 
+  // Per-symbol metadata (tick/step/precision/fee/ID) so TP/SL works for any
+  // open position's market, not just the selected one.
+  const symbolMeta: Record<string, SymbolMeta> = {};
+  for (const s of perpSymbols) {
+    const name = (s.name ?? "").toUpperCase();
+    if (!name) continue;
+    symbolMeta[name] = {
+      symbolID: s.id,
+      tickSize: Number(s.tickSize) || 0,
+      stepSize: Number(s.stepSize) || 0,
+      pricePrecision: s.pricePrecision ?? 2,
+      quantityPrecision: s.quantityPrecision ?? 5,
+      takerFee: Number(s.takerFee) || 0.0004,
+    };
+  }
+
   return (
     <Shell bleed>
-      <TradeTerminal assets={assets} />
+      <TradeTerminal assets={assets} symbolMeta={symbolMeta} />
     </Shell>
   );
 }
