@@ -96,7 +96,7 @@ export function AssetPicker({
       {open ? (
         <div className="absolute left-0 top-full z-50 mt-2 w-[288px] overflow-hidden rounded-lg border border-line bg-surface shadow-2xl">
           <div className="border-b border-line p-2">
-            <div className="flex items-center gap-2 rounded-md border border-line bg-surface-2 px-2.5">
+            <div className="flex items-center gap-2 rounded-md border border-line bg-surface-2 px-2.5 focus-within:border-[#3a4452]">
               <span className="text-fg-dim">⌕</span>
               <input
                 ref={inputRef}

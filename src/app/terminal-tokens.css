@@ -34,10 +34,21 @@
   --color-negative: #f6465d;
 }
 
-/* Trade controls never use the brand (orange) focus outline — the global
-   :focus-visible amber is overridden with a neutral blue inside the terminal. */
-.trade-terminal :focus-visible {
-  outline-color: #3b82f6;
+/* Focus, terminal-wide, fixed at the source.
+
+   Trade controls never draw a focus box of their own — no browser outline, no
+   Tailwind ring (box-shadow) or ring-offset, on either :focus or :focus-visible.
+   This kills the global amber :focus-visible outline (globals.css) inside the
+   terminal for EVERY input / select / textarea / button / link, so no stray
+   blue or orange box can appear on the symbol search, limit price, size,
+   TP/SL, grouping select, leverage, Mid/Last, % chips or book/positions
+   controls. Focus is shown instead by the field WRAPPER's 1px border turning
+   neutral (#3a4452) via focus-within, which keeps keyboard focus visible on
+   the text fields. Scoped to .trade-terminal, so focus elsewhere is untouched. */
+.trade-terminal :is(input, select, textarea, button, a, [tabindex]):focus,
+.trade-terminal :is(input, select, textarea, button, a, [tabindex]):focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 /* Honour reduced-motion: no price flashes / transitions inside the terminal. */
