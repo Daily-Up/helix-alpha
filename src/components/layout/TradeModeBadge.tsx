@@ -34,6 +34,7 @@ export function TradeModeBadge() {
     : "paper";
 
   return (
+    <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
     <Link
       href="/settings/connect-sodex"
       title={
@@ -82,5 +83,25 @@ export function TradeModeBadge() {
         }
       `}</style>
     </Link>
+      {isLive ? (
+        <span
+          title="Trading against SoDEX mainnet — real funds."
+          style={{
+            fontFamily: "var(--font-jetbrains-mono)",
+            fontSize: 9.5,
+            letterSpacing: "0.14em",
+            textTransform: "uppercase",
+            color: "#cca15a",
+            border: "1px solid #cca15a40",
+            background: "#cca15a10",
+            borderRadius: 999,
+            padding: "3px 7px",
+            whiteSpace: "nowrap",
+          }}
+        >
+          Mainnet
+        </span>
+      ) : null}
+    </div>
   );
 }
