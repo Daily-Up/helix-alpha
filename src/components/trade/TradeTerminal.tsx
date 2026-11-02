@@ -580,8 +580,9 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
         <div className="flex min-w-0 flex-col lg:min-h-0 lg:flex-1">
           {/* chart + book */}
           <div className="grid grid-cols-1 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_210px] lg:overflow-hidden">
-            {/* Chart cell (relative so the AI-Setup output can float over it). */}
-            <div className="relative h-[440px] border-line px-3 py-2 lg:h-auto lg:min-h-0 lg:overflow-hidden lg:border-r">
+            {/* Chart cell (relative so the AI-Setup output can float over it).
+                min-w-0 lets it shrink so the terminal always fits the viewport. */}
+            <div className="relative h-[440px] border-line px-3 py-2 lg:h-auto lg:min-h-0 lg:min-w-0 lg:overflow-hidden lg:border-r">
               {sodexSymbol ? (
                 <PriceChart
                   symbol={sodexSymbol}

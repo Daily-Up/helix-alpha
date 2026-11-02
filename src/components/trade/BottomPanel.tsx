@@ -99,7 +99,7 @@ export function BottomPanel({
         ))}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-auto">
         {!ready ? (
           <Empty cta>
             Connect a SoDEX wallet to view your {tab.toLowerCase()}.
