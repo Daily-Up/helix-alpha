@@ -1,5 +1,6 @@
 import { fmtRelative, truncate } from "@/lib/format";
 import { Num } from "@/components/ui/Num";
+import { safeHref } from "@/lib/safe-url";
 
 export interface EventCardData {
   id: string;
@@ -247,7 +248,7 @@ export function EventCard({ ev }: { ev: EventCardData }) {
           }}
         >
           <a
-            href={ev.source_link}
+            href={safeHref(ev.source_link)}
             target="_blank"
             rel="noopener noreferrer"
             className="signal-headline-link"

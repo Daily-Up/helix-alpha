@@ -24,6 +24,7 @@ import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Num } from "@/components/ui/Num";
 import { Timestamp } from "@/components/ui/Timestamp";
+import { safeHref } from "@/lib/safe-url";
 import { fmtRelative, fmtSodexSymbol } from "@/lib/format";
 import { stripTechnicalScoring } from "@/lib/format/reasoning";
 import { cn } from "@/components/ui/cn";
@@ -426,7 +427,7 @@ export function SignalAuditPage({ signalId }: { signalId: string }) {
               ) : null}
               {e.original_link ? (
                 <a
-                  href={e.original_link}
+                  href={safeHref(e.original_link)}
                   target="_blank"
                   rel="noreferrer"
                   className="text-accent-2 hover:underline"
@@ -470,7 +471,7 @@ export function SignalAuditPage({ signalId }: { signalId: string }) {
                     <span className="text-fg-muted">{d.author ?? "(no author)"}</span>
                     {d.source_link ? (
                       <a
-                        href={d.source_link}
+                        href={safeHref(d.source_link)}
                         target="_blank"
                         rel="noreferrer"
                         className="ml-auto text-accent-2 hover:underline"
