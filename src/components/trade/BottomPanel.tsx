@@ -255,7 +255,8 @@ function PositionsView({
         const entry = Number(p.ep);
         const ur = p.ur != null ? Number(p.ur) : null;
         const lev = p.l ?? null;
-        const liq = p.lp ? Number(p.lp) : null;
+        // Treat a 0 / missing liq price as "no liq yet" → renders "—".
+        const liq = p.lp && Number(p.lp) > 0 ? Number(p.lp) : null;
         // Live mark from the market ticker for this symbol — never a value
         // derived from uPNL. Only the selected market has a ticker, so other
         // symbols resolve to null and render "—".
