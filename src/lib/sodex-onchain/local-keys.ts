@@ -101,6 +101,75 @@ export function suggestKeyName(prefix = "helix"): string {
   return `${prefix}-${suffix}`;
 }
 
+// ─── API-key expiry (master + API-key flow) ─────────────────────────
+// Registered keys are minted with a 7-day SoDEX expiry (the default in
+// client.ts `addApiKey`). We don't persist the expiry in StoredApiKey —
+// it's always createdAt + this TTL — so the order form can check it with
+// no network call. Burner keys (name === "") are the wallet itself and
+// never expire this way.
+export const SODEX_KEY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+// When less than this is left (or it's already past), prompt the user to
+// re-authorize before a trade silently fails at the gateway on a dead key.
+export const SODEX_KEY_EXPIRING_MS = 12 * 60 * 60 * 1000;
+
+export type KeyExpiryState = "active" | "expiring" | "expired" | "none";
+
+export interface KeyExpiry {
+  /** Unix-ms expiry, or null when the key doesn't expire (burner / "0"). */
+  expiresAt: number | null;
+  /** Ms until expiry (negative once expired), or null. */
+  msLeft: number | null;
+  state: KeyExpiryState;
+}
+
+const NO_EXPIRY: KeyExpiry = { expiresAt: null, msLeft: null, state: "none" };
+
+/** Expiry view for a locally-stored key (createdAt + 7-day TTL). */
+export function localKeyExpiry(
+  key: StoredApiKey,
+  now: number = Date.now(),
+): KeyExpiry {
+  if (!key.name) return NO_EXPIRY; // burner wallet — no registration to expire
+  return expiryFromTimestamp(key.createdAt + SODEX_KEY_TTL_MS, now);
+}
+
+/**
+ * Expiry view from an absolute expiry timestamp — e.g. SoDEX's
+ * `listApiKeys` value, where 0 means "no expiry". Defensive about units:
+ * a value below 1e12 is treated as Unix-seconds and scaled to ms (a real
+ * near-future ms timestamp is ~1.7e12), so we render correctly whether
+ * the gateway echoes ms or seconds.
+ */
+export function expiryFromTimestamp(
+  expiresAt: number,
+  now: number = Date.now(),
+): KeyExpiry {
+  if (!expiresAt || expiresAt <= 0) return NO_EXPIRY;
+  const ms = expiresAt < 1e12 ? expiresAt * 1000 : expiresAt;
+  const msLeft = ms - now;
+  const state: KeyExpiryState =
+    msLeft <= 0
+      ? "expired"
+      : msLeft <= SODEX_KEY_EXPIRING_MS
+        ? "expiring"
+        : "active";
+  return { expiresAt: ms, msLeft, state };
+}
+
+/** Human label: "expires in 3d 4h", "expires in 11h 20m", "expired", or "". */
+export function formatExpiry(e: KeyExpiry): string {
+  if (e.state === "none" || e.msLeft == null) return "";
+  if (e.msLeft <= 0) return "expired";
+  const totalMin = Math.floor(e.msLeft / 60000);
+  const d = Math.floor(totalMin / 1440);
+  const h = Math.floor((totalMin % 1440) / 60);
+  const m = totalMin % 60;
+  if (d > 0) return `expires in ${d}d ${h}h`;
+  if (h > 0) return `expires in ${h}h ${m}m`;
+  return `expires in ${m}m`;
+}
+
 // ─── Safety limits (per-network) ────────────────────────────────────
 
 export interface SafetyLimits {

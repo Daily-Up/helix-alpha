@@ -49,6 +49,9 @@ import {
 } from "@/lib/sodex-onchain/client";
 import {
   clearLocalKey,
+  expiryFromTimestamp,
+  formatExpiry,
+  localKeyExpiry,
   mintNewApiKey,
   readLocalKey,
   readSafetyLimits,
@@ -179,9 +182,55 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
   }, [refreshAccount]);
 
   const [localKey, setLocalKey] = useState<StoredApiKey | null>(null);
+  // Load the stored key; also clear it when a DIFFERENT master wallet
+  // connects — the key belongs to the wallet that signed addAPIKey, so a
+  // new address means it's the wrong key for this account. We deliberately
+  // do NOT clear on wallet disconnect (address === undefined): that fires
+  // on reload, reconnect and chain switches, and would nuke a valid key.
   useEffect(() => {
-    setLocalKey(readLocalKey(network));
-  }, [network, remoteKeys]);
+    const key = readLocalKey(network);
+    if (
+      key?.masterAddress &&
+      address &&
+      key.masterAddress.toLowerCase() !== address.toLowerCase()
+    ) {
+      clearLocalKey(network);
+      setLocalKey(null);
+      setActionMsg(
+        "A different wallet connected — removed the previous wallet's trading key from this browser.",
+      );
+      return;
+    }
+    setLocalKey(key);
+  }, [network, remoteKeys, address]);
+
+  // Explicit, user-initiated removal of the browser-stored trading key.
+  // Clears the local secret; if the master wallet is still connected we
+  // offer (via pendingRevokeName) to revoke the registration on SoDEX too,
+  // otherwise it stays valid until it expires.
+  const [pendingRevokeName, setPendingRevokeName] = useState<string | null>(
+    null,
+  );
+  const onDisconnectLocal = useCallback(() => {
+    const key = readLocalKey(network);
+    const name = key?.name ?? null;
+    clearLocalKey(network);
+    setLocalKey(null);
+    setError(null);
+    if (name && isConnected && address && accountState && provider) {
+      setPendingRevokeName(name);
+      setActionMsg(
+        "Removed the trading key from this browser. It's still registered on SoDEX until it expires — revoke it there too?",
+      );
+    } else {
+      setPendingRevokeName(null);
+      setActionMsg(
+        name
+          ? "Removed the trading key from this browser. Reconnect the master wallet to revoke it on SoDEX."
+          : "Removed the trading key from this browser.",
+      );
+    }
+  }, [network, isConnected, address, accountState, provider]);
 
   // True when the connected wallet has no SoDEX account yet (aid=0 +
   // zero user address). SoDEX returns a default empty state for
@@ -365,30 +414,77 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
       {/* Already-connected banner — when there's a stored API key, the
           user is already in Live mode. Show it explicitly so the page
           doesn't look like a fresh-setup form. */}
-      {localKey ? (
-        <div
-          className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded border border-positive/30 bg-positive/5 p-3 text-sm"
-          style={{ borderColor: "rgba(52, 195, 154, 0.35)" }}
-        >
-          <div className="flex flex-col gap-1">
-            <span
-              className="font-[var(--font-jetbrains-mono)] text-[10px] uppercase text-positive"
-              style={{ letterSpacing: "0.22em" }}
-            >
-              Live mode active
-            </span>
-            <span className="text-fg">
-              You have a Helix-scoped SoDEX API key stored in this browser.
-              Execute Live works on signal cards. Master wallet only needed
-              again to rotate or revoke this key.
-            </span>
-            <span className="font-mono text-xs text-fg-muted">
-              key: <span className="text-fg">{localKey.name || "(burner)"}</span>{" "}
-              · address: <Addr value={localKey.address} tail={6} />
-            </span>
-          </div>
-        </div>
-      ) : null}
+      {localKey
+        ? (() => {
+            const exp = localKeyExpiry(localKey);
+            const expLabel = formatExpiry(exp);
+            const expColor =
+              exp.state === "expired"
+                ? "#e06c66"
+                : exp.state === "expiring"
+                  ? "#e0a53f"
+                  : undefined;
+            const borderColor =
+              exp.state === "expired"
+                ? "rgba(224, 108, 102, 0.4)"
+                : exp.state === "expiring"
+                  ? "rgba(224, 165, 63, 0.4)"
+                  : "rgba(52, 195, 154, 0.35)";
+            return (
+              <div
+                className="mb-4 flex flex-wrap items-start justify-between gap-3 rounded border border-positive/30 bg-positive/5 p-3 text-sm"
+                style={{ borderColor }}
+              >
+                <div className="flex flex-col gap-1">
+                  <span
+                    className="font-[var(--font-jetbrains-mono)] text-[10px] uppercase text-positive"
+                    style={{ letterSpacing: "0.22em" }}
+                  >
+                    Live mode active
+                  </span>
+                  <span className="text-fg">
+                    You have a Helix-scoped SoDEX API key stored in this
+                    browser. Execute Live works on signal cards. Master wallet
+                    only needed again to rotate or revoke this key.
+                  </span>
+                  <span className="font-mono text-xs text-fg-muted">
+                    key:{" "}
+                    <span className="text-fg">
+                      {localKey.name || "(burner)"}
+                    </span>{" "}
+                    · address: <Addr value={localKey.address} tail={6} />
+                    {expLabel ? (
+                      <>
+                        {" · "}
+                        <span style={expColor ? { color: expColor } : undefined}>
+                          {expLabel}
+                        </span>
+                      </>
+                    ) : null}
+                  </span>
+                  {exp.state === "expired" || exp.state === "expiring" ? (
+                    <span
+                      className="text-[11px]"
+                      style={{ color: expColor }}
+                    >
+                      {exp.state === "expired"
+                        ? "This key has expired — generate a new one below to keep trading."
+                        : "This key is about to expire — generate a new one below to avoid interruptions."}
+                    </span>
+                  ) : null}
+                </div>
+                <button
+                  onClick={onDisconnectLocal}
+                  disabled={!!busy}
+                  className="shrink-0 rounded border border-line px-2.5 py-1 text-xs text-fg-muted transition-colors hover:border-negative/40 hover:text-negative"
+                  title="Remove this browser's trading key. Your funds and SoDEX account are untouched; you'll be offered to revoke on SoDEX too."
+                >
+                  Remove from this browser
+                </button>
+              </div>
+            );
+          })()
+        : null}
 
       {/* Wallet card is a required SETUP step when there's no key yet,
           but only an OPTIONAL "manage keys" affordance once you're live
@@ -634,6 +730,28 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
                                   ✓ secret in this browser
                                 </span>
                               ) : null}
+                              {(() => {
+                                const e = expiryFromTimestamp(k.expiresAt);
+                                const lbl = formatExpiry(e);
+                                if (!lbl) return null;
+                                const c =
+                                  e.state === "expired"
+                                    ? "#e06c66"
+                                    : e.state === "expiring"
+                                      ? "#e0a53f"
+                                      : undefined;
+                                return (
+                                  <span
+                                    className={cn(
+                                      "text-[10px]",
+                                      !c && "text-fg-dim",
+                                    )}
+                                    style={c ? { color: c } : undefined}
+                                  >
+                                    {lbl}
+                                  </span>
+                                );
+                              })()}
                             </div>
                             <div className="text-right">
                               <button
@@ -699,8 +817,23 @@ function MasterKeyFlow({ network }: { network: SodexNetwork }) {
       <SafetyLimitsCard network={network} />
 
       {actionMsg ? (
-        <div className="rounded border border-positive/30 bg-positive/5 px-3 py-2 text-xs text-positive">
-          {actionMsg}
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded border border-positive/30 bg-positive/5 px-3 py-2 text-xs text-positive">
+          <span>{actionMsg}</span>
+          {pendingRevokeName ? (
+            <button
+              onClick={async () => {
+                const name = pendingRevokeName;
+                setPendingRevokeName(null);
+                await onRevokeKey(name);
+              }}
+              disabled={!!busy}
+              className="shrink-0 rounded border border-negative/40 px-2 py-0.5 text-[11px] text-negative transition-colors hover:bg-negative/10"
+            >
+              {busy === `revoke:${pendingRevokeName}`
+                ? "Revoking…"
+                : `Revoke "${pendingRevokeName}" on SoDEX too →`}
+            </button>
+          ) : null}
         </div>
       ) : null}
 

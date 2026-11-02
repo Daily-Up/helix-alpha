@@ -30,6 +30,9 @@ import {
   readSafetyLimits,
   writeLocalKey,
   readTradesToday,
+  localKeyExpiry,
+  formatExpiry,
+  type KeyExpiry,
 } from "@/lib/sodex-onchain/local-keys";
 import { placeLiveOrder } from "@/lib/sodex-onchain/placeLiveOrder";
 import { fmtSodexSymbol } from "@/lib/format";
@@ -66,6 +69,7 @@ export function ExecuteLiveButton({ signal }: Props) {
   const [identityAddress, setIdentityAddress] = useState<
     `0x${string}` | null
   >(null);
+  const [keyExpiry, setKeyExpiry] = useState<KeyExpiry | null>(null);
   const [maxDaily, setMaxDaily] = useState(3);
   const [tradesToday, setTradesToday] = useState(0);
   // Editable order params — pre-filled from the signal, then user-adjustable
@@ -86,6 +90,7 @@ export function ExecuteLiveButton({ signal }: Props) {
     const limits = readSafetyLimits(network);
     setReady(!!key && limits.acceptedDisclaimer);
     setIdentityAddress(key?.address ?? null);
+    setKeyExpiry(key ? localKeyExpiry(key) : null);
     // Seed size from the signal's suggestion, falling back to the per-trade
     // safety size. Only when empty so we don't clobber the user's edit.
     setSizeInput((prev) =>
@@ -162,6 +167,20 @@ export function ExecuteLiveButton({ signal }: Props) {
         {hasKey
           ? "Accept disclaimer to execute live →"
           : "→ Create SoDEX API key to execute live"}
+      </a>
+    );
+  }
+
+  // Key expired — block live execution and prompt re-authorization rather
+  // than letting the order fail at the gateway on a dead key.
+  if (keyExpiry?.state === "expired") {
+    return (
+      <a
+        href="/settings/connect-sodex"
+        className="inline-flex items-center gap-2 rounded border border-negative/40 bg-negative/10 px-2.5 py-1 text-xs text-negative transition-colors hover:border-negative/60 hover:bg-negative/20"
+        title="Your Helix trading key has expired. Reconnect your master wallet on the Connect SoDEX page and generate a new key."
+      >
+        ⚠ Trading key expired — re-authorize →
       </a>
     );
   }
@@ -261,6 +280,16 @@ export function ExecuteLiveButton({ signal }: Props) {
         <span className="text-[10px] text-fg-dim">
           {tradesToday}/{maxDaily} live trades today
         </span>
+      ) : null}
+      {!confirming && keyExpiry?.state === "expiring" ? (
+        <a
+          href="/settings/connect-sodex"
+          className="text-[10px] hover:underline"
+          style={{ color: "#e0a53f" }}
+          title="Your Helix trading key is about to expire — re-authorize to avoid interruptions."
+        >
+          ⚠ Key {formatExpiry(keyExpiry)} — re-authorize soon
+        </a>
       ) : null}
     </div>
   );
