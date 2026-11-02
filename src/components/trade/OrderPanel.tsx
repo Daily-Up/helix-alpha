@@ -19,8 +19,8 @@ import Link from "next/link";
 import { cn } from "@/components/ui/cn";
 import { useTradeMode } from "@/lib/sodex-onchain/useTradeMode";
 import { placeLiveOrder } from "@/lib/sodex-onchain/placeLiveOrder";
-import { getPerpsAccountState } from "@/lib/sodex-onchain/client";
 import { getBuilderCode } from "@/lib/sodex-onchain/chains";
+import type { SodexPerpsAccountState } from "@/lib/sodex-onchain/types";
 import {
   readLocalKey,
   readTradesToday,
@@ -114,6 +114,7 @@ export function OrderPanel({
   midPrice,
   rules,
   limitFill,
+  account,
 }: {
   symbol: string;
   sodexSymbol: string;
@@ -123,6 +124,7 @@ export function OrderPanel({
   midPrice?: number | null;
   rules: SymbolRules | null;
   limitFill?: number | null;
+  account: SodexPerpsAccountState | null;
 }) {
   const tm = useTradeMode(NETWORK);
   const { address: connectedMaster } = useAccount();
@@ -164,46 +166,19 @@ export function OrderPanel({
       setLeverage((l) => Math.min(l, rules.maxLeverage as number));
   }, [rules?.maxLeverage]);
 
-  // ── Live account state (read-only; perps). Available + current position. ──
-  const [acct, setAcct] = useState<{
-    availableUsd: number;
-    equity: number;
-    positionSz: number;
-    positionEntry: number | null;
-  } | null>(null);
-  useEffect(() => {
-    if (!tm.ready || !tm.address || !isPerp) {
-      setAcct(null);
-      return;
-    }
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const st = await getPerpsAccountState(
-          NETWORK,
-          tm.address as `0x${string}`,
-        );
-        if (cancelled) return;
-        const pos = st.P?.find(
-          (p) => (p.s ?? "").toUpperCase() === sodexSymbol.toUpperCase(),
-        );
-        setAcct({
-          availableUsd: Number(st.am) || 0,
-          equity: Number(st.av) || 0,
-          positionSz: pos ? Number(pos.sz) || 0 : 0,
-          positionEntry: pos ? Number(pos.ep) || null : null,
-        });
-      } catch {
-        /* keep last good */
-      }
+  // Available + current position, derived from the account state (fetched
+  // once in the terminal and shared with the bottom tabs).
+  const acct = useMemo(() => {
+    if (!account) return null;
+    const pos = account.P?.find(
+      (p) => (p.s ?? "").toUpperCase() === sodexSymbol.toUpperCase(),
+    );
+    return {
+      availableUsd: Number(account.am) || 0,
+      positionSz: pos ? Number(pos.sz) || 0 : 0,
+      positionEntry: pos ? Number(pos.ep) || null : null,
     };
-    load();
-    const t = setInterval(load, 5000);
-    return () => {
-      cancelled = true;
-      clearInterval(t);
-    };
-  }, [tm.ready, tm.address, isPerp, sodexSymbol]);
+  }, [account, sodexSymbol]);
 
   // Key expiry → re-authorize gate (mirrors ExecuteLiveButton; S3).
   const [keyExpiry, setKeyExpiry] = useState<KeyExpiry | null>(null);

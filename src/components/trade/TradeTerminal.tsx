@@ -19,6 +19,10 @@ import { PriceChart } from "./PriceChart";
 import { OrderBook, type BookLevel } from "./OrderBook";
 import { OrderPanel, type SymbolRules } from "./OrderPanel";
 import type { Trade } from "./TradesTape";
+import { BottomPanel, type BottomTab } from "./BottomPanel";
+import { useTradeMode } from "@/lib/sodex-onchain/useTradeMode";
+import { getPerpsAccountState } from "@/lib/sodex-onchain/client";
+import type { SodexPerpsAccountState } from "@/lib/sodex-onchain/types";
 
 export interface TerminalAsset {
   id: string;
@@ -60,9 +64,15 @@ const fmtUsd = (v: number | null) =>
           ? `$${(v / 1e3).toFixed(2)}K`
           : `$${v.toFixed(0)}`;
 
-const BOTTOM_TABS = ["Positions", "Balances", "Open Orders", "Trade History"] as const;
+const MIN_BOTTOM = 120;
+const DEFAULT_BOTTOM = 220;
+const clampBottom = (h: number) => {
+  const vh = typeof window !== "undefined" ? window.innerHeight : 900;
+  return Math.max(MIN_BOTTOM, Math.min(h, vh * 0.5));
+};
 
 export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
+  const tm = useTradeMode("mainnet");
   const [assetId, setAssetId] = useState<string>(
     () => assets.find((a) => a.id === "tok-btc")?.id ?? assets[0]?.id ?? "",
   );
@@ -76,11 +86,13 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
   const [asks, setAsks] = useState<BookLevel[]>([]);
   const [mktLoading, setMktLoading] = useState(false);
   const [now, setNow] = useState(() => Date.now());
-  const [bottomTab, setBottomTab] = useState<(typeof BOTTOM_TABS)[number]>("Positions");
+  const [bottomTab, setBottomTab] = useState<BottomTab>("Positions");
   const [rules, setRules] = useState<SymbolRules | null>(null);
   const [trades, setTrades] = useState<Trade[]>([]);
   const [tradesLoading, setTradesLoading] = useState(false);
   const [limitFill, setLimitFill] = useState<number | null>(null);
+  const [account, setAccount] = useState<SodexPerpsAccountState | null>(null);
+  const [bottomH, setBottomH] = useState(DEFAULT_BOTTOM);
 
   // 1s clock for the funding countdown.
   useEffect(() => {
@@ -178,6 +190,81 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
       clearInterval(t);
     };
   }, [sodexSymbol, market]);
+
+  // Live perps account state (positions / balances / margin) for the ticket
+  // and the bottom tabs. Read-only, polled; only when the browser is live.
+  useEffect(() => {
+    if (!tm.ready || !tm.address) {
+      setAccount(null);
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const st = await getPerpsAccountState(
+          "mainnet",
+          tm.address as `0x${string}`,
+        );
+        if (!cancelled) setAccount(st);
+      } catch {
+        /* keep last good */
+      }
+    };
+    load();
+    const t = setInterval(load, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [tm.ready, tm.address]);
+
+  // Bottom-panel height: load persisted, drag to resize, persist on release.
+  const bottomHRef = useRef(DEFAULT_BOTTOM);
+  const draggingBottom = useRef(false);
+  useEffect(() => {
+    try {
+      const s = window.localStorage.getItem("helix.terminal.bottomH");
+      if (s) {
+        const h = clampBottom(Number(s));
+        setBottomH(h);
+        bottomHRef.current = h;
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!draggingBottom.current) return;
+      const h = clampBottom(window.innerHeight - e.clientY);
+      bottomHRef.current = h;
+      setBottomH(h);
+    };
+    const onUp = () => {
+      if (!draggingBottom.current) return;
+      draggingBottom.current = false;
+      document.body.style.userSelect = "";
+      try {
+        window.localStorage.setItem(
+          "helix.terminal.bottomH",
+          String(bottomHRef.current),
+        );
+      } catch {
+        /* ignore */
+      }
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, []);
+  const startBottomDrag = (e: React.MouseEvent) => {
+    e.preventDefault();
+    draggingBottom.current = true;
+    document.body.style.userSelect = "none";
+  };
 
   // Mark = perp mark price, else last. Everything anchors to this.
   const mark = num(ticker?.markPrice) ?? num(ticker?.lastPx);
@@ -398,30 +485,31 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
               midPrice={midPrice}
               rules={rules}
               limitFill={limitFill}
+              account={account}
             />
           ) : null}
         </div>
       </div>
 
-      {/* ── Bottom: positions / balances tabs ── */}
-      <div className="shrink-0 border-t border-line">
-        <div className="flex items-center gap-5 border-b border-line px-4 py-2 text-[12px]">
-          {BOTTOM_TABS.map((t) => (
-            <button
-              key={t}
-              onClick={() => setBottomTab(t)}
-              className={cn(
-                "transition-colors",
-                bottomTab === t ? "font-medium text-fg" : "text-fg-dim hover:text-fg-muted",
-              )}
-            >
-              {t} {t === "Positions" ? "0" : ""}
-            </button>
-          ))}
-        </div>
-        <div className="px-4 py-6 text-center text-[12px] text-fg-dim">
-          Connect a SoDEX wallet to view your {bottomTab.toLowerCase()}.
-        </div>
+      {/* ── Resize handle + bottom panel ── */}
+      <div
+        onMouseDown={startBottomDrag}
+        className="group flex shrink-0 cursor-row-resize items-center justify-center border-t border-line bg-surface-2/20 py-[3px] transition-colors hover:bg-accent/15"
+        title="Drag to resize"
+        role="separator"
+        aria-orientation="horizontal"
+      >
+        <div className="h-0.5 w-10 rounded-full bg-line-2 group-hover:bg-accent/50" />
+      </div>
+      <div className="shrink-0 overflow-hidden" style={{ height: bottomH }}>
+        <BottomPanel
+          tab={bottomTab}
+          setTab={setBottomTab}
+          account={account}
+          ready={tm.ready}
+          markPrice={mark}
+          digits={digits}
+        />
       </div>
     </div>
   );
