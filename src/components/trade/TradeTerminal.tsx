@@ -10,7 +10,7 @@
  * and draws its levels on the chart. Bottom: positions/balances tabs.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/components/ui/cn";
 import { AssetLogo } from "@/components/ui/AssetLogo";
 import { AssetPicker } from "./AssetPicker";
@@ -197,6 +197,10 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
       : null;
   const fundingPct =
     num(ticker?.fundingRate) != null ? (num(ticker?.fundingRate) as number) * 100 : null;
+  const fundingInterval = rules?.fundingInterval ?? 3600;
+  const periodsPerYear = (365 * 24 * 3600) / fundingInterval;
+  const annualizedFundingPct =
+    fundingPct != null ? fundingPct * periodsPerYear : null;
   const countdown =
     ticker?.nextFundingTime != null
       ? Math.max(0, ticker.nextFundingTime - now)
@@ -254,18 +258,14 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
                   setAssetId(id);
                   setSetupError(null);
                 }}
+                suffix={isPerp ? "-PERP" : "-SPOT"}
               />
-              {selected?.market ? (
-                <span className="rounded border border-line bg-surface px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-fg-dim">
-                  {isPerp ? "perp" : "spot"}
-                </span>
-              ) : null}
             </div>
             <span className="text-[10px] text-fg-dim">{selected?.name}</span>
           </div>
         </div>
 
-        <Stat label="Mark" value={fmt(mark, digits)} big />
+        <MarkPrice value={mark} digits={digits} />
         {isPerp ? <Stat label="Oracle" value={fmt(oracle, digits)} /> : null}
         <Stat
           label="24h Change"
@@ -281,13 +281,18 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
           <>
             <Stat label="Open Interest" value={fmtUsd(oiUsd)} />
             <Stat
-              label="Funding / Countdown"
+              label="Funding"
               value={
                 fundingPct != null
                   ? `${fundingPct >= 0 ? "+" : ""}${fundingPct.toFixed(4)}%${countdownStr ? ` · ${countdownStr}` : ""}`
                   : "—"
               }
               tone={fundingPct == null ? "default" : fundingPct >= 0 ? "positive" : "negative"}
+              title={
+                annualizedFundingPct != null
+                  ? `Annualized ≈ ${annualizedFundingPct >= 0 ? "+" : ""}${annualizedFundingPct.toFixed(2)}% (${Math.round(periodsPerYear)}×/yr funding)`
+                  : undefined
+              }
             />
           </>
         ) : (
@@ -301,10 +306,10 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
           onClick={runSetup}
           disabled={setupLoading || !sodexSymbol}
           className={cn(
-            "ml-auto inline-flex items-center gap-1.5 rounded-md border px-4 py-2 text-[13px] font-semibold transition-colors",
+            "ml-auto inline-flex items-center gap-1.5 rounded-md border px-4 py-2 text-[13px] font-medium transition-colors",
             setupLoading
-              ? "cursor-wait border-line bg-surface text-fg-dim"
-              : "border-accent/50 bg-accent/20 text-accent-2 hover:bg-accent/30",
+              ? "cursor-wait border-line text-fg-dim"
+              : "border-line text-fg-muted hover:border-line-2 hover:text-fg",
           )}
         >
           {setupLoading ? "Reading the tape…" : "⚡ AI Setup"}
@@ -426,26 +431,65 @@ function Stat({
   label,
   value,
   tone = "default",
-  big = false,
+  title,
 }: {
   label: string;
   value: string;
   tone?: "default" | "positive" | "negative";
-  big?: boolean;
+  title?: string;
 }) {
   return (
-    <div className="flex flex-col">
-      <span className="text-[9.5px] uppercase tracking-wide text-fg-dim">{label}</span>
+    <div className="flex flex-col" title={title}>
+      <span className="text-[11px] uppercase tracking-wide text-fg-dim">
+        {label}
+      </span>
       <span
         className={cn(
-          "font-[var(--font-jetbrains-mono)] leading-tight",
-          big ? "text-[15px]" : "text-[12.5px]",
+          "font-[var(--font-jetbrains-mono)] text-[13px] leading-tight tabular-nums",
           tone === "positive" && "text-positive",
           tone === "negative" && "text-negative",
           tone === "default" && "text-fg",
         )}
       >
         {value}
+      </span>
+    </div>
+  );
+}
+
+/** Mark price with a 150ms green/red background flash on each tick change. */
+function MarkPrice({ value, digits }: { value: number | null; digits: number }) {
+  const [flash, setFlash] = useState<"up" | "down" | null>(null);
+  const prev = useRef<number | null>(null);
+  useEffect(() => {
+    if (value == null) return;
+    if (prev.current != null && value !== prev.current) {
+      setFlash(value > prev.current ? "up" : "down");
+      prev.current = value;
+      const t = setTimeout(() => setFlash(null), 150);
+      return () => clearTimeout(t);
+    }
+    prev.current = value;
+  }, [value]);
+  return (
+    <div className="flex flex-col">
+      <span className="text-[11px] uppercase tracking-wide text-fg-dim">Mark</span>
+      <span
+        className={cn(
+          "w-fit rounded px-1 font-[var(--font-jetbrains-mono)] text-[21px] font-semibold leading-tight tabular-nums transition-colors duration-150 motion-reduce:transition-none",
+          flash === "up"
+            ? "bg-positive/25 text-positive"
+            : flash === "down"
+              ? "bg-negative/25 text-negative"
+              : "bg-transparent text-fg",
+        )}
+      >
+        {value != null
+          ? value.toLocaleString(undefined, {
+              minimumFractionDigits: digits,
+              maximumFractionDigits: digits,
+            })
+          : "—"}
       </span>
     </div>
   );

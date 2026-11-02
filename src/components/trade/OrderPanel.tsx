@@ -40,6 +40,7 @@ export interface SymbolRules {
   takerFee: number;
   maxLeverage: number | null;
   initLeverage: number | null;
+  fundingInterval: number;
   marginTiers:
     | {
         maxNotionalValue: number;

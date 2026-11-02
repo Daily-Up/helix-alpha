@@ -71,6 +71,7 @@ export async function GET(req: Request) {
         // Perps-only; null on spot.
         maxLeverage: s.maxLeverage ?? null,
         initLeverage: s.initLeverage ?? null,
+        fundingInterval: s.fundingInterval ?? 3600,
         marginTiers:
           s.marginTiers?.map((t) => ({
             maxNotionalValue: num(t.maxNotionalValue),

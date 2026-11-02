@@ -29,10 +29,13 @@ export function AssetPicker({
   assets,
   value,
   onChange,
+  suffix = "",
 }: {
   assets: PickerAsset[];
   value: string;
   onChange: (id: string) => void;
+  /** Appended to the selected symbol in the button, e.g. "-PERP". */
+  suffix?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -84,7 +87,7 @@ export function AssetPicker({
         aria-haspopup="listbox"
         aria-expanded={open}
       >
-        {selected ? selected.symbol : "Select market"}
+        {selected ? `${selected.symbol}${suffix}` : "Select market"}
         <span className={cn("text-[11px] text-fg-dim transition-transform", open && "rotate-180")}>
           ▾
         </span>

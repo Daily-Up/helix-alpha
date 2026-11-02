@@ -57,6 +57,8 @@ export interface SodexSymbol {
   initLeverage?: number;
   /** Maintenance-margin tiers by notional (see SodexMarginTier). */
   marginTiers?: SodexMarginTier[];
+  /** Funding interval in seconds (e.g. 3600 = hourly). */
+  fundingInterval?: number;
 }
 
 export interface SodexCoin {
