@@ -57,6 +57,26 @@ const marginModeLabel = (m?: string) =>
 
 type Position = NonNullable<SodexPerpsAccountState["P"]>[number];
 
+export type TpSlCtx = {
+  /** Selected market's rules (tick/step/precision/fee) — null until loaded. */
+  rules: {
+    symbolID: number;
+    tickSize: number;
+    stepSize: number;
+    pricePrecision: number;
+    quantityPrecision: number;
+    takerFee: number;
+  } | null;
+  builderRate: number;
+  busy: boolean;
+  /** Place/modify TP & SL (place new, then cancel old). */
+  onSet: (
+    pos: Position,
+    next: { tp: number | null; sl: number | null },
+    existing: { tpOrderId: number | null; slOrderId: number | null },
+  ) => Promise<{ ok: boolean; error?: string }>;
+};
+
 export function BottomPanel({
   tab,
   setTab,
@@ -70,6 +90,7 @@ export function BottomPanel({
   closeAllBusy,
   markBySymbol,
   selectedSymbol,
+  tpsl,
   ready,
   digits,
 }: {
@@ -90,6 +111,8 @@ export function BottomPanel({
   markBySymbol: Record<string, number>;
   /** Currently-selected market symbol, for the "Current market only" filter. */
   selectedSymbol: string | null;
+  /** TP/SL placement context (selected market rules + the place/modify call). */
+  tpsl: TpSlCtx;
   ready: boolean;
   digits: number;
 }) {
@@ -167,6 +190,8 @@ export function BottomPanel({
               orders={openOrders}
               digits={digits}
               markBySymbol={markBySymbol}
+              selectedSymbol={selectedSymbol}
+              tpsl={tpsl}
               onSelect={onSelectSymbol}
               onClose={onClosePosition}
             />
@@ -248,6 +273,8 @@ function PositionsView({
   orders,
   digits,
   markBySymbol,
+  selectedSymbol,
+  tpsl,
   onSelect,
   onClose,
 }: {
@@ -255,6 +282,8 @@ function PositionsView({
   orders: SodexOpenOrder[];
   digits: number;
   markBySymbol: Record<string, number>;
+  selectedSymbol: string | null;
+  tpsl: TpSlCtx;
   onSelect: (sodexSymbol: string) => void;
   onClose: (position: Position, type: "market" | "limit") => void;
 }) {
@@ -309,16 +338,35 @@ function PositionsView({
         // market only — openOrders covers the selected symbol). stopType isn't
         // in the public type, so classify by trigger vs entry: a stop above
         // entry on a long = TP, below = SL (mirrored for shorts).
-        const stops = orders
-          .filter(
-            (o) =>
-              o.symbol.toUpperCase() === p.s.toUpperCase() &&
-              o.reduceOnly &&
-              stopPriceOf(o) != null,
-          )
-          .map((o) => stopPriceOf(o) as number);
-        const tp = stops.find((t) => (isLong ? t > entry : t < entry)) ?? null;
-        const sl = stops.find((t) => (isLong ? t < entry : t > entry)) ?? null;
+        const stopOrders = orders.filter(
+          (o) =>
+            o.symbol.toUpperCase() === p.s.toUpperCase() &&
+            o.reduceOnly &&
+            stopPriceOf(o) != null,
+        );
+        const tpOrder =
+          stopOrders.find((o) => {
+            const t = stopPriceOf(o) as number;
+            return isLong ? t > entry : t < entry;
+          }) ?? null;
+        const slOrder =
+          stopOrders.find((o) => {
+            const t = stopPriceOf(o) as number;
+            return isLong ? t < entry : t > entry;
+          }) ?? null;
+        const tp = tpOrder ? stopPriceOf(tpOrder) : null;
+        const sl = slOrder ? stopPriceOf(slOrder) : null;
+        // Resting stop size (to warn when the position has since drifted).
+        const existingStopQty =
+          tpOrder?.origQty != null
+            ? Number(tpOrder.origQty)
+            : slOrder?.origQty != null
+              ? Number(slOrder.origQty)
+              : null;
+        // TP/SL editing needs the selected market's rules (tick/step/fees).
+        const canEditTpSl =
+          tpsl.rules != null &&
+          p.s.toUpperCase() === (selectedSymbol ?? "").toUpperCase();
 
         return (
           <div
@@ -424,7 +472,28 @@ function PositionsView({
                 ✎
               </button>
               {tpslRow === key ? (
-                <TpSlPopover tp={tp} sl={sl} digits={digits} onClose={() => setTpslRow(null)} />
+                <TpSlPopover
+                  position={p}
+                  entry={entry}
+                  absSize={abs}
+                  isLong={isLong}
+                  mark={mark}
+                  liq={liq}
+                  margin={margin}
+                  tp={tp}
+                  sl={sl}
+                  tpOrderId={tpOrder?.orderID ?? null}
+                  slOrderId={slOrder?.orderID ?? null}
+                  existingQty={existingStopQty}
+                  canEdit={canEditTpSl}
+                  tpsl={tpsl}
+                  digits={digits}
+                  onSelectMarket={() => {
+                    onSelect(p.s);
+                    setTpslRow(null);
+                  }}
+                  onClose={() => setTpslRow(null)}
+                />
               ) : null}
             </span>
             {/* Close (×) + ⋯ menu (Limit close) */}
@@ -467,55 +536,241 @@ function PositionsView({
   );
 }
 
-/** TP/SL editor popover. Display + inputs; placement is pending a signing-path
- *  change, so Set is disabled with a note (ship the display part now). */
+/** TP/SL editor popover — validation, est. PnL + fees, and a confirm step.
+ *  Editing is enabled only for the selected market (its rules carry tick/step
+ *  + fees); other markets show the current triggers + a switch button. */
 function TpSlPopover({
+  position,
+  entry,
+  absSize,
+  isLong,
+  mark,
+  liq,
+  margin,
   tp,
   sl,
+  tpOrderId,
+  slOrderId,
+  existingQty,
+  canEdit,
+  tpsl,
   digits,
+  onSelectMarket,
   onClose,
 }: {
+  position: Position;
+  entry: number;
+  absSize: number;
+  isLong: boolean;
+  mark: number | null;
+  liq: number | null;
+  margin: number | null;
   tp: number | null;
   sl: number | null;
+  tpOrderId: number | null;
+  slOrderId: number | null;
+  existingQty: number | null;
+  canEdit: boolean;
+  tpsl: TpSlCtx;
   digits: number;
+  onSelectMarket: () => void;
   onClose: () => void;
 }) {
-  const fmt = (v: number | null) =>
-    v != null ? v.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits }) : "";
+  const fmtPx = (v: number) =>
+    v.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  const [tpInput, setTpInput] = useState(tp != null ? String(tp) : "");
+  const [slInput, setSlInput] = useState(sl != null ? String(sl) : "");
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const rules = tpsl.rules;
+  const signed = isLong ? absSize : -absSize;
+  const tpVal = tpInput.trim() ? Number(tpInput) : null;
+  const slVal = slInput.trim() ? Number(slInput) : null;
+  const valid = (v: number | null) => v != null && Number.isFinite(v) && v > 0;
+
+  // Validation (condition 3): long TP>mark / SL<mark; short reversed.
+  const problems: string[] = [];
+  if (valid(tpVal) && mark != null && (isLong ? (tpVal as number) <= mark : (tpVal as number) >= mark))
+    problems.push(`Take profit must be ${isLong ? "above" : "below"} mark (${fmtPx(mark)}).`);
+  if (valid(slVal) && mark != null && (isLong ? (slVal as number) >= mark : (slVal as number) <= mark))
+    problems.push(`Stop loss must be ${isLong ? "below" : "above"} mark (${fmtPx(mark)}).`);
+  // SL beyond liquidation → would never trigger (non-blocking warning).
+  let liqWarn: string | null = null;
+  if (valid(slVal) && liq != null && (isLong ? (slVal as number) <= liq : (slVal as number) >= liq))
+    liqWarn = `Stop is past liquidation (${fmtPx(liq)}) — it may never trigger.`;
+  // Position size drifted from the resting TP/SL size (condition 1 fallback).
+  const step = rules && rules.stepSize > 0 ? rules.stepSize : 1e-9;
+  const sizeDrift = existingQty != null && Math.abs(existingQty - absSize) > step / 2;
+
+  const pnlAt = (t: number | null) => (valid(t) ? ((t as number) - entry) * signed : null);
+  const feeAt = (t: number | null) => {
+    if (!valid(t) || !rules) return null;
+    const notional = absSize * (t as number);
+    return { ex: notional * rules.takerFee, bu: notional * tpsl.builderRate };
+  };
+  const pct = (p: number | null) => (p != null && margin && margin > 0 ? (p / margin) * 100 : null);
+
+  const changed = tpVal !== tp || slVal !== sl;
+  const canReview =
+    canEdit && problems.length === 0 && changed && (valid(tpVal) || valid(slVal));
+
+  const submit = async () => {
+    setError(null);
+    const res = await tpsl.onSet(
+      position,
+      { tp: valid(tpVal) ? tpVal : null, sl: valid(slVal) ? slVal : null },
+      { tpOrderId, slOrderId },
+    );
+    if (res.ok) onClose();
+    else {
+      setError(res.error ?? "Placement failed.");
+      setConfirming(false);
+    }
+  };
+  const resize = async () => {
+    setError(null);
+    const res = await tpsl.onSet(position, { tp, sl }, { tpOrderId, slOrderId });
+    if (res.ok) onClose();
+    else setError(res.error ?? "Resize failed.");
+  };
+
+  const sign = (v: number) => (v < 0 ? "−" : "+");
+  const money2 = (v: number) =>
+    `${sign(v)}$${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
   return (
     <>
       <div className="fixed inset-0 z-30" onClick={onClose} />
-      <div className="absolute right-0 top-full z-40 mt-1 w-56 rounded-md border border-line bg-surface p-3 text-left shadow-xl">
-        <div className="mb-2 text-[11px] font-medium text-fg">Take Profit / Stop Loss</div>
-        <div className="flex flex-col gap-2">
-          <label className="flex flex-col gap-0.5">
-            <span className="text-[9px] uppercase tracking-wider text-positive">Take profit</span>
-            <input
-              defaultValue={fmt(tp)}
-              placeholder="Trigger price"
-              className="rounded border border-line bg-surface-2 px-2 py-1 text-[11px] tabular-nums text-fg outline-none placeholder:text-fg-dim"
-            />
-          </label>
-          <label className="flex flex-col gap-0.5">
-            <span className="text-[9px] uppercase tracking-wider text-negative">Stop loss</span>
-            <input
-              defaultValue={fmt(sl)}
-              placeholder="Trigger price"
-              className="rounded border border-line bg-surface-2 px-2 py-1 text-[11px] tabular-nums text-fg outline-none placeholder:text-fg-dim"
-            />
-          </label>
-          <button
-            disabled
-            title="Trigger-order placement for an open position is pending a signing-path change"
-            className="cursor-not-allowed rounded bg-surface-2 py-1 text-[11px] text-fg-dim"
-          >
-            Set — coming soon
-          </button>
-          <p className="text-[9px] leading-snug text-fg-dim">
-            Placing TP/SL on an open position needs a trigger-order path that
-            isn&apos;t wired yet.
-          </p>
+      <div className="absolute right-0 top-full z-40 mt-1 w-64 rounded-md border border-line bg-surface p-3 text-left shadow-xl">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-[11px] font-medium text-fg">Take Profit / Stop Loss</span>
+          <span className="text-[9px] text-fg-dim">{perpName(position.s)}</span>
         </div>
+
+        {!canEdit ? (
+          <div className="flex flex-col gap-2">
+            <div className="flex justify-between text-[11px] tabular-nums">
+              <span className="text-positive">TP {tp != null ? fmtPx(tp) : "—"}</span>
+              <span className="text-negative">SL {sl != null ? fmtPx(sl) : "—"}</span>
+            </div>
+            <button
+              onClick={onSelectMarket}
+              className="rounded border border-line py-1 text-[11px] text-fg-muted transition-colors hover:text-fg"
+            >
+              Switch to {perpName(position.s)} to edit
+            </button>
+          </div>
+        ) : confirming ? (
+          <div className="flex flex-col gap-1.5 text-[11px]">
+            {([
+              ["Take profit", tpVal, "text-positive"],
+              ["Stop loss", slVal, "text-negative"],
+            ] as const).map(([label, v, cls]) =>
+              valid(v) ? (
+                <div key={label} className="rounded border border-line px-2 py-1">
+                  <div className="flex items-center justify-between">
+                    <span className={cls}>{label}</span>
+                    <span className="tabular-nums text-fg">{fmtPx(v as number)}</span>
+                  </div>
+                  <div className="mt-0.5 flex items-center justify-between text-[10px] text-fg-dim">
+                    <span>Est. PnL</span>
+                    <span
+                      className={cn(
+                        "tabular-nums",
+                        (pnlAt(v) ?? 0) >= 0 ? "text-positive" : "text-negative",
+                      )}
+                    >
+                      {pnlAt(v) != null
+                        ? `${money2(pnlAt(v) as number)}${pct(pnlAt(v)) != null ? ` (${sign(pct(pnlAt(v)) as number)}${Math.abs(pct(pnlAt(v)) as number).toFixed(2)}%)` : ""}`
+                        : "—"}
+                    </span>
+                  </div>
+                  {feeAt(v) ? (
+                    <div className="flex items-center justify-between text-[10px] text-fg-dim">
+                      <span>Fee (taker + builder)</span>
+                      <span className="tabular-nums">
+                        ${(feeAt(v)!.ex + feeAt(v)!.bu).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null,
+            )}
+            <p className="text-[9px] text-fg-dim">
+              Reduce-only market stop, mark-triggered, size {absSize} {baseOf(position.s)}. Real funds.
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={submit}
+                disabled={tpsl.busy}
+                className="flex-1 rounded bg-accent/20 py-1 text-[11px] font-semibold text-accent-2 hover:bg-accent/30 disabled:opacity-60"
+              >
+                {tpsl.busy ? "Placing…" : "Confirm"}
+              </button>
+              <button
+                onClick={() => setConfirming(false)}
+                disabled={tpsl.busy}
+                className="flex-1 rounded border border-line py-1 text-[11px] text-fg-muted hover:text-fg"
+              >
+                Back
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <label className="flex flex-col gap-0.5">
+              <span className="text-[9px] uppercase tracking-wider text-positive">Take profit</span>
+              <input
+                value={tpInput}
+                onChange={(e) => setTpInput(e.target.value.replace(/[^0-9.]/g, ""))}
+                placeholder="Trigger price"
+                className="rounded border border-line bg-surface-2 px-2 py-1 text-[11px] tabular-nums text-fg outline-none placeholder:text-fg-dim focus:border-[#3a4452]"
+              />
+              {valid(tpVal) && pnlAt(tpVal) != null ? (
+                <span className={cn("text-[9px] tabular-nums", (pnlAt(tpVal) as number) >= 0 ? "text-positive" : "text-negative")}>
+                  {money2(pnlAt(tpVal) as number)}
+                  {pct(pnlAt(tpVal)) != null ? ` (${sign(pct(pnlAt(tpVal)) as number)}${Math.abs(pct(pnlAt(tpVal)) as number).toFixed(2)}%)` : ""}
+                </span>
+              ) : null}
+            </label>
+            <label className="flex flex-col gap-0.5">
+              <span className="text-[9px] uppercase tracking-wider text-negative">Stop loss</span>
+              <input
+                value={slInput}
+                onChange={(e) => setSlInput(e.target.value.replace(/[^0-9.]/g, ""))}
+                placeholder="Trigger price"
+                className="rounded border border-line bg-surface-2 px-2 py-1 text-[11px] tabular-nums text-fg outline-none placeholder:text-fg-dim focus:border-[#3a4452]"
+              />
+              {valid(slVal) && pnlAt(slVal) != null ? (
+                <span className={cn("text-[9px] tabular-nums", (pnlAt(slVal) as number) >= 0 ? "text-positive" : "text-negative")}>
+                  {money2(pnlAt(slVal) as number)}
+                  {pct(pnlAt(slVal)) != null ? ` (${sign(pct(pnlAt(slVal)) as number)}${Math.abs(pct(pnlAt(slVal)) as number).toFixed(2)}%)` : ""}
+                </span>
+              ) : null}
+            </label>
+            {sizeDrift ? (
+              <div className="flex items-center justify-between gap-2 rounded border border-[#e0a53f]/40 bg-[#e0a53f]/10 px-2 py-1 text-[9.5px] text-[#e0a53f]">
+                <span>TP/SL size ≠ position</span>
+                <button onClick={resize} disabled={tpsl.busy} className="shrink-0 rounded border border-[#e0a53f]/50 px-1.5 hover:bg-[#e0a53f]/15">
+                  Resize to position
+                </button>
+              </div>
+            ) : null}
+            {problems.map((p, i) => (
+              <p key={i} className="text-[9.5px] text-negative">{p}</p>
+            ))}
+            {liqWarn ? <p className="text-[9.5px] text-[#e0a53f]">{liqWarn}</p> : null}
+            <button
+              onClick={() => setConfirming(true)}
+              disabled={!canReview}
+              className="rounded bg-accent/20 py-1 text-[11px] font-semibold text-accent-2 transition-colors hover:bg-accent/30 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Review
+            </button>
+          </div>
+        )}
+        {error ? <p className="mt-2 text-[10px] text-negative">{error}</p> : null}
       </div>
     </>
   );

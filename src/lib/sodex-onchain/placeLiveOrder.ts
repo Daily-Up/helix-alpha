@@ -388,3 +388,73 @@ export async function placeLiveOrder(args: PlaceLiveOrderArgs): Promise<void> {
       setConfirming(false);
     }
 }
+
+/**
+ * placeTriggerForPosition — place a standalone reduce-only STOP (TP or SL) for
+ * an EXISTING open position, at an ABSOLUTE trigger price. Same order shape as
+ * the placeStop bracket in placeLiveOrder (reduce-only MARKET STOP, trigger on
+ * mark), but driven by the position rather than a just-filled entry. The
+ * builder fee attaches via placeOrderBatch. The caller rounds stopPrice to the
+ * tick size and quantity to the step size. This is additive — it does not
+ * touch the MARKET / LIMIT / reduceOnly paths above.
+ */
+export interface PlaceTriggerArgs {
+  network: SodexNetwork;
+  apiKeyName?: string;
+  privateKey: `0x${string}`;
+  accountID: number;
+  symbolID: number;
+  /** Position direction — a long closes with SELL, a short with BUY. */
+  positionIsLong: boolean;
+  /** Position quantity in base units, already step-rounded. */
+  quantity: string;
+  /** Absolute trigger price, already tick-rounded (string). */
+  stopPrice: string;
+  /** 2 = take-profit, 1 = stop-loss. */
+  stopType: number;
+}
+
+export async function placeTriggerForPosition(
+  args: PlaceTriggerArgs,
+): Promise<unknown> {
+  const {
+    network,
+    apiKeyName,
+    privateKey,
+    accountID,
+    symbolID,
+    positionIsLong,
+    quantity,
+    stopPrice,
+    stopType,
+  } = args;
+  const tag = stopType === 2 ? "tp" : "sl";
+  const clOrdID = `helix-${tag}${Date.now().toString(36)}${Math.random()
+    .toString(36)
+    .slice(2, 4)}`.slice(0, 36);
+  return placeOrderBatch({
+    network,
+    apiKeyName,
+    privateKey,
+    market: "futures",
+    batch: {
+      accountID,
+      orders: [
+        {
+          symbolID,
+          clOrdID,
+          side: positionIsLong ? SodexSide.SELL : SodexSide.BUY,
+          type: SodexOrderType.MARKET,
+          timeInForce: SodexTimeInForce.IOC,
+          quantity,
+          modifier: SodexModifier.STOP,
+          stopPrice,
+          stopType,
+          triggerType: 2, // MARK_PRICE (matches the bracket path)
+          reduceOnly: true,
+          positionSide: 1,
+        },
+      ],
+    },
+  });
+}

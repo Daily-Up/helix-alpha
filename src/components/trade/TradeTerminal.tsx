@@ -28,7 +28,11 @@ import {
   cancelOrders,
 } from "@/lib/sodex-onchain/client";
 import { readLocalKey } from "@/lib/sodex-onchain/local-keys";
-import { placeLiveOrder } from "@/lib/sodex-onchain/placeLiveOrder";
+import {
+  placeLiveOrder,
+  placeTriggerForPosition,
+} from "@/lib/sodex-onchain/placeLiveOrder";
+import { getBuilderCode } from "@/lib/sodex-onchain/chains";
 import { useAccount } from "wagmi";
 import type {
   SodexPerpsAccountState,
@@ -109,6 +113,7 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
   const [allMarks, setAllMarks] = useState<Record<string, number>>({});
   const [cancelBusy, setCancelBusy] = useState(false);
   const [closeAllBusy, setCloseAllBusy] = useState(false);
+  const [tpslBusy, setTpslBusy] = useState(false);
   const { address: connectedMaster } = useAccount();
   const [bottomH, setBottomH] = useState(DEFAULT_BOTTOM);
   const [sideFill, setSideFill] = useState<{
@@ -463,6 +468,105 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
     },
     [closeAllBusy, markBySymbol, connectedMaster, refreshOpenOrders],
   );
+
+  const builderRate = useMemo(() => {
+    const b = getBuilderCode("mainnet");
+    return b ? b.fee / 100_000 : 0;
+  }, []);
+
+  // Set / modify TP & SL for an open position (selected market only — its rules
+  // carry the symbolID + tick/step). Place the NEW trigger first, then cancel
+  // the OLD one on success; a failed placement keeps the old order untouched.
+  const onSetTpSl = useCallback(
+    async (
+      pos: SodexPerpsAccountState["P"][number],
+      next: { tp: number | null; sl: number | null },
+      existing: { tpOrderId: number | null; slOrderId: number | null },
+    ): Promise<{ ok: boolean; error?: string }> => {
+      const key = readLocalKey("mainnet");
+      const aid = account?.aid;
+      const sid = rules?.id;
+      if (!key || aid == null || sid == null) {
+        return { ok: false, error: "Connect a SoDEX key first." };
+      }
+      const isLong = Number(pos.sz) >= 0;
+      const qty = Math.abs(Number(pos.sz)).toFixed(rules?.quantityPrecision ?? 5);
+      const pxDp = rules?.pricePrecision ?? 2;
+      const tick = rules && rules.tickSize > 0 ? rules.tickSize : 0;
+      const roundTick = (p: number) =>
+        tick > 0 ? (Math.round(p / tick) * tick).toFixed(pxDp) : p.toFixed(pxDp);
+      // Place NEW, then cancel OLD on success — never cancel first.
+      const replace = async (
+        trigger: number | null,
+        stopType: number,
+        oldId: number | null,
+      ): Promise<string | null> => {
+        if (trigger == null) return null; // this leg unchanged
+        try {
+          await placeTriggerForPosition({
+            network: "mainnet",
+            apiKeyName: key.name || undefined,
+            privateKey: key.privateKey,
+            accountID: aid,
+            symbolID: sid,
+            positionIsLong: isLong,
+            quantity: qty,
+            stopPrice: roundTick(trigger),
+            stopType,
+          });
+        } catch (e) {
+          return (e as Error).message; // keep the old order
+        }
+        if (oldId != null) {
+          try {
+            await cancelOrders({
+              network: "mainnet",
+              apiKeyName: key.name || undefined,
+              privateKey: key.privateKey,
+              accountID: aid,
+              cancels: [{ symbolID: sid, orderID: oldId }],
+            });
+          } catch {
+            /* new order is live; a stale old order is non-fatal */
+          }
+        }
+        return null;
+      };
+      setTpslBusy(true);
+      try {
+        const errs = (
+          [
+            await replace(next.tp, 2, existing.tpOrderId),
+            await replace(next.sl, 1, existing.slOrderId),
+          ] as (string | null)[]
+        ).filter((e): e is string => e != null);
+        await refreshOpenOrders();
+        return errs.length ? { ok: false, error: errs.join("; ") } : { ok: true };
+      } finally {
+        setTpslBusy(false);
+      }
+    },
+    [account?.aid, rules, refreshOpenOrders],
+  );
+
+  const tpslCtx = useMemo(
+    () => ({
+      rules: rules
+        ? {
+            symbolID: rules.id,
+            tickSize: rules.tickSize,
+            stepSize: rules.stepSize,
+            pricePrecision: rules.pricePrecision,
+            quantityPrecision: rules.quantityPrecision,
+            takerFee: rules.takerFee,
+          }
+        : null,
+      builderRate,
+      busy: tpslBusy,
+      onSet: onSetTpSl,
+    }),
+    [rules, builderRate, tpslBusy, onSetTpSl],
+  );
   const oracle = num(ticker?.indexPrice);
   const lastPrice = num(ticker?.lastPx);
   const bestBid = bids[0] ? Number(bids[0].price) : null;
@@ -728,6 +832,7 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
               closeAllBusy={closeAllBusy}
               markBySymbol={markBySymbol}
               selectedSymbol={sodexSymbol}
+              tpsl={tpslCtx}
               ready={tm.ready}
               digits={digits}
             />
