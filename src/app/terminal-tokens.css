@@ -34,6 +34,12 @@
   --color-negative: #f6465d;
 }
 
+/* Trade controls never use the brand (orange) focus outline — the global
+   :focus-visible amber is overridden with a neutral blue inside the terminal. */
+.trade-terminal :focus-visible {
+  outline-color: #3b82f6;
+}
+
 /* Honour reduced-motion: no price flashes / transitions inside the terminal. */
 @media (prefers-reduced-motion: reduce) {
   .trade-terminal *,

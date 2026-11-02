@@ -460,14 +460,14 @@ export function OrderPanel({
               ) : null}
             </div>
           </div>
-          <div className="flex items-center rounded-md border border-line bg-surface-2 px-3">
+          <div className="flex items-center rounded-md border border-line bg-surface-2 px-3 focus-within:border-[#3b82f6] focus-within:ring-1 focus-within:ring-[#3b82f6]">
             <input
               inputMode="decimal"
               value={limitPxInput}
               onChange={(e) =>
                 setLimitPxInput(e.target.value.replace(/[^0-9.]/g, ""))
               }
-              className="w-full bg-transparent py-2 text-sm text-fg outline-none tabular-nums"
+              className="w-full bg-transparent py-2 text-sm text-fg outline-none focus-visible:outline-none tabular-nums"
               placeholder={markPrice != null ? pxFmt(markPrice, digits) : "0"}
             />
             <span className="text-[11px] text-fg-dim">USDC</span>
@@ -504,20 +504,21 @@ export function OrderPanel({
           <span className="text-[10px] uppercase tracking-wider text-fg-dim">
             Size
           </span>
-          <span className="text-[10px] text-fg-dim">
-            ≈{" "}
-            {qty > 0
-              ? qty.toLocaleString(undefined, { maximumFractionDigits: 4 })
-              : "—"}{" "}
-            {symbol}
-          </span>
+          {rawSize > 0 && qty > 0 ? (
+            <span className="text-[10px] text-fg-dim tabular-nums">
+              ≈ {qty.toLocaleString(undefined, { maximumFractionDigits: 6 })}{" "}
+              {symbol}
+            </span>
+          ) : null}
         </div>
-        <div className="flex items-center rounded-md border border-line bg-surface-2 px-3">
+        {/* Input + unit toggle act as ONE control: the focus ring sits flush on
+            the wrapper (neutral blue), and the input has no outline of its own. */}
+        <div className="flex items-center rounded-md border border-line bg-surface-2 px-3 focus-within:border-[#3b82f6] focus-within:ring-1 focus-within:ring-[#3b82f6]">
           <input
             inputMode="decimal"
             value={sizeInput}
             onChange={(e) => setSizeInput(e.target.value.replace(/[^0-9.]/g, ""))}
-            className="w-full bg-transparent py-2 text-sm text-fg outline-none tabular-nums"
+            className="w-full bg-transparent py-2 text-sm text-fg outline-none focus-visible:outline-none tabular-nums"
             placeholder="0"
           />
           <button
@@ -732,7 +733,7 @@ function BracketInput({
         value={value}
         onChange={(e) => onChange(e.target.value.replace(/[^0-9.]/g, ""))}
         placeholder="0"
-        className="rounded border border-line bg-surface-2 px-2 py-1 text-xs tabular-nums outline-none focus:border-accent/50"
+        className="rounded border border-line bg-surface-2 px-2 py-1 text-xs tabular-nums outline-none focus:border-[#3b82f6] focus-visible:outline-none"
       />
       <span className="text-[9px] tabular-nums" style={{ color }}>
         {price != null ? pxFmt(price, digits) : "—"}
