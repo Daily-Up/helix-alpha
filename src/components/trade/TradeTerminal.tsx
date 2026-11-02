@@ -10,7 +10,7 @@
  * and draws its levels on the chart. Bottom: positions/balances tabs.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/components/ui/cn";
 import { AssetLogo } from "@/components/ui/AssetLogo";
 import { AssetPicker } from "./AssetPicker";
@@ -411,6 +411,29 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
   const levels =
     setup && setup.asset.id === assetId ? setup.setup.key_levels : undefined;
 
+  // Current-symbol position (entry/liq) + open orders → chart price lines.
+  const chartPosition = useMemo(() => {
+    const p = account?.P?.find(
+      (x) => (x.s ?? "").toUpperCase() === (sodexSymbol ?? "").toUpperCase(),
+    );
+    if (!p || Number(p.sz) === 0) return { entry: null, liq: null };
+    return {
+      entry: Number(p.ep) || null,
+      liq: p.lp ? Number(p.lp) : null,
+    };
+  }, [account, sodexSymbol]);
+  const chartOrderLines = useMemo(
+    () =>
+      openOrders
+        .filter((o) => o.price != null && Number.isFinite(Number(o.price)))
+        .map((o) => ({
+          price: Number(o.price),
+          side: (o.side === 1 ? "buy" : "sell") as "buy" | "sell", // 1 = BUY
+          size: o.origQty ?? "",
+        })),
+    [openOrders],
+  );
+
   async function runSetup() {
     if (!assetId) return;
     setSetupLoading(true);
@@ -518,6 +541,10 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
               label={`${selected?.symbol ?? ""}-${isPerp ? "PERP" : "SPOT"} · SoDEX`}
               market={market}
               levels={levels}
+              tickSize={rules?.tickSize}
+              positionEntry={chartPosition.entry}
+              positionLiq={chartPosition.liq}
+              orderLines={chartOrderLines}
             />
           ) : (
             <div className="flex h-full min-h-[360px] items-center justify-center text-sm text-fg-dim">

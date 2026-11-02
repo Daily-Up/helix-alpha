@@ -25,6 +25,23 @@ interface Candle {
 
 const UP = "#26a69a";
 const DOWN = "#ef5350";
+// Volume bars use the terminal palette (green up / red down), semi-opaque.
+const VOL_UP = "rgba(14,203,129,0.5)";
+const VOL_DOWN = "rgba(246,70,93,0.5)";
+const NEUTRAL = "rgba(190,190,195,0.75)";
+
+/** Decimal places implied by a tick size (1 → 0, 0.001 → 3). */
+const decimalsFromTick = (tick?: number) => {
+  if (!tick || tick <= 0) return 2;
+  if (tick >= 1) return 0;
+  return Math.min(8, Math.ceil(-Math.log10(tick)));
+};
+
+export interface ChartOrderLine {
+  price: number;
+  side: "buy" | "sell";
+  size: string;
+}
 
 const fmt = (n: number | null, d = 2) =>
   n == null
@@ -36,12 +53,23 @@ export function PriceChart({
   label,
   market,
   levels,
+  tickSize,
+  positionEntry,
+  positionLiq,
+  orderLines,
 }: {
   symbol: string;
   /** Display label e.g. "GOOGL · 1h". */
   label: string;
   market: "spot" | "perp";
   levels?: SetupLevel[];
+  /** Price tick size → axis precision (BTC → "82,000", no ".00"). */
+  tickSize?: number;
+  /** Open-position entry + liquidation price for this symbol (price lines). */
+  positionEntry?: number | null;
+  positionLiq?: number | null;
+  /** Open orders for this symbol, drawn as side-coloured price lines. */
+  orderLines?: ChartOrderLine[];
 }) {
   const [interval, setIntervalSel] = useState<Interval>("1h");
   const [candles, setCandles] = useState<Candle[]>([]);
@@ -59,6 +87,8 @@ export function PriceChart({
   const volRef = useRef<any>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const priceLinesRef = useRef<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tradeLinesRef = useRef<any[]>([]);
   const candlesRef = useRef<Candle[]>([]);
 
   const digits = (candles[candles.length - 1]?.close ?? 1) < 10 ? 4 : 2;
@@ -98,6 +128,9 @@ export function PriceChart({
           textColor: "rgba(190,190,195,0.55)",
           fontSize: 11,
           fontFamily: "var(--font-jetbrains-mono), monospace",
+          // Attribution shown as a text link in the footer instead (the logo
+          // overlapped the volume bars); the license requires the credit.
+          attributionLogo: false,
         },
         grid: {
           vertLines: { color: "rgba(255,255,255,0.03)" },
@@ -126,6 +159,11 @@ export function PriceChart({
         borderDownColor: DOWN,
         wickUpColor: UP,
         wickDownColor: DOWN,
+        priceFormat: {
+          type: "price",
+          precision: decimalsFromTick(tickSize),
+          minMove: tickSize && tickSize > 0 ? tickSize : 0.01,
+        },
       });
       const vol = chart.addHistogramSeries({
         priceFormat: { type: "volume" },
@@ -182,12 +220,68 @@ export function PriceChart({
       candles.map((c) => ({
         time: c.time,
         value: c.volume,
-        color: c.close >= c.open ? "rgba(38,166,154,0.35)" : "rgba(239,83,80,0.35)",
+        color: c.close >= c.open ? VOL_UP : VOL_DOWN,
       })),
     );
     chartRef.current?.timeScale().fitContent();
     setLegend(candles[candles.length - 1] ?? null);
   }, [candles, ready]);
+
+  // Keep the price-axis precision in sync with the symbol's tick size.
+  useEffect(() => {
+    if (!ready || !candleRef.current) return;
+    candleRef.current.applyOptions({
+      priceFormat: {
+        type: "price",
+        precision: decimalsFromTick(tickSize),
+        minMove: tickSize && tickSize > 0 ? tickSize : 0.01,
+      },
+    });
+  }, [tickSize, ready]);
+
+  // Live updates: poll the latest bars and update() them (sets the volume
+  // colour on every incremental update, not just the initial setData).
+  useEffect(() => {
+    if (!ready) return;
+    let cancelled = false;
+    const poll = async () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      try {
+        const r = await fetch(
+          `/api/sodex/candles?symbol=${encodeURIComponent(symbol)}&market=${market}&interval=${interval}&limit=2`,
+        );
+        const j = await r.json();
+        if (cancelled || !j.ok || !Array.isArray(j.candles)) return;
+        const lastT = candlesRef.current[candlesRef.current.length - 1]?.time ?? 0;
+        for (const c of j.candles as Candle[]) {
+          if (c.time < lastT) continue; // never update older than the last bar
+          candleRef.current?.update({
+            time: c.time,
+            open: c.open,
+            high: c.high,
+            low: c.low,
+            close: c.close,
+          });
+          volRef.current?.update({
+            time: c.time,
+            value: c.volume,
+            color: c.close >= c.open ? VOL_UP : VOL_DOWN,
+          });
+          // keep the ref in sync so the legend/crosshair stay correct
+          const arr = candlesRef.current;
+          if (arr.length && arr[arr.length - 1].time === c.time) arr[arr.length - 1] = c;
+          else arr.push(c);
+        }
+      } catch {
+        /* keep last good */
+      }
+    };
+    const t = setInterval(poll, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [ready, symbol, market, interval]);
 
   // Setup levels → price lines.
   useEffect(() => {
@@ -215,6 +309,45 @@ export function PriceChart({
     }
   }, [levels, ready, candles]);
 
+  // Position (entry neutral, liq red-dashed) + open-order (side-coloured,
+  // labelled with size) price lines. Cleared + redrawn when they change or the
+  // symbol switches.
+  useEffect(() => {
+    const series = candleRef.current;
+    if (!ready || !series) return;
+    for (const pl of tradeLinesRef.current) {
+      try {
+        series.removePriceLine(pl);
+      } catch {
+        /* no-op */
+      }
+    }
+    tradeLinesRef.current = [];
+    const add = (price: number, color: string, style: number, title: string) =>
+      tradeLinesRef.current.push(
+        series.createPriceLine({
+          price,
+          color,
+          lineWidth: 1,
+          lineStyle: style,
+          axisLabelVisible: true,
+          title,
+        }),
+      );
+    if (positionEntry != null && positionEntry > 0)
+      add(positionEntry, NEUTRAL, 0, "Entry");
+    if (positionLiq != null && positionLiq > 0)
+      add(positionLiq, DOWN, 2, "Liq");
+    for (const o of orderLines ?? []) {
+      add(
+        o.price,
+        o.side === "buy" ? UP : DOWN,
+        1,
+        `${o.side === "buy" ? "Buy" : "Sell"} ${o.size}`,
+      );
+    }
+  }, [ready, positionEntry, positionLiq, orderLines, symbol, candles.length]);
+
   const up = legend ? legend.close >= legend.open : true;
   const chg = legend ? legend.close - legend.open : 0;
   const chgPct = legend && legend.open ? (chg / legend.open) * 100 : 0;
@@ -240,6 +373,14 @@ export function PriceChart({
         <span className="ml-2 text-[10px] text-fg-dim">
           {loading ? "loading…" : ""}
         </span>
+        <a
+          href="https://www.tradingview.com/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="ml-auto pr-1 text-[9px] text-fg-dim transition-colors hover:text-fg-muted"
+        >
+          Charts by TradingView
+        </a>
       </div>
 
       {/* Chart with OHLC legend overlay — fills the remaining cell height;
