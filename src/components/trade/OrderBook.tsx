@@ -270,13 +270,19 @@ export function OrderBook({
                 <span
                   className={cn(
                     "flex items-center gap-1 font-[var(--font-jetbrains-mono)] text-[13px] font-medium tabular-nums",
-                    dir === "down" ? "text-negative" : "text-positive",
+                    dir === "down"
+                      ? "text-negative"
+                      : dir === "up"
+                        ? "text-positive"
+                        : "text-fg",
                   )}
                 >
                   {markPrice != null ? fmtPx(markPrice) : "—"}
-                  <span className="text-[10px]">
-                    {dir === "down" ? "↓" : "↑"}
-                  </span>
+                  {dir === "up" || dir === "down" ? (
+                    <span className="text-[10px]">
+                      {dir === "down" ? "↓" : "↑"}
+                    </span>
+                  ) : null}
                 </span>
                 <span className="text-[10px] text-fg-dim">
                   {spread != null
