@@ -641,6 +641,34 @@ export async function placeOrderBatch(opts: {
   };
   if (apiKeyName) headers["X-API-Key"] = apiKeyName;
 
+  // Dev-only payload proof (commit 3a). When NEXT_PUBLIC_SODEX_DRY_RUN=1 —
+  // which is guarded to never run in a production build — the order is built
+  // and signed exactly as normal, then the FINAL wire payload (body incl. the
+  // `builder` fee field, headers incl. X-API-Sign) is logged and a stub
+  // returned instead of submitting. Lets us confirm the execute→placeLiveOrder
+  // extraction didn't change the payload. The private key is never in the
+  // body/headers, so nothing secret is logged.
+  if (
+    process.env.NODE_ENV !== "production" &&
+    process.env.NEXT_PUBLIC_SODEX_DRY_RUN === "1"
+  ) {
+    // eslint-disable-next-line no-console
+    console.log(
+      "[DRY_RUN placeOrderBatch]",
+      JSON.stringify(
+        { url: `${endpoint}${path}`, headers, body },
+        // Defensive: mask any field that looks like a secret. The private key
+        // is never in headers/body, but this guarantees it (and any seed /
+        // mnemonic) can never be logged. X-API-Sign / -Nonce / -Key are not
+        // secrets and are left intact.
+        (k, v) =>
+          /private|secret|seed|mnemonic|passphrase/i.test(k) ? "«redacted»" : v,
+        2,
+      ),
+    );
+    return { dryRun: true, orderID: "dry-run", body, headers };
+  }
+
   const res = await fetch(`${endpoint}${path}`, {
     method: "POST",
     headers,

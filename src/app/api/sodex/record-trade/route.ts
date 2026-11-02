@@ -76,6 +76,17 @@ export async function POST(req: Request) {
     );
   }
 
+  // DRY_RUN (commit 3a payload-proof): when the dev-only flag is on, the
+  // browser is building/signing order payloads to capture them, not really
+  // trading — so DON'T persist anything. This keeps fake orders out of the
+  // live-trades history. Guarded to never run in a production build.
+  if (
+    process.env.NODE_ENV !== "production" &&
+    process.env.NEXT_PUBLIC_SODEX_DRY_RUN === "1"
+  ) {
+    return NextResponse.json({ ok: true, id: "dry-run", dryRun: true });
+  }
+
   const id = randomUUID();
   await ExecutedTrades.insertExecutedTrade({
     id,
