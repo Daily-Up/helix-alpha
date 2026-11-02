@@ -105,6 +105,12 @@ export interface SodexPerpsAccountState {
     l?: number;
     /** Liquidation price. */
     lp?: string;
+    /** Funding fee accrued on THIS open position so far (signed decimal
+     *  string, settlement coin): positive = received, negative = paid. Equals
+     *  the sum of /fundings payments for this position's id. */
+    ff?: string;
+    /** Position open time (ms). */
+    ct?: number;
   }>;
   /** Open orders (PerpsOrder shape; see getOpenOrders). */
   O: unknown[];

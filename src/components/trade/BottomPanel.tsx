@@ -439,6 +439,17 @@ function PositionsView({
         // Resting TP / SL triggers for this position.
         const { tp, sl } = tpslFor(p, orders);
 
+        // Funding: total ACCRUED on this open position so far (p.ff), plus the
+        // current rate / est. next / countdown for the cell's hover.
+        const f = fundingBySymbol[p.s.toUpperCase()];
+        const accruedFunding = p.ff != null ? Number(p.ff) : null;
+        const estNextFunding =
+          f && value != null ? fundingEst(value, isLong, f.rate) : null;
+        const fundingRatePct = f ? f.rate * 100 : null;
+        const fundingNextMs = f ? nextFundingMs(f.next) : 0;
+        const fundingCd =
+          fundingNextMs > 0 ? fmtCountdown(fundingNextMs - now) : null;
+
         return (
           <div
             key={key}
@@ -515,13 +526,14 @@ function PositionsView({
             <span className="text-right text-fg-muted">
               {margin != null ? money(margin) : "—"}
             </span>
-            {/* Funding — est. next payment for THIS position (size × mark ×
-                rate), signed: longs pay when the rate is positive. */}
+            {/* Funding — total funding ACCRUED on this position so far (p.ff),
+                signed (green = received, red = paid). Rate / est. next / count-
+                down on hover. */}
             <FundingCell
-              notional={value}
-              isLong={isLong}
-              funding={fundingBySymbol[p.s.toUpperCase()]}
-              now={now}
+              accrued={accruedFunding}
+              estNext={estNextFunding}
+              ratePct={fundingRatePct}
+              cd={fundingCd}
             />
             {/* SL */}
             <TriggerCell value={sl} tone="neg" px={px} onEdit={() => openModal(p, "sl")} />
@@ -619,42 +631,42 @@ function TriggerCell({
   );
 }
 
-/** Positions "Funding" cell — est. next funding for the position, signed
- *  (green = you receive, red = you pay), with rate + countdown on hover. */
+/** Positions "Funding" cell — total funding ACCRUED on the open position so
+ *  far (p.ff), signed (green = received, red = paid). The current rate, est.
+ *  next payment and countdown to the next settlement are on hover. */
 function FundingCell({
-  notional,
-  isLong,
-  funding,
-  now,
+  accrued,
+  estNext,
+  ratePct,
+  cd,
 }: {
-  notional: number | null;
-  isLong: boolean;
-  funding: FundingInfo | undefined;
-  now: number;
+  accrued: number | null;
+  estNext: number | null;
+  ratePct: number | null;
+  cd: string | null;
 }) {
-  if (!funding || notional == null || !Number.isFinite(notional)) {
+  if (accrued == null || !Number.isFinite(accrued)) {
     return (
-      <span className="text-right text-fg-dim" title="Funding rate unavailable">
+      <span className="text-right text-fg-dim" title="Funding not available yet">
         —
       </span>
     );
   }
-  const est = fundingEst(notional, isLong, funding.rate);
-  const ratePct = funding.rate * 100;
-  const nextMs = nextFundingMs(funding.next);
-  const cd = nextMs > 0 ? fmtCountdown(nextMs - now) : null;
   const title =
-    `Est. next funding ${fundingFmt(est)} — rate ${ratePct >= 0 ? "+" : ""}` +
-    `${ratePct.toFixed(4)}% per interval${cd ? `, next in ${cd}` : ""}`;
+    `Funding accrued on this position ${fundingFmt(accrued)}` +
+    (estNext != null ? ` · est. next ${fundingFmt(estNext)}` : "") +
+    (ratePct != null
+      ? ` (rate ${ratePct >= 0 ? "+" : ""}${ratePct.toFixed(4)}%/interval${cd ? `, in ${cd}` : ""})`
+      : "");
   return (
     <span
       className={cn(
         "text-right",
-        est > 0 ? "text-positive" : est < 0 ? "text-negative" : "text-fg-muted",
+        accrued > 0 ? "text-positive" : accrued < 0 ? "text-negative" : "text-fg-muted",
       )}
       title={title}
     >
-      {fundingFmt(est)}
+      {fundingFmt(accrued)}
     </span>
   );
 }
