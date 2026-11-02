@@ -50,6 +50,32 @@ const fmtTime = (t: number) => {
   const d = new Date(t < 1e12 ? t * 1000 : t); // accept seconds or ms
   return `${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}`;
 };
+// Short "time until next funding" from ms remaining (e.g. "1h 23m", "4m 09s").
+const fmtCountdown = (ms: number) => {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  return h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${two(ss)}s` : `${ss}s`;
+};
+// Signed est. funding for a position at the current rate: a long PAYS (negative)
+// when the rate is positive and a short RECEIVES (positive); reversed when the
+// rate is negative. notional = |size| × mark; rate = raw fraction per interval.
+const fundingEst = (notional: number, isLong: boolean, rate: number) =>
+  (isLong ? -1 : 1) * notional * rate;
+// Signed $ whose precision scales to the (usually tiny) funding amount.
+const fundingFmt = (v: number) => {
+  if (!Number.isFinite(v)) return "—";
+  const a = Math.abs(v);
+  const dp = a >= 1 ? 2 : a >= 0.01 ? 3 : 4;
+  return `${v < 0 ? "−" : "+"}$${a.toLocaleString(undefined, {
+    minimumFractionDigits: dp,
+    maximumFractionDigits: dp,
+  })}`;
+};
+// next funding time may arrive in seconds or ms; normalise to ms.
+const nextFundingMs = (next: number) =>
+  next > 0 ? (next < 1e12 ? next * 1000 : next) : 0;
 // Display names use the -PERP convention everywhere, matching the header.
 const perpName = (s: string) => s.replace(/-USDC?$/i, "-PERP");
 const baseOf = (s: string) => s.split("-")[0] || s;
@@ -57,6 +83,10 @@ const marginModeLabel = (m?: string) =>
   m ? m.charAt(0).toUpperCase() + m.slice(1).toLowerCase() : null;
 
 type Position = NonNullable<SodexPerpsAccountState["P"]>[number];
+
+/** Per-symbol funding snapshot: raw rate (fraction per interval) + next
+ *  funding time in ms. */
+export type FundingInfo = { rate: number; next: number };
 
 export type TpSlCtx = {
   /** Per-symbol metadata keyed by sodex symbol (so TP/SL works for any market). */
@@ -89,6 +119,9 @@ export function BottomPanel({
   onCloseAll,
   closeAllBusy,
   markBySymbol,
+  fundingBySymbol,
+  fundingInterval,
+  now,
   selectedSymbol,
   tpsl,
   ready,
@@ -109,6 +142,12 @@ export function BottomPanel({
   closeAllBusy: boolean;
   /** Live mark price keyed by sodex symbol (all open-position symbols). */
   markBySymbol: Record<string, number>;
+  /** Per-symbol funding: raw rate (fraction/interval) + next funding time (ms). */
+  fundingBySymbol: Record<string, FundingInfo>;
+  /** Funding interval in seconds, for the annualized rate. */
+  fundingInterval: number;
+  /** Date.now() ms, ticking each second — for the funding countdown. */
+  now: number;
   /** Currently-selected market symbol, for the "Current market only" filter. */
   selectedSymbol: string | null;
   /** TP/SL placement context (selected market rules + the place/modify call). */
@@ -190,6 +229,8 @@ export function BottomPanel({
               orders={openOrders}
               digits={digits}
               markBySymbol={markBySymbol}
+              fundingBySymbol={fundingBySymbol}
+              now={now}
               selectedSymbol={selectedSymbol}
               tpsl={tpsl}
               onSelect={onSelectSymbol}
@@ -213,12 +254,17 @@ export function BottomPanel({
           // TODO: wire to /api/sodex/my-trades (Helix's executed-trade log).
           <Empty>Trade history coming soon.</Empty>
         ) : tab === "Funding" ? (
-          // TODO: SoDEX exposes no per-position funding-payment endpoint yet.
-          // Wire here once /accounts/{addr}/funding (or similar) ships.
-          <Empty>
-            Funding payments aren&apos;t available from SoDEX yet. (TODO: wire a
-            funding-history endpoint when one exists.)
-          </Empty>
+          positions.length === 0 ? (
+            <Empty>No open positions.</Empty>
+          ) : (
+            <FundingView
+              positions={positions}
+              markBySymbol={markBySymbol}
+              fundingBySymbol={fundingBySymbol}
+              fundingInterval={fundingInterval}
+              now={now}
+            />
+          )
         ) : (
           // Order History — TODO: no SoDEX filled/cancelled/rejected history
           // endpoint yet; fall back to an empty state.
@@ -270,7 +316,7 @@ function Empty({ children, cta }: { children: React.ReactNode; cta?: boolean }) 
 // chart+book width at 1366 and breathes at 1920. (Funding dropped: SoDEX
 // exposes no per-position funding, so it was always "—".)
 const POS_COLS =
-  "minmax(96px,1.7fr) minmax(0,1.05fr) minmax(0,0.95fr) minmax(0,0.95fr) minmax(0,0.95fr) minmax(0,1.35fr) minmax(0,1fr) minmax(0,0.82fr) minmax(0,0.95fr) minmax(0,0.95fr) minmax(0,0.78fr)";
+  "minmax(96px,1.7fr) minmax(0,1.05fr) minmax(0,0.95fr) minmax(0,0.95fr) minmax(0,0.95fr) minmax(0,1.35fr) minmax(0,1fr) minmax(0,0.82fr) minmax(0,1fr) minmax(0,0.95fr) minmax(0,0.95fr) minmax(0,0.78fr)";
 
 /** Read a (possibly runtime-only) stopPrice off an open order. */
 function stopPriceOf(o: SodexOpenOrder): number | null {
@@ -313,6 +359,8 @@ function PositionsView({
   orders,
   digits,
   markBySymbol,
+  fundingBySymbol,
+  now,
   selectedSymbol,
   tpsl,
   onSelect,
@@ -322,6 +370,8 @@ function PositionsView({
   orders: SodexOpenOrder[];
   digits: number;
   markBySymbol: Record<string, number>;
+  fundingBySymbol: Record<string, FundingInfo>;
+  now: number;
   selectedSymbol: string | null;
   tpsl: TpSlCtx;
   onSelect: (sodexSymbol: string) => void;
@@ -342,6 +392,7 @@ function PositionsView({
     "uPnL",
     "Liquidation",
     "Margin",
+    "Funding",
     "SL",
     "TP",
     "",
@@ -454,6 +505,14 @@ function PositionsView({
             <span className="text-right text-fg-muted">
               {margin != null ? money(margin) : "—"}
             </span>
+            {/* Funding — est. next payment for THIS position (size × mark ×
+                rate), signed: longs pay when the rate is positive. */}
+            <FundingCell
+              notional={value}
+              isLong={isLong}
+              funding={fundingBySymbol[p.s.toUpperCase()]}
+              now={now}
+            />
             {/* SL */}
             <TriggerCell value={sl} tone="neg" px={px} onEdit={() => openModal(p, "sl")} />
             {/* TP */}
@@ -547,6 +606,151 @@ function TriggerCell({
         ✎
       </button>
     </span>
+  );
+}
+
+/** Positions "Funding" cell — est. next funding for the position, signed
+ *  (green = you receive, red = you pay), with rate + countdown on hover. */
+function FundingCell({
+  notional,
+  isLong,
+  funding,
+  now,
+}: {
+  notional: number | null;
+  isLong: boolean;
+  funding: FundingInfo | undefined;
+  now: number;
+}) {
+  if (!funding || notional == null || !Number.isFinite(notional)) {
+    return (
+      <span className="text-right text-fg-dim" title="Funding rate unavailable">
+        —
+      </span>
+    );
+  }
+  const est = fundingEst(notional, isLong, funding.rate);
+  const ratePct = funding.rate * 100;
+  const nextMs = nextFundingMs(funding.next);
+  const cd = nextMs > 0 ? fmtCountdown(nextMs - now) : null;
+  const title =
+    `Est. next funding ${fundingFmt(est)} — rate ${ratePct >= 0 ? "+" : ""}` +
+    `${ratePct.toFixed(4)}% per interval${cd ? `, next in ${cd}` : ""}`;
+  return (
+    <span
+      className={cn(
+        "text-right",
+        est > 0 ? "text-positive" : est < 0 ? "text-negative" : "text-fg-muted",
+      )}
+      title={title}
+    >
+      {fundingFmt(est)}
+    </span>
+  );
+}
+
+const FUND_COLS =
+  "minmax(96px,1.4fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1.1fr) minmax(0,0.9fr)";
+
+/** Funding tab — per-position forward estimate: current rate, annualized rate,
+ *  est. next funding, and the countdown. No realized history yet (see TODO). */
+function FundingView({
+  positions,
+  markBySymbol,
+  fundingBySymbol,
+  fundingInterval,
+  now,
+}: {
+  positions: Position[];
+  markBySymbol: Record<string, number>;
+  fundingBySymbol: Record<string, FundingInfo>;
+  fundingInterval: number;
+  now: number;
+}) {
+  const periodsPerYear =
+    (365 * 24 * 3600) / (fundingInterval > 0 ? fundingInterval : 3600);
+  return (
+    <div className="text-[11.5px]">
+      <div
+        className="grid gap-2 border-b border-line px-4 py-1.5 text-[9px] uppercase tracking-wider text-fg-dim"
+        style={{ gridTemplateColumns: FUND_COLS }}
+      >
+        <span>Market</span>
+        <span className="text-right">Funding Rate</span>
+        <span className="text-right">Annualized</span>
+        <span className="text-right">Est. Next Funding</span>
+        <span className="text-right">Next In</span>
+      </div>
+      {positions.map((p) => {
+        const sz = Number(p.sz);
+        const isLong = sz >= 0;
+        const abs = Math.abs(sz);
+        const mark = markBySymbol[p.s.toUpperCase()] ?? Number(p.ep);
+        const notional = abs * mark;
+        const f = fundingBySymbol[p.s.toUpperCase()];
+        const ratePct = f ? f.rate * 100 : null;
+        const annual = ratePct != null ? ratePct * periodsPerYear : null;
+        const est = f ? fundingEst(notional, isLong, f.rate) : null;
+        const nextMs = f ? nextFundingMs(f.next) : 0;
+        const cd = nextMs > 0 ? fmtCountdown(nextMs - now) : "—";
+        return (
+          <div
+            key={`${p.i}-${p.s}`}
+            className="grid items-center gap-2 px-4 py-1.5 font-[var(--font-jetbrains-mono)] tabular-nums hover:bg-surface-2/40"
+            style={{ gridTemplateColumns: FUND_COLS }}
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <AssetLogo symbol={p.s} size={16} />
+              <span className="truncate text-fg">{perpName(p.s)}</span>
+              <span
+                className={cn(
+                  "rounded px-1 text-[8.5px] font-semibold uppercase",
+                  isLong ? "bg-positive/15 text-positive" : "bg-negative/15 text-negative",
+                )}
+              >
+                {isLong ? "Long" : "Short"}
+              </span>
+            </span>
+            <span
+              className={cn(
+                "text-right",
+                ratePct == null ? "text-fg-dim" : ratePct >= 0 ? "text-positive" : "text-negative",
+              )}
+            >
+              {ratePct == null ? "—" : `${ratePct >= 0 ? "+" : ""}${ratePct.toFixed(4)}%`}
+            </span>
+            <span
+              className={cn(
+                "text-right",
+                annual == null ? "text-fg-dim" : annual >= 0 ? "text-positive" : "text-negative",
+              )}
+            >
+              {annual == null ? "—" : `${annual >= 0 ? "+" : ""}${annual.toFixed(2)}%`}
+            </span>
+            <span
+              className={cn(
+                "text-right",
+                est == null
+                  ? "text-fg-dim"
+                  : est > 0
+                    ? "text-positive"
+                    : est < 0
+                      ? "text-negative"
+                      : "text-fg-muted",
+              )}
+            >
+              {est == null ? "—" : fundingFmt(est)}
+            </span>
+            <span className="text-right text-fg-dim">{cd}</span>
+          </div>
+        );
+      })}
+      {/* TODO(sodex): SoDEX exposes no funding-PAYMENT history endpoint yet.
+          Ask SoDEX for GET /accounts/{address}/funding (realized funding per
+          position/epoch); when it ships, render the history here. For now this
+          tab shows only the forward per-position estimate. */}
+      <p className="px-4 py-3 text-[11px] text-fg-dim">Funding history coming soon.</p>
+    </div>
   );
 }
 

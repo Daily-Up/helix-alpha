@@ -135,6 +135,11 @@ export function TradeTerminal({
   // Live mark per symbol across ALL open positions (not just the selected
   // market), from the all-tickers poll below.
   const [allMarks, setAllMarks] = useState<Record<string, number>>({});
+  // Per-symbol funding (raw rate + next funding time, ms) from the same poll,
+  // so the Positions "Funding" column + Funding tab are account-wide.
+  const [fundingBySymbol, setFundingBySymbol] = useState<
+    Record<string, { rate: number; next: number }>
+  >({});
   const [cancelBusy, setCancelBusy] = useState(false);
   const [closeAllBusy, setCloseAllBusy] = useState(false);
   const [tpslBusy, setTpslBusy] = useState(false);
@@ -222,6 +227,7 @@ export function TradeTerminal({
   useEffect(() => {
     if (!hasOpenPositions) {
       setAllMarks({});
+      setFundingBySymbol({});
       return;
     }
     let cancelled = false;
@@ -232,6 +238,7 @@ export function TradeTerminal({
         const j = await r.json();
         if (cancelled || !j.ok) return;
         setAllMarks(j.marks ?? {});
+        setFundingBySymbol(j.funding ?? {});
       } catch {
         /* keep last good marks */
       }
@@ -972,6 +979,9 @@ export function TradeTerminal({
               onCloseAll={onCloseAll}
               closeAllBusy={closeAllBusy}
               markBySymbol={markBySymbol}
+              fundingBySymbol={fundingBySymbol}
+              fundingInterval={fundingInterval}
+              now={now}
               selectedSymbol={sodexSymbol}
               tpsl={tpslCtx}
               ready={tm.ready}
