@@ -171,9 +171,9 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border border-line bg-surface">
+    <div className="flex h-full flex-col overflow-hidden rounded-lg border border-line bg-surface">
       {/* ── Header stat row ── */}
-      <div className="flex flex-wrap items-center gap-x-7 gap-y-3 border-b border-line bg-surface-2/40 px-4 py-2.5">
+      <div className="flex shrink-0 flex-wrap items-center gap-x-7 gap-y-3 border-b border-line bg-surface-2/40 px-4 py-2.5">
         <div className="flex items-center gap-2.5">
           {selected ? <AssetLogo symbol={selected.symbol} size={28} /> : null}
           <div className="flex flex-col">
@@ -242,11 +242,14 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
         </button>
       </div>
 
-      {/* ── Body: chart | book | ticket. On narrow screens the order
-          ticket sits right under the chart (before the long book) so it's
-          never buried; from lg up it's the right-hand column. ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_210px_284px]">
-        <div className="order-1 border-line px-3 py-2 lg:border-r">
+      {/* ── Body: chart | book | ticket. Fills the remaining height; each
+          panel scrolls internally on desktop. Below lg it stacks (chart →
+          form → book) and the body scrolls. ── */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_210px_284px] lg:overflow-hidden">
+        {/* Chart cell (relative so the AI-Setup output can float over it).
+            On mobile each grid row sizes to content (no flex-shrink overlap);
+            from lg the cells fill the single row and scroll internally. */}
+        <div className="relative order-1 border-line px-3 py-2 lg:min-h-0 lg:overflow-hidden lg:border-r">
           {sodexSymbol ? (
             <PriceChart
               symbol={sodexSymbol}
@@ -255,13 +258,47 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
               levels={levels}
             />
           ) : (
-            <div className="flex h-[420px] items-center justify-center text-sm text-fg-dim">
+            <div className="flex h-full min-h-[360px] items-center justify-center text-sm text-fg-dim">
               No SoDEX market for this asset.
             </div>
           )}
+
+          {/* AI Setup output floats over the chart; the levels are drawn on
+              the chart itself, so this card is dismissible without losing them. */}
+          {(setup && setup.asset.id === assetId) || setupLoading || setupError ? (
+            <div className="absolute bottom-3 left-3 z-20 flex max-h-[72%] w-[min(360px,calc(100%-24px))] flex-col overflow-hidden rounded-lg border border-line bg-surface/95 shadow-2xl backdrop-blur">
+              <div className="flex shrink-0 items-center justify-between border-b border-line px-3 py-1.5">
+                <span className="text-[11px] font-medium text-accent-2">AI Setup</span>
+                {!setupLoading ? (
+                  <button
+                    onClick={() => {
+                      setSetup(null);
+                      setSetupError(null);
+                    }}
+                    className="text-[14px] leading-none text-fg-dim hover:text-fg"
+                    aria-label="Dismiss setup"
+                  >
+                    ×
+                  </button>
+                ) : null}
+              </div>
+              <div className="min-h-0 overflow-y-auto p-3">
+                {setupError ? (
+                  <div className="text-sm text-negative">{setupError}</div>
+                ) : setupLoading ? (
+                  <div className="py-4 text-center text-sm text-fg-dim">
+                    Pulling {selected?.symbol} news + price, thinking through the setup…
+                  </div>
+                ) : setup ? (
+                  <SetupCard data={setup} />
+                ) : null}
+              </div>
+            </div>
+          ) : null}
         </div>
 
-        <div className="order-3 border-t border-line lg:order-2 lg:border-t-0">
+        {/* Order book */}
+        <div className="order-3 border-t border-line lg:order-2 lg:min-h-0 lg:overflow-y-auto lg:border-t-0">
           <OrderBook
             bids={bids}
             asks={asks}
@@ -272,7 +309,8 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
           />
         </div>
 
-        <div className="order-2 border-t border-line lg:order-3 lg:border-l lg:border-t-0">
+        {/* Order ticket */}
+        <div className="order-2 border-t border-line lg:order-3 lg:min-h-0 lg:overflow-y-auto lg:border-l lg:border-t-0">
           {selected && sodexSymbol ? (
             <OrderPanel
               symbol={selected.symbol}
@@ -284,25 +322,8 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
         </div>
       </div>
 
-      {/* ── Setup output ── */}
-      {(setup && setup.asset.id === assetId) || setupLoading || setupError ? (
-        <div className="border-t border-line p-4">
-          {setupError ? (
-            <div className="rounded-lg border border-negative/30 bg-negative/10 px-4 py-3 text-sm text-negative">
-              {setupError}
-            </div>
-          ) : setupLoading ? (
-            <div className="rounded-xl border border-line bg-surface-2/40 px-5 py-8 text-center text-sm text-fg-dim">
-              Pulling {selected?.symbol} news + price, thinking through the setup…
-            </div>
-          ) : setup ? (
-            <SetupCard data={setup} />
-          ) : null}
-        </div>
-      ) : null}
-
       {/* ── Bottom: positions / balances tabs ── */}
-      <div className="border-t border-line">
+      <div className="shrink-0 border-t border-line">
         <div className="flex items-center gap-5 border-b border-line px-4 py-2 text-[12px]">
           {BOTTOM_TABS.map((t) => (
             <button

@@ -24,20 +24,19 @@ export function Topbar() {
 
   return (
     <header className="sticky top-0 z-10 flex h-14 items-center justify-between border-b border-line bg-bg/90 px-6 backdrop-blur">
-      <div className="flex items-center gap-3 text-xs text-fg-muted">
-        <MobileNav />
-        {/* suppressHydrationWarning is belt-and-suspenders: the empty initial
-            value means there's nothing to mismatch, but if a future change
-            ever inlines `new Date()` again this stops the noisy console. */}
-        <span className="tabular text-fg" suppressHydrationWarning>
-          {now || "——:——:——"}
-        </span>
-        <span className="text-fg-dim">UTC</span>
-      </div>
       <div className="flex items-center gap-3">
-        {/* Single trade-mode status — no separate decorative "Live" pill,
-            which contradicted the badge (that pill always said "Live"
-            while the badge could read Demo). */}
+        <MobileNav />
+      </div>
+      {/* Clock sits with the trade-mode badge on the right so it doesn't float
+          alone on the left. suppressHydrationWarning: the empty initial value
+          means nothing to mismatch. */}
+      <div className="flex items-center gap-4">
+        <div className="flex items-center gap-1.5 text-xs text-fg-muted">
+          <span className="tabular text-fg" suppressHydrationWarning>
+            {now || "——:——:——"}
+          </span>
+          <span className="text-fg-dim">UTC</span>
+        </div>
         <TradeModeBadge />
       </div>
     </header>

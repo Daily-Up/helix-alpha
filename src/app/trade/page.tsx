@@ -57,19 +57,8 @@ export default async function TradePage() {
     );
 
   return (
-    <Shell>
-      <div className="dash-page-enter flex flex-col gap-3">
-        <div className="flex items-baseline justify-between">
-          <h1 className="font-[var(--font-jetbrains-mono)] text-[11px] uppercase tracking-[0.18em] text-fg-dim">
-            Trade Terminal · SoDEX Perpetuals
-          </h1>
-          <span className="text-[11px] text-fg-dim">
-            News-grounded setups · one-signature execution
-          </span>
-        </div>
-
-        <TradeTerminal assets={assets} />
-      </div>
+    <Shell bleed>
+      <TradeTerminal assets={assets} />
     </Shell>
   );
 }

@@ -17,15 +17,32 @@ import { Topbar } from "./Topbar";
  * dashboard panels (equity curve + risk metrics side by side)
  * still breathe. Used by every page in the app.
  */
-export function Shell({ children }: { children: React.ReactNode }) {
+/**
+ * `bleed` is used only by the trade terminal: it drops the max-width cap and
+ * editorial padding so the terminal fills everything right of the sidebar
+ * (8px gutter), and makes `main` non-scrolling so the terminal can own its
+ * own height (calc(100vh - topbar)) with each panel scrolling internally.
+ * Every other page keeps the capped, scrollable layout unchanged.
+ */
+export function Shell({
+  children,
+  bleed = false,
+}: {
+  children: React.ReactNode;
+  bleed?: boolean;
+}) {
   return (
     <div className="flex h-screen overflow-hidden bg-bg text-fg">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar />
-        <main className="flex-1 overflow-y-auto px-6 py-5 md:px-10 md:py-7">
-          <div className="mx-auto w-full max-w-[1440px]">{children}</div>
-        </main>
+        {bleed ? (
+          <main className="min-h-0 flex-1 overflow-hidden p-2">{children}</main>
+        ) : (
+          <main className="flex-1 overflow-y-auto px-6 py-5 md:px-10 md:py-7">
+            <div className="mx-auto w-full max-w-[1440px]">{children}</div>
+          </main>
+        )}
       </div>
     </div>
   );
