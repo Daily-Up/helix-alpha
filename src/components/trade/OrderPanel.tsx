@@ -145,7 +145,6 @@ export function OrderPanel({
   const [tpsl, setTpsl] = useState(false);
   const [stopInput, setStopInput] = useState("");
   const [targetInput, setTargetInput] = useState("");
-  const [reduceOnly, setReduceOnly] = useState(false);
   const [levModal, setLevModal] = useState(false);
 
   // ── Confirm / submit state ──
@@ -613,17 +612,6 @@ export function OrderPanel({
           </span>
         </div>
       )}
-
-      {/* Reduce only */}
-      <label className="inline-flex cursor-pointer items-center gap-2 text-[11.5px] text-fg-muted">
-        <input
-          type="checkbox"
-          checked={reduceOnly}
-          onChange={(e) => setReduceOnly(e.target.checked)}
-          className="h-3 w-3 accent-accent"
-        />
-        Reduce only
-      </label>
 
       {/* Submit / confirm */}
       <div>
