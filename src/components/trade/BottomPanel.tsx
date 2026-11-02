@@ -69,6 +69,8 @@ export type TpSlCtx = {
   } | null;
   builderRate: number;
   busy: boolean;
+  /** Placement is disabled until the SoDEX trigger payload fix is approved. */
+  placementEnabled: boolean;
   /** Place/modify TP & SL (place new, then cancel old). */
   onSet: (
     pos: Position,
@@ -752,7 +754,7 @@ function TpSlPopover({
             {sizeDrift ? (
               <div className="flex items-center justify-between gap-2 rounded border border-[#e0a53f]/40 bg-[#e0a53f]/10 px-2 py-1 text-[9.5px] text-[#e0a53f]">
                 <span>TP/SL size ≠ position</span>
-                <button onClick={resize} disabled={tpsl.busy} className="shrink-0 rounded border border-[#e0a53f]/50 px-1.5 hover:bg-[#e0a53f]/15">
+                <button onClick={resize} disabled={tpsl.busy || !tpsl.placementEnabled} className="shrink-0 rounded border border-[#e0a53f]/50 px-1.5 hover:bg-[#e0a53f]/15 disabled:opacity-40">
                   Resize to position
                 </button>
               </div>
@@ -761,9 +763,14 @@ function TpSlPopover({
               <p key={i} className="text-[9.5px] text-negative">{p}</p>
             ))}
             {liqWarn ? <p className="text-[9.5px] text-[#e0a53f]">{liqWarn}</p> : null}
+            {!tpsl.placementEnabled ? (
+              <p className="text-[9.5px] text-[#e0a53f]">
+                TP/SL placement is being fixed — temporarily disabled.
+              </p>
+            ) : null}
             <button
               onClick={() => setConfirming(true)}
-              disabled={!canReview}
+              disabled={!canReview || !tpsl.placementEnabled}
               className="rounded bg-accent/20 py-1 text-[11px] font-semibold text-accent-2 transition-colors hover:bg-accent/30 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Review

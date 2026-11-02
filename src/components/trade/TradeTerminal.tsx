@@ -79,6 +79,11 @@ const fmtUsd = (v: number | null) =>
           ? `$${(v / 1e3).toFixed(2)}K`
           : `$${v.toFixed(0)}`;
 
+// TP/SL placement is disabled until the SoDEX trigger-order payload is fixed
+// (P0: orders were accepted but didn't exist on SoDEX). Flip to true once the
+// signing-path fix is approved.
+const TPSL_PLACEMENT_ENABLED = false;
+
 const MIN_BOTTOM = 120;
 const DEFAULT_BOTTOM = 220;
 const clampBottom = (h: number) => {
@@ -483,6 +488,12 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
       next: { tp: number | null; sl: number | null },
       existing: { tpOrderId: number | null; slOrderId: number | null },
     ): Promise<{ ok: boolean; error?: string }> => {
+      if (!TPSL_PLACEMENT_ENABLED) {
+        return {
+          ok: false,
+          error: "TP/SL placement is being fixed — temporarily disabled.",
+        };
+      }
       const key = readLocalKey("mainnet");
       const aid = account?.aid;
       const sid = rules?.id;
@@ -563,6 +574,7 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
         : null,
       builderRate,
       busy: tpslBusy,
+      placementEnabled: TPSL_PLACEMENT_ENABLED,
       onSet: onSetTpSl,
     }),
     [rules, builderRate, tpslBusy, onSetTpSl],
