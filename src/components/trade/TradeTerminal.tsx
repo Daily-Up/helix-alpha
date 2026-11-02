@@ -28,6 +28,8 @@ import {
   cancelOrders,
 } from "@/lib/sodex-onchain/client";
 import { readLocalKey } from "@/lib/sodex-onchain/local-keys";
+import { placeLiveOrder } from "@/lib/sodex-onchain/placeLiveOrder";
+import { useAccount } from "wagmi";
 import type {
   SodexPerpsAccountState,
   SodexOpenOrder,
@@ -106,6 +108,8 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
   // market), from the all-tickers poll below.
   const [allMarks, setAllMarks] = useState<Record<string, number>>({});
   const [cancelBusy, setCancelBusy] = useState(false);
+  const [closeAllBusy, setCloseAllBusy] = useState(false);
+  const { address: connectedMaster } = useAccount();
   const [bottomH, setBottomH] = useState(DEFAULT_BOTTOM);
   const [sideFill, setSideFill] = useState<{
     side: "buy" | "sell";
@@ -414,6 +418,51 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
     if (sodexSymbol && mark != null) m[sodexSymbol.toUpperCase()] = mark;
     return m;
   }, [allMarks, sodexSymbol, mark]);
+
+  // Close ALL positions — a market reduce-only close for each, through the same
+  // live path as a single close (no signing changes). The local API key signs;
+  // connectedMaster resolves the account. Batch-level busy flag; the account +
+  // open-orders polls refresh the panel as positions close.
+  const onCloseAll = useCallback(
+    async (toClose: SodexPerpsAccountState["P"]) => {
+      if (closeAllBusy) return;
+      const list = (toClose ?? []).filter((p) => Number(p.sz) !== 0);
+      if (!list.length) return;
+      setCloseAllBusy(true);
+      try {
+        for (const p of list) {
+          const sz = Number(p.sz);
+          const mk = markBySymbol[p.s.toUpperCase()] ?? Number(p.ep);
+          const notional = Math.abs(sz) * mk;
+          if (!Number.isFinite(notional) || notional <= 0) continue;
+          await placeLiveOrder({
+            network: "mainnet",
+            signal: {
+              signal_id: `closeall-${p.s}-${Date.now().toString(36)}`,
+              symbol: p.s,
+              side: sz > 0 ? "sell" : "buy", // opposite side closes
+              price_usd: mk,
+            },
+            identityAddress: readLocalKey("mainnet")?.address ?? null,
+            connectedMaster,
+            sizeInput: String(notional),
+            stopInput: "",
+            targetInput: "",
+            orderType: "MARKET",
+            reduceOnly: true,
+            setMsg: () => {},
+            setBusy: () => {},
+            setConfirming: () => {},
+            setTradesToday: () => {},
+          });
+        }
+      } finally {
+        setCloseAllBusy(false);
+        refreshOpenOrders();
+      }
+    },
+    [closeAllBusy, markBySymbol, connectedMaster, refreshOpenOrders],
+  );
   const oracle = num(ticker?.indexPrice);
   const lastPrice = num(ticker?.lastPx);
   const bestBid = bids[0] ? Number(bids[0].price) : null;
@@ -675,7 +724,10 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
               cancelBusy={cancelBusy}
               onSelectSymbol={onSelectSymbol}
               onClosePosition={onClosePosition}
+              onCloseAll={onCloseAll}
+              closeAllBusy={closeAllBusy}
               markBySymbol={markBySymbol}
+              selectedSymbol={sodexSymbol}
               ready={tm.ready}
               digits={digits}
             />
