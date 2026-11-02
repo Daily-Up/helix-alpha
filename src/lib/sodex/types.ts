@@ -6,6 +6,19 @@
  * precision unintentionally.
  */
 
+/** One maintenance-margin tier (perps). The tier that applies is chosen by
+ *  position notional: the first tier whose `maxNotionalValue` ≥ notional. */
+export interface SodexMarginTier {
+  /** Upper notional bound (USD) for this tier, decimal string. */
+  maxNotionalValue: string;
+  /** Maintenance-margin rate for this tier, decimal string (e.g. "0.0125"). */
+  maintenanceMarginRate: string;
+  /** Max leverage allowed in this tier. */
+  maxLeverage: number;
+  /** Flat maintenance-margin deduction for this tier, decimal string. */
+  maintenanceDeduction: string;
+}
+
 /** Trading-pair definition from /markets/symbols. */
 export interface SodexSymbol {
   id: number;
@@ -37,6 +50,13 @@ export interface SodexSymbol {
   makerFee: string;
   takerFee: string;
   status: "TRADING" | "HALT" | string;
+  // ── Perps-only (absent on spot symbols) ──
+  /** Max leverage for this contract (e.g. 40). */
+  maxLeverage?: number;
+  /** Default leverage the contract opens at. */
+  initLeverage?: number;
+  /** Maintenance-margin tiers by notional (see SodexMarginTier). */
+  marginTiers?: SodexMarginTier[];
 }
 
 export interface SodexCoin {

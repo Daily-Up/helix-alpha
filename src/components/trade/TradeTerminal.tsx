@@ -119,6 +119,11 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
   const mark = num(ticker?.markPrice) ?? num(ticker?.lastPx);
   const digits = mark != null && mark < 10 ? 4 : 2;
   const oracle = num(ticker?.indexPrice);
+  const lastPrice = num(ticker?.lastPx);
+  const bestBid = bids[0] ? Number(bids[0].price) : null;
+  const bestAsk = asks[0] ? Number(asks[0].price) : null;
+  const midPrice =
+    bestBid != null && bestAsk != null ? (bestBid + bestAsk) / 2 : mark;
   const changeAbs = num(ticker?.change);
   const changePct = ticker?.changePct ?? null;
   const up = (changePct ?? 0) >= 0;
@@ -317,6 +322,8 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
               sodexSymbol={sodexSymbol}
               market={selected.market}
               markPrice={mark}
+              lastPrice={lastPrice}
+              midPrice={midPrice}
             />
           ) : null}
         </div>
