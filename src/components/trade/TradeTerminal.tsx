@@ -245,11 +245,11 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
       {/* ── Body: chart | book | ticket. Fills the remaining height; each
           panel scrolls internally on desktop. Below lg it stacks (chart →
           form → book) and the body scrolls. ── */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_210px_284px] lg:overflow-hidden">
+      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_210px_284px] lg:grid-rows-[minmax(0,1fr)] lg:overflow-hidden">
         {/* Chart cell (relative so the AI-Setup output can float over it).
-            On mobile each grid row sizes to content (no flex-shrink overlap);
-            from lg the cells fill the single row and scroll internally. */}
-        <div className="relative order-1 border-line px-3 py-2 lg:min-h-0 lg:overflow-hidden lg:border-r">
+            Fixed height on mobile (grid rows are auto there); from lg it
+            stretches to the single 1fr row and the chart fills it. */}
+        <div className="relative order-1 h-[440px] border-line px-3 py-2 lg:h-auto lg:min-h-0 lg:overflow-hidden lg:border-r">
           {sodexSymbol ? (
             <PriceChart
               symbol={sodexSymbol}

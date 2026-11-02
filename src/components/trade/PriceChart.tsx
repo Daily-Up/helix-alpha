@@ -130,9 +130,13 @@ export function PriceChart({
       const vol = chart.addHistogramSeries({
         priceFormat: { type: "volume" },
         priceScaleId: "vol",
+        // Hide the volume series' own last-value badge + price line so it
+        // doesn't clash with the price axis (the stray "49.94" label).
+        lastValueVisible: false,
+        priceLineVisible: false,
       });
       chart.priceScale("vol").applyOptions({
-        scaleMargins: { top: 0.82, bottom: 0 },
+        scaleMargins: { top: 0.8, bottom: 0 },
       });
       chartRef.current = chart;
       candleRef.current = candle;
@@ -216,9 +220,9 @@ export function PriceChart({
   const chgPct = legend && legend.open ? (chg / legend.open) * 100 : 0;
 
   return (
-    <div className="flex flex-col">
+    <div className="flex h-full flex-col">
       {/* Timeframe controls */}
-      <div className="flex items-center gap-0.5 border-b border-line px-1 pb-2">
+      <div className="flex shrink-0 items-center gap-0.5 border-b border-line px-1 pb-2">
         {INTERVALS.map((iv) => (
           <button
             key={iv}
@@ -238,8 +242,9 @@ export function PriceChart({
         </span>
       </div>
 
-      {/* Chart with OHLC legend overlay */}
-      <div className="relative">
+      {/* Chart with OHLC legend overlay — fills the remaining cell height;
+          lightweight-charts autoSize (ResizeObserver) tracks the container. */}
+      <div className="relative min-h-0 flex-1 pt-2">
         <div className="pointer-events-none absolute left-2 top-2 z-10 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-[var(--font-jetbrains-mono)] text-[11px]">
           <span className="text-fg-muted">{label}</span>
           {legend ? (
@@ -260,7 +265,7 @@ export function PriceChart({
             </>
           ) : null}
         </div>
-        <div ref={containerRef} className="h-[420px] w-full" />
+        <div ref={containerRef} className="h-full w-full" />
         {err ? (
           <div className="absolute inset-0 flex items-center justify-center text-sm text-fg-dim">
             Chart unavailable — {err}
