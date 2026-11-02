@@ -499,7 +499,7 @@ export function OrderPanel({
           label="Current Position"
           value={
             acct && acct.positionSz !== 0
-              ? `${acct.positionSz > 0 ? "+" : ""}${acct.positionSz.toLocaleString(undefined, { maximumFractionDigits: 4 })} ${symbol}`
+              ? `${acct.positionSz > 0 ? "+" : ""}${acct.positionSz.toLocaleString(undefined, { maximumFractionDigits: rules?.quantityPrecision ?? 6 })} ${symbol}`
               : "None"
           }
           tone={
