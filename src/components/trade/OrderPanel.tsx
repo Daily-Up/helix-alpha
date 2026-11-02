@@ -215,13 +215,18 @@ export function OrderPanel({
   const pct = Math.max(0, Math.min(100, Math.round((sizeUsd / sliderMax) * 100)));
 
   const setFromPct = (p: number) => {
+    // 0% clears the field (shows the placeholder) rather than writing a 0 value.
+    if (p <= 0) {
+      setSizeInput("");
+      return;
+    }
     const targetUsd = (p / 100) * sliderMax;
     setSizeInput(
       sizeUnit === "usd"
         ? String(Math.round(targetUsd))
         : entryPrice && entryPrice > 0
           ? (targetUsd / entryPrice).toFixed(rules?.quantityPrecision ?? 4)
-          : "0",
+          : "",
     );
   };
 
@@ -288,6 +293,10 @@ export function OrderPanel({
   };
 
   const requestConfirm = () => {
+    if (sizeUsd <= 0) {
+      setMsg("✗ Enter a size.");
+      return;
+    }
     const err = validate();
     if (err) {
       setMsg(`✗ ${err}`);
@@ -358,7 +367,7 @@ export function OrderPanel({
   );
 
   return (
-    <div className="flex h-full flex-col gap-3 overflow-y-auto p-4">
+    <div className="flex shrink-0 flex-col gap-3 p-4">
       {/* Leverage + margin mode — READ-ONLY. The ticket does not set these on
           SoDEX, so the order inherits the account's current settings. */}
       {isPerp ? (
@@ -460,7 +469,7 @@ export function OrderPanel({
               ) : null}
             </div>
           </div>
-          <div className="flex items-center rounded-md border border-line bg-surface-2 px-3 focus-within:border-[#3b82f6] focus-within:ring-1 focus-within:ring-[#3b82f6]">
+          <div className="flex items-center rounded-md border border-line bg-surface-2 px-3 focus-within:border-[#3a4452]">
             <input
               inputMode="decimal"
               value={limitPxInput}
@@ -511,15 +520,16 @@ export function OrderPanel({
             </span>
           ) : null}
         </div>
-        {/* Input + unit toggle act as ONE control: the focus ring sits flush on
-            the wrapper (neutral blue), and the input has no outline of its own. */}
-        <div className="flex items-center rounded-md border border-line bg-surface-2 px-3 focus-within:border-[#3b82f6] focus-within:ring-1 focus-within:ring-[#3b82f6]">
+        {/* Input + unit toggle are ONE control. On focus, only the wrapper's
+            1px border lightens to a neutral — no ring, no box-shadow, and the
+            input itself has no outline, so the typed number never shifts. */}
+        <div className="flex items-center rounded-md border border-line bg-surface-2 px-3 focus-within:border-[#3a4452]">
           <input
             inputMode="decimal"
             value={sizeInput}
             onChange={(e) => setSizeInput(e.target.value.replace(/[^0-9.]/g, ""))}
-            className="w-full bg-transparent py-2 text-sm text-fg outline-none focus-visible:[outline:none] tabular-nums"
-            placeholder="0"
+            className="w-full bg-transparent py-2 text-sm text-fg outline-none placeholder:text-fg-dim focus-visible:[outline:none] tabular-nums"
+            placeholder="0.00"
           />
           <button
             onClick={() => setSizeUnit((u) => (u === "usd" ? "base" : "usd"))}
@@ -618,7 +628,7 @@ export function OrderPanel({
           >
             ⚠ Trading key expired — re-authorize
           </Link>
-        ) : confirming ? (
+        ) : confirming && sizeUsd > 0 ? (
           <ConfirmStep
             side={side}
             isPerp={isPerp}
@@ -733,7 +743,7 @@ function BracketInput({
         value={value}
         onChange={(e) => onChange(e.target.value.replace(/[^0-9.]/g, ""))}
         placeholder="0"
-        className="rounded border border-line bg-surface-2 px-2 py-1 text-xs tabular-nums outline-none focus:border-[#3b82f6] focus-visible:[outline:none]"
+        className="rounded border border-line bg-surface-2 px-2 py-1 text-xs tabular-nums outline-none focus:border-[#3a4452] focus-visible:[outline:none]"
       />
       <span className="text-[9px] tabular-nums" style={{ color }}>
         {price != null ? pxFmt(price, digits) : "—"}
@@ -813,9 +823,6 @@ function ConfirmStep(p: {
         <FeeRow label="Builder fee" rate={p.builderRate} usd={p.builderFeeUsd} />
         <FeeRow label="Total" rate={p.totalRate} usd={p.totalFeeUsd} strong />
       </div>
-      <p className="mt-2 text-[10px]" style={{ color: SHORT }}>
-        ⚠ Real funds on SoDEX Mainnet.
-      </p>
       <div className="mt-2 flex gap-2">
         <button
           onClick={p.onConfirm}
