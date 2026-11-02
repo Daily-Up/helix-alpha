@@ -56,6 +56,9 @@ export interface PlaceLiveOrderArgs {
   /** LIMIT only — time-in-force. POST_ONLY maps to SoDEX GTX (maker-only);
    *  default GTC (resting). IOC is marketable. */
   timeInForce?: "GTC" | "IOC" | "POST_ONLY";
+  /** Reduce-only — closes/reduces an existing position, never opens or flips.
+   *  Omitted/false keeps the MARKET + LIMIT entries byte-identical. */
+  reduceOnly?: boolean;
   /** UI-state writers — kept as callbacks so the body stays verbatim. */
   setMsg: (m: string | null) => void;
   setBusy: (b: boolean) => void;
@@ -75,6 +78,7 @@ export async function placeLiveOrder(args: PlaceLiveOrderArgs): Promise<void> {
     orderType = "MARKET",
     limitPrice,
     timeInForce = "GTC",
+    reduceOnly,
     setMsg,
     setBusy,
     setConfirming,
@@ -245,6 +249,12 @@ export async function placeLiveOrder(args: PlaceLiveOrderArgs): Promise<void> {
           quantity: limitQty,
         };
       }
+
+      // Reduce-only (v3-2): close/reduce an existing position, never flip it.
+      // Additive and optional — when omitted the MARKET and LIMIT entries above
+      // are byte-identical. The builder fee still attaches (placeOrderBatch adds
+      // it regardless of this flag).
+      if (reduceOnly) order.reduceOnly = true;
 
       const sodexResp = await placeOrderBatch({
         network,
