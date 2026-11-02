@@ -41,7 +41,7 @@ export function AccountPanel({
     equity != null && equity > 0 && used != null ? (used / equity) * 100 : null;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto border-t border-line p-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto border-t border-line p-3">
       <div className="flex items-center justify-between">
         <span className="text-[10px] font-medium uppercase tracking-wider text-fg-dim">
           Account
@@ -64,18 +64,19 @@ export function AccountPanel({
           </Link>
         </div>
       ) : (
-        <div className="flex flex-col gap-1.5 text-[11.5px]">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
           <ARow label="Equity" value={money(equity)} />
           <ARow label="Available" value={money(available)} />
           <ARow label="Margin used" value={money(used)} />
           <ARow
+            label="Margin ratio"
+            value={marginRatio != null ? `${marginRatio.toFixed(2)}%` : "—"}
+          />
+          <ARow
             label="Unrealized PnL"
             value={signedMoney(upnl)}
             tone={upnl == null || upnl === 0 ? "default" : upnl > 0 ? "positive" : "negative"}
-          />
-          <ARow
-            label="Margin ratio"
-            value={marginRatio != null ? `${marginRatio.toFixed(2)}%` : "—"}
+            className="col-span-2"
           />
         </div>
       )}
@@ -87,13 +88,15 @@ function ARow({
   label,
   value,
   tone = "default",
+  className,
 }: {
   label: string;
   value: string;
   tone?: "default" | "positive" | "negative";
+  className?: string;
 }) {
   return (
-    <div className="flex items-center justify-between">
+    <div className={cn("flex items-center justify-between gap-2", className)}>
       <span className="text-fg-dim">{label}</span>
       <span
         className={cn(

@@ -367,7 +367,7 @@ export function OrderPanel({
   );
 
   return (
-    <div className="flex shrink-0 flex-col gap-3 p-4">
+    <div className="flex shrink-0 flex-col gap-2 p-3">
       {/* Leverage + margin mode — READ-ONLY. The ticket does not set these on
           SoDEX, so the order inherits the account's current settings. */}
       {isPerp ? (
