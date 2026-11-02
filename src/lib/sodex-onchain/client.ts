@@ -29,7 +29,10 @@ import type {
   SodexAccountState,
   SodexAction,
   SodexApiKeyRow,
+  SodexCancelItem,
+  SodexCancelOrderParams,
   SodexNewOrderBatch,
+  SodexOpenOrder,
   SodexRevokeApiKeyParams,
 } from "./types";
 import { SodexApiKeyType } from "./types";
@@ -675,4 +678,93 @@ export async function placeOrderBatch(opts: {
     body: JSON.stringify(body),
   });
   return handle<unknown>(res);
+}
+
+/**
+ * Cancel one or more perps orders — DELETE /trade/orders, signed with the API
+ * key as a "cancelOrder" ExchangeAction (the same signing path as newOrder).
+ * Each item is {symbolID, orderID}. A cancel has no builder/fee. Supports the
+ * same dev-only DRY_RUN flag as placeOrderBatch (logs the final wire payload,
+ * masks any secret-looking field, and returns a stub without submitting).
+ */
+export async function cancelOrders(opts: {
+  network: SodexNetwork;
+  apiKeyName?: string;
+  privateKey: Hex;
+  accountID: number;
+  cancels: SodexCancelItem[];
+  market?: SodexMarket;
+}): Promise<unknown> {
+  const {
+    network,
+    apiKeyName,
+    privateKey,
+    accountID,
+    cancels,
+    market = "futures",
+  } = opts;
+  const { chainId, spotEndpoint, perpsEndpoint } = SODEX_NETWORKS[network];
+  const endpoint = market === "futures" ? perpsEndpoint : spotEndpoint;
+
+  const params: SodexCancelOrderParams = { accountID, cancels };
+  const action: SodexAction<SodexCancelOrderParams> = {
+    type: "cancelOrder",
+    params,
+  };
+
+  const { apiSign, nonce } = await signWithApiKey({
+    privateKey,
+    domainName: market === "futures" ? "futures" : "spot",
+    chainId,
+    action,
+  });
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "X-API-Sign": apiSign,
+    "X-API-Nonce": nonce.toString(),
+  };
+  if (apiKeyName) headers["X-API-Key"] = apiKeyName;
+
+  const url = `${endpoint}/trade/orders`;
+
+  if (
+    process.env.NODE_ENV !== "production" &&
+    process.env.NEXT_PUBLIC_SODEX_DRY_RUN === "1"
+  ) {
+    // eslint-disable-next-line no-console
+    console.log(
+      "[DRY_RUN cancelOrders]",
+      JSON.stringify(
+        { method: "DELETE", url, headers, body: params },
+        (k, v) =>
+          /private|secret|seed|mnemonic|passphrase/i.test(k) ? "«redacted»" : v,
+        2,
+      ),
+    );
+    return { dryRun: true, canceled: cancels.length };
+  }
+
+  const res = await fetch(url, {
+    method: "DELETE",
+    headers,
+    body: JSON.stringify(params),
+  });
+  return handle<unknown>(res);
+}
+
+/**
+ * GET /accounts/{address}/orders — the account's open perps orders.
+ * Read-only (no signature). Returns the `orders` array (PerpsOrder shape).
+ */
+export async function getOpenOrders(
+  network: SodexNetwork,
+  address: `0x${string}`,
+  market: SodexMarket = "futures",
+): Promise<SodexOpenOrder[]> {
+  const { spotEndpoint, perpsEndpoint } = SODEX_NETWORKS[network];
+  const endpoint = market === "futures" ? perpsEndpoint : spotEndpoint;
+  const res = await fetch(`${endpoint}/accounts/${address}/orders`);
+  const data = await handle<{ orders?: SodexOpenOrder[] }>(res);
+  return data?.orders ?? [];
 }

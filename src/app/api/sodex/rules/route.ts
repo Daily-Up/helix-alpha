@@ -66,6 +66,7 @@ export async function GET(req: Request) {
       symbol,
       market,
       rules: {
+        id: s.id,
         makerFee: num(s.makerFee),
         takerFee: num(s.takerFee),
         // Perps-only; null on spot.

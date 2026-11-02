@@ -145,6 +145,42 @@ export interface SodexNewOrderBatch {
   orders: SodexNewOrderEntry[];
 }
 
+/** One item in a cancel request. Provide orderID OR clOrdID, not both. */
+export interface SodexCancelItem {
+  symbolID: number;
+  orderID?: number;
+  clOrdID?: string;
+}
+
+/** Inner params for the "cancelOrder" action (DELETE /trade/orders). */
+export interface SodexCancelOrderParams {
+  accountID: number;
+  cancels: SodexCancelItem[];
+}
+
+/** An open order from GET /accounts/{address}/orders (PerpsOrder). */
+export interface SodexOpenOrder {
+  orderID: number;
+  clOrdID?: string;
+  /** Symbol name, e.g. "BTC-USD". */
+  symbol: string;
+  /** 1 = BUY, 2 = SELL. */
+  side: SodexSideValue;
+  /** 1 = LIMIT, 2 = MARKET. */
+  type: SodexOrderTypeValue;
+  timeInForce?: SodexTifValue;
+  price?: string;
+  /** Original quantity. */
+  origQty?: string;
+  funds?: string;
+  /** Filled quantity. */
+  executedQty: string;
+  status: number;
+  createdAt?: number;
+  updatedAt?: number;
+  reduceOnly?: boolean;
+}
+
 /**
  * Inner params for an addAPIKey action. Type is the int32 enum
  * (EVM = 1). ExpiresAt is unix-seconds; 0 means never.

@@ -36,6 +36,8 @@ const SHORT = "#f6465d";
 const NETWORK = "mainnet" as const;
 
 export interface SymbolRules {
+  /** Numeric SoDEX symbolID (used for cancels). */
+  id: number;
   makerFee: number;
   takerFee: number;
   maxLeverage: number | null;

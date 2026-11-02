@@ -10,7 +10,7 @@
  * and draws its levels on the chart. Bottom: positions/balances tabs.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/components/ui/cn";
 import { AssetLogo } from "@/components/ui/AssetLogo";
 import { AssetPicker } from "./AssetPicker";
@@ -21,8 +21,16 @@ import { OrderPanel, type SymbolRules } from "./OrderPanel";
 import type { Trade } from "./TradesTape";
 import { BottomPanel, type BottomTab } from "./BottomPanel";
 import { useTradeMode } from "@/lib/sodex-onchain/useTradeMode";
-import { getPerpsAccountState } from "@/lib/sodex-onchain/client";
-import type { SodexPerpsAccountState } from "@/lib/sodex-onchain/types";
+import {
+  getPerpsAccountState,
+  getOpenOrders,
+  cancelOrders,
+} from "@/lib/sodex-onchain/client";
+import { readLocalKey } from "@/lib/sodex-onchain/local-keys";
+import type {
+  SodexPerpsAccountState,
+  SodexOpenOrder,
+} from "@/lib/sodex-onchain/types";
 
 export interface TerminalAsset {
   id: string;
@@ -92,6 +100,8 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
   const [tradesLoading, setTradesLoading] = useState(false);
   const [limitFill, setLimitFill] = useState<number | null>(null);
   const [account, setAccount] = useState<SodexPerpsAccountState | null>(null);
+  const [openOrders, setOpenOrders] = useState<SodexOpenOrder[]>([]);
+  const [cancelBusy, setCancelBusy] = useState(false);
   const [bottomH, setBottomH] = useState(DEFAULT_BOTTOM);
   const [sideFill, setSideFill] = useState<{
     side: "buy" | "sell";
@@ -227,6 +237,52 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
       clearInterval(t);
     };
   }, [tm.ready, tm.address]);
+
+  // Open orders for the CURRENT symbol (read-only, polled). Scoping to the
+  // symbol keeps "Cancel all" per-symbol.
+  const refreshOpenOrders = useCallback(async () => {
+    if (!tm.ready || !tm.address) {
+      setOpenOrders([]);
+      return;
+    }
+    try {
+      const all = await getOpenOrders("mainnet", tm.address as `0x${string}`);
+      const sym = (sodexSymbol ?? "").toUpperCase();
+      setOpenOrders(all.filter((o) => (o.symbol ?? "").toUpperCase() === sym));
+    } catch {
+      /* keep last */
+    }
+  }, [tm.ready, tm.address, sodexSymbol]);
+  useEffect(() => {
+    refreshOpenOrders();
+    const t = setInterval(refreshOpenOrders, 4000);
+    return () => clearInterval(t);
+  }, [refreshOpenOrders]);
+
+  // Cancel orders by id (per-row or cancel-all), then refresh. Signs with the
+  // local API key; symbolID comes from the current market's rules.
+  const onCancelOrders = useCallback(
+    async (orderIDs: number[]) => {
+      const key = readLocalKey("mainnet");
+      if (!key || !account?.aid || !rules?.id || orderIDs.length === 0) return;
+      setCancelBusy(true);
+      try {
+        await cancelOrders({
+          network: "mainnet",
+          apiKeyName: key.name || undefined,
+          privateKey: key.privateKey,
+          accountID: account.aid,
+          cancels: orderIDs.map((orderID) => ({ symbolID: rules.id, orderID })),
+        });
+        await refreshOpenOrders();
+      } catch (e) {
+        console.warn("[cancel] failed:", (e as Error).message);
+      } finally {
+        setCancelBusy(false);
+      }
+    },
+    [account?.aid, rules?.id, refreshOpenOrders],
+  );
 
   // Bottom-panel height: load persisted, drag to resize, persist on release.
   const bottomHRef = useRef(DEFAULT_BOTTOM);
@@ -523,6 +579,9 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
           tab={bottomTab}
           setTab={setBottomTab}
           account={account}
+          openOrders={openOrders}
+          onCancel={onCancelOrders}
+          cancelBusy={cancelBusy}
           ready={tm.ready}
           digits={digits}
         />

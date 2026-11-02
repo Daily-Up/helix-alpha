@@ -9,7 +9,12 @@
 
 import Link from "next/link";
 import { cn } from "@/components/ui/cn";
-import type { SodexPerpsAccountState } from "@/lib/sodex-onchain/types";
+import {
+  SodexSide,
+  SodexOrderType,
+  type SodexPerpsAccountState,
+  type SodexOpenOrder,
+} from "@/lib/sodex-onchain/types";
 
 export const BOTTOM_TABS = [
   "Positions",
@@ -23,23 +28,33 @@ const money = (v: number, d = 2) =>
   `$${v.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d })}`;
 const qtyFmt = (v: number) =>
   v.toLocaleString(undefined, { maximumFractionDigits: 6 });
+const two = (n: number) => String(n).padStart(2, "0");
+const fmtTime = (t: number) => {
+  const d = new Date(t < 1e12 ? t * 1000 : t); // accept seconds or ms
+  return `${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}`;
+};
 
 export function BottomPanel({
   tab,
   setTab,
   account,
+  openOrders,
+  onCancel,
+  cancelBusy,
   ready,
   digits,
 }: {
   tab: BottomTab;
   setTab: (t: BottomTab) => void;
   account: SodexPerpsAccountState | null;
+  openOrders: SodexOpenOrder[];
+  onCancel: (orderIDs: number[]) => void;
+  cancelBusy: boolean;
   ready: boolean;
   digits: number;
 }) {
   const positions = (account?.P ?? []).filter((p) => Number(p.sz) !== 0);
   const balances = (account?.B ?? []).filter((b) => Number(b.wb) > 0);
-  const openOrders = (account?.O as unknown[]) ?? [];
 
   const counts: Record<BottomTab, number> = {
     Positions: positions.length,
@@ -152,15 +167,12 @@ export function BottomPanel({
           openOrders.length === 0 ? (
             <Empty>No open orders.</Empty>
           ) : (
-            // TODO: SoDEX's perps account `O` entries aren't a documented
-            // shape yet, and there is no cancelOrder action in the client —
-            // adding a cancel signing path needs explicit sign-off. For now
-            // show the count; detailed rows + Cancel are a follow-up.
-            <Empty>
-              {openOrders.length} open order
-              {openOrders.length === 1 ? "" : "s"} — detailed rows &amp; cancel
-              coming soon.
-            </Empty>
+            <OpenOrders
+              orders={openOrders}
+              onCancel={onCancel}
+              busy={cancelBusy}
+              digits={digits}
+            />
           )
         ) : (
           // Trade History — TODO: wire to /api/sodex/my-trades (Helix's
@@ -226,6 +238,92 @@ function Table({
           ))}
         </div>
       ))}
+    </div>
+  );
+}
+
+const OO_COLS = "72px 1fr 1fr 1fr 1fr 64px";
+
+function OpenOrders({
+  orders,
+  onCancel,
+  busy,
+  digits,
+}: {
+  orders: SodexOpenOrder[];
+  onCancel: (orderIDs: number[]) => void;
+  busy: boolean;
+  digits: number;
+}) {
+  const px = (v?: string) =>
+    v != null && Number.isFinite(Number(v))
+      ? Number(v).toLocaleString(undefined, {
+          minimumFractionDigits: digits,
+          maximumFractionDigits: digits,
+        })
+      : "—";
+  return (
+    <div className="text-[11.5px]">
+      <div className="flex items-center justify-between border-b border-line px-4 py-1.5">
+        <span className="text-[9px] uppercase tracking-wider text-fg-dim">
+          {orders.length} open · {orders[0]?.symbol}
+        </span>
+        <button
+          onClick={() => onCancel(orders.map((o) => o.orderID))}
+          disabled={busy}
+          className="rounded border border-line px-2 py-0.5 text-[10px] text-fg-muted transition-colors hover:border-negative/40 hover:text-negative disabled:opacity-50"
+        >
+          {busy ? "Cancelling…" : "Cancel all"}
+        </button>
+      </div>
+      <div
+        className="grid gap-2 border-b border-line px-4 py-1 text-[9px] uppercase tracking-wider text-fg-dim"
+        style={{ gridTemplateColumns: OO_COLS }}
+      >
+        <span>Side</span>
+        <span className="text-right">Price</span>
+        <span className="text-right">Size</span>
+        <span className="text-right">Filled</span>
+        <span className="text-right">Time</span>
+        <span />
+      </div>
+      {orders.map((o) => {
+        const buy = o.side === SodexSide.BUY;
+        const isLimit = o.type === SodexOrderType.LIMIT;
+        return (
+          <div
+            key={o.orderID}
+            className="grid items-center gap-2 px-4 py-1.5 font-[var(--font-jetbrains-mono)] tabular-nums hover:bg-surface-2/40"
+            style={{ gridTemplateColumns: OO_COLS }}
+          >
+            <span className={buy ? "text-positive" : "text-negative"}>
+              {buy ? "Buy" : "Sell"}
+              <span className="ml-1 text-[9px] text-fg-dim">
+                {isLimit ? "LMT" : "MKT"}
+              </span>
+            </span>
+            <span className="text-right">{px(o.price)}</span>
+            <span className="text-right">
+              {o.origQty ? qtyFmt(Number(o.origQty)) : "—"}
+            </span>
+            <span className="text-right text-fg-muted">
+              {o.executedQty ? qtyFmt(Number(o.executedQty)) : "0"}
+            </span>
+            <span className="text-right text-fg-dim">
+              {o.createdAt ? fmtTime(o.createdAt) : "—"}
+            </span>
+            <span className="text-right">
+              <button
+                onClick={() => onCancel([o.orderID])}
+                disabled={busy}
+                className="rounded border border-line px-1.5 py-0.5 text-[10px] text-fg-muted transition-colors hover:border-negative/40 hover:text-negative disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }
