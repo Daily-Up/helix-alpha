@@ -123,6 +123,15 @@ export function PriceChart({
       const LWC = await import("lightweight-charts");
       if (disposed || !containerRef.current) return;
       const chart = LWC.createChart(containerRef.current, {
+        // Localised price axis: thousands separators, precision from tick size
+        // (BTC → "82,000", not "82000.00"). Refreshed on tick-size change below.
+        localization: {
+          priceFormatter: (p: number) =>
+            p.toLocaleString(undefined, {
+              minimumFractionDigits: decimalsFromTick(tickSize),
+              maximumFractionDigits: decimalsFromTick(tickSize),
+            }),
+        },
         layout: {
           background: { type: LWC.ColorType.Solid, color: "transparent" },
           textColor: "rgba(190,190,195,0.55)",
@@ -235,6 +244,15 @@ export function PriceChart({
         type: "price",
         precision: decimalsFromTick(tickSize),
         minMove: tickSize && tickSize > 0 ? tickSize : 0.01,
+      },
+    });
+    chartRef.current?.applyOptions({
+      localization: {
+        priceFormatter: (p: number) =>
+          p.toLocaleString(undefined, {
+            minimumFractionDigits: decimalsFromTick(tickSize),
+            maximumFractionDigits: decimalsFromTick(tickSize),
+          }),
       },
     });
   }, [tickSize, ready]);
