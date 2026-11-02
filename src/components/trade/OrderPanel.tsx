@@ -165,9 +165,14 @@ export function OrderPanel({
   // once in the terminal and shared with the bottom tabs).
   const acct = useMemo(() => {
     if (!account) return null;
-    const pos = account.P?.find(
-      (p) => (p.s ?? "").toUpperCase() === sodexSymbol.toUpperCase(),
-    );
+    const base = (s: string) => (s.split("-")[0] || s).toUpperCase();
+    const want = sodexSymbol.toUpperCase();
+    // Match the selected market's open position — exact symbol first, then base
+    // symbol — so the ticket reads the leverage SoDEX actually applies (the
+    // position's `l` from /state) even when the symbol suffix differs.
+    const pos =
+      account.P?.find((p) => (p.s ?? "").toUpperCase() === want) ??
+      account.P?.find((p) => base(p.s ?? "") === base(sodexSymbol));
     return {
       availableUsd: Number(account.am) || 0,
       positionSz: pos ? Number(pos.sz) || 0 : 0,
