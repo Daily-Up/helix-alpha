@@ -86,6 +86,7 @@ export function OrderPanel({
   limitFill,
   account,
   sideFill,
+  closeIntent,
 }: {
   symbol: string;
   sodexSymbol: string;
@@ -97,6 +98,12 @@ export function OrderPanel({
   limitFill?: number | null;
   account: SodexPerpsAccountState | null;
   sideFill?: { side: "buy" | "sell"; seq: number } | null;
+  closeIntent?: {
+    side: "buy" | "sell";
+    sizeBase: number;
+    type: "market" | "limit";
+    seq: number;
+  } | null;
 }) {
   const tm = useTradeMode(NETWORK);
   const { address: connectedMaster } = useAccount();
@@ -110,6 +117,8 @@ export function OrderPanel({
   const [sizeUnit, setSizeUnit] = useState<"usd" | "base">("usd");
   const [limitPxInput, setLimitPxInput] = useState("");
   const [postOnly, setPostOnly] = useState(false);
+  // Reduce-only: set by a Close action; cleared when the user picks a fresh side.
+  const [reduceOnly, setReduceOnly] = useState(false);
   const [tpsl, setTpsl] = useState(false);
   const [stopInput, setStopInput] = useState("");
   const [targetInput, setTargetInput] = useState("");
@@ -133,6 +142,23 @@ export function OrderPanel({
     if (sideFill) setSide(sideFill.side);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sideFill?.seq]);
+
+  // Close intent from the Positions table → prefill opposite side, full size,
+  // reduce-only. Market opens the inline confirm; limit just prefills.
+  useEffect(() => {
+    if (!closeIntent) return;
+    setReduceOnly(true);
+    setSide(closeIntent.side);
+    setType(closeIntent.type);
+    setSizeUnit("base");
+    setSizeInput(String(closeIntent.sizeBase));
+    setTpsl(false);
+    setPostOnly(false);
+    setMsg(null);
+    if (closeIntent.type === "market") setConfirming(true);
+    else setConfirming(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closeIntent?.seq]);
 
 
   // Available + current position, derived from the account state (fetched
@@ -289,6 +315,7 @@ export function OrderPanel({
       limitPrice: type === "limit" ? roundedLimit : undefined,
       timeInForce:
         type === "limit" ? (postOnly ? "POST_ONLY" : "GTC") : undefined,
+      reduceOnly,
       setMsg,
       setBusy,
       setConfirming,
@@ -302,6 +329,7 @@ export function OrderPanel({
     markPrice,
     connectedMaster,
     sizeUsd,
+    reduceOnly,
     tpsl,
     stopInput,
     targetInput,
@@ -310,7 +338,14 @@ export function OrderPanel({
 
   const sideColor = isLong ? LONG : SHORT;
   const sideWord = isPerp ? (isLong ? "Long" : "Short") : isLong ? "Buy" : "Sell";
-  const submitLabel = `${isLong ? "Buy" : "Sell"} / ${sideWord} ${symbol}`;
+  const submitLabel = reduceOnly
+    ? `Close ${symbol}`
+    : `${isLong ? "Buy" : "Sell"} / ${sideWord} ${symbol}`;
+  // Manually picking a side = a fresh order, so drop reduce-only.
+  const pickSide = (s: "buy" | "sell") => {
+    setSide(s);
+    setReduceOnly(false);
+  };
 
   // ── Sub-renderers ──
   const connectCta = (
@@ -344,7 +379,7 @@ export function OrderPanel({
       {/* Side toggle */}
       <div className="grid grid-cols-2 gap-2">
         <button
-          onClick={() => setSide("buy")}
+          onClick={() => pickSide("buy")}
           className="rounded-md py-2 text-[13px] font-semibold transition-colors"
           style={
             isLong
@@ -355,7 +390,7 @@ export function OrderPanel({
           {isPerp ? "Buy / Long" : "Buy"}
         </button>
         <button
-          onClick={() => setSide("sell")}
+          onClick={() => pickSide("sell")}
           className="rounded-md py-2 text-[13px] font-semibold transition-colors"
           style={
             !isLong
@@ -384,6 +419,20 @@ export function OrderPanel({
           </button>
         ))}
       </div>
+
+      {/* Reduce-only banner (set by a Close action) */}
+      {reduceOnly ? (
+        <div className="flex items-center justify-between rounded-md border border-line bg-surface-2 px-2.5 py-1 text-[11px] text-fg-muted">
+          <span>Reduce-only · closing {symbol}</span>
+          <button
+            onClick={() => setReduceOnly(false)}
+            className="px-1 text-fg-dim hover:text-fg"
+            title="Clear reduce-only"
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
 
       {/* Limit price + Mid/Last */}
       {type === "limit" ? (
@@ -578,6 +627,7 @@ export function OrderPanel({
             entry={entryPrice}
             type={type}
             postOnly={postOnly}
+            reduceOnly={reduceOnly}
             stop={stopPrice}
             target={targetPrice}
             exchangeFeeUsd={exchangeFeeUsd}
@@ -700,6 +750,7 @@ function ConfirmStep(p: {
   entry: number | null;
   type: "market" | "limit";
   postOnly: boolean;
+  reduceOnly: boolean;
   stop: number | null;
   target: number | null;
   exchangeFeeUsd: number;
@@ -720,12 +771,16 @@ function ConfirmStep(p: {
   return (
     <div className="rounded-md border p-3" style={{ borderColor: color }}>
       <div className="mb-2 text-[12px]">
+        {p.reduceOnly ? (
+          <span className="font-semibold text-fg">Close </span>
+        ) : null}
         <span className="font-semibold" style={{ color }}>
           {word}
         </span>{" "}
         <span className="text-fg">{p.symbol}</span>{" "}
         <span className="text-fg-dim">
           · {p.type === "limit" ? (p.postOnly ? "Limit · post-only" : "Limit") : "Market"}
+          {p.reduceOnly ? " · reduce-only" : ""}
         </span>
       </div>
       <div className="flex flex-col gap-1 text-[11px]">

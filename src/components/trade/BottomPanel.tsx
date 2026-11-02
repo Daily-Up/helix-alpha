@@ -33,6 +33,11 @@ const fmtTime = (t: number) => {
   const d = new Date(t < 1e12 ? t * 1000 : t); // accept seconds or ms
   return `${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}`;
 };
+// Display names use the -PERP convention everywhere, matching the header.
+const perpName = (s: string) => s.replace(/-USDC?$/i, "-PERP");
+const baseOf = (s: string) => s.split("-")[0] || s;
+
+type Position = NonNullable<SodexPerpsAccountState["P"]>[number];
 
 export function BottomPanel({
   tab,
@@ -41,6 +46,8 @@ export function BottomPanel({
   openOrders,
   onCancel,
   cancelBusy,
+  onSelectSymbol,
+  onClosePosition,
   ready,
   digits,
 }: {
@@ -50,6 +57,10 @@ export function BottomPanel({
   openOrders: SodexOpenOrder[];
   onCancel: (orderIDs: number[]) => void;
   cancelBusy: boolean;
+  /** Switch the terminal to a position's market (click the market name). */
+  onSelectSymbol: (sodexSymbol: string) => void;
+  /** Close/limit-close a position through the order ticket. */
+  onClosePosition: (position: Position, type: "market" | "limit") => void;
   ready: boolean;
   digits: number;
 }) {
@@ -94,58 +105,11 @@ export function BottomPanel({
           positions.length === 0 ? (
             <Empty>No open positions.</Empty>
           ) : (
-            <Table
-              head={["Market", "Size", "Entry", "Liq", "Lev", "uPNL"]}
-              rows={positions.map((p) => {
-                const sz = Number(p.sz);
-                const entry = Number(p.ep);
-                // Use SoDEX's authoritative values from /state (not estimates).
-                const liq = p.lp ? Number(p.lp) : null;
-                const upnl = p.ur != null ? Number(p.ur) : null;
-                const lev = p.l ?? null;
-                const mode = p.m
-                  ? p.m.charAt(0) + p.m.slice(1).toLowerCase()
-                  : "";
-                const px = (v: number) =>
-                  v.toLocaleString(undefined, {
-                    minimumFractionDigits: digits,
-                    maximumFractionDigits: digits,
-                  });
-                return [
-                  <span key="m" className="text-fg">
-                    {p.s}
-                    {mode ? (
-                      <span className="ml-1 text-[9px] text-fg-dim">{mode}</span>
-                    ) : null}
-                  </span>,
-                  <span
-                    key="s"
-                    className={sz >= 0 ? "text-positive" : "text-negative"}
-                  >
-                    {sz >= 0 ? "+" : ""}
-                    {qtyFmt(sz)}
-                  </span>,
-                  <span key="e">{px(entry)}</span>,
-                  <span key="lq" className="text-fg-muted">
-                    {liq != null ? px(liq) : "—"}
-                  </span>,
-                  <span key="lv">{lev != null ? `${lev}×` : "—"}</span>,
-                  <span
-                    key="u"
-                    className={
-                      upnl == null
-                        ? "text-fg-dim"
-                        : upnl >= 0
-                          ? "text-positive"
-                          : "text-negative"
-                    }
-                  >
-                    {upnl == null
-                      ? "—"
-                      : `${upnl >= 0 ? "+" : ""}${money(upnl)}`}
-                  </span>,
-                ];
-              })}
+            <PositionsView
+              positions={positions}
+              digits={digits}
+              onSelect={onSelectSymbol}
+              onClose={onClosePosition}
             />
           )
         ) : tab === "Balances" ? (
@@ -238,6 +202,129 @@ function Table({
           ))}
         </div>
       ))}
+    </div>
+  );
+}
+
+const POS_COLS =
+  "108px 64px 132px 88px 88px 92px 84px 48px 150px 128px";
+
+function PositionsView({
+  positions,
+  digits,
+  onSelect,
+  onClose,
+}: {
+  positions: Position[];
+  digits: number;
+  onSelect: (sodexSymbol: string) => void;
+  onClose: (position: Position, type: "market" | "limit") => void;
+}) {
+  const px = (v: number) =>
+    v.toLocaleString(undefined, {
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    });
+  return (
+    <div className="min-w-max text-[11.5px]">
+      <div
+        className="grid gap-2 border-b border-line px-4 py-1.5 text-[9px] uppercase tracking-wider text-fg-dim"
+        style={{ gridTemplateColumns: POS_COLS }}
+      >
+        <span>Market</span>
+        <span>Side</span>
+        <span className="text-right">Size</span>
+        <span className="text-right">Entry</span>
+        <span className="text-right">Mark</span>
+        <span className="text-right">Liq</span>
+        <span className="text-right">Margin</span>
+        <span className="text-right">Lev</span>
+        <span className="text-right">uPNL</span>
+        <span />
+      </div>
+      {positions.map((p) => {
+        const sz = Number(p.sz);
+        const abs = Math.abs(sz);
+        const isLong = sz >= 0;
+        const entry = Number(p.ep);
+        const ur = p.ur != null ? Number(p.ur) : null;
+        const lev = p.l ?? null;
+        const liq = p.lp ? Number(p.lp) : null;
+        // Mark from SoDEX uPNL: ur = (mark − entry) × sz → mark = entry + ur/sz.
+        const mark = ur != null && sz !== 0 ? entry + ur / sz : null;
+        // Margin = notional / leverage; ROE% = uPNL / margin.
+        const margin = lev && lev > 0 ? (abs * entry) / lev : null;
+        const roe =
+          ur != null && margin && margin > 0 ? (ur / margin) * 100 : null;
+        // Warn when mark is within 10% of the liquidation price.
+        const liqWarn =
+          liq != null &&
+          mark != null &&
+          mark > 0 &&
+          Math.abs(mark - liq) / mark <= 0.1;
+        const upnlCls =
+          ur == null
+            ? "text-fg-dim"
+            : ur >= 0
+              ? "text-positive"
+              : "text-negative";
+        return (
+          <div
+            key={`${p.i}-${p.s}`}
+            className="grid items-center gap-2 px-4 py-1.5 font-[var(--font-jetbrains-mono)] tabular-nums hover:bg-surface-2/40"
+            style={{ gridTemplateColumns: POS_COLS }}
+          >
+            <button
+              onClick={() => onSelect(p.s)}
+              className="truncate text-left font-medium text-fg hover:text-accent-2"
+              title="Switch the chart to this market"
+            >
+              {perpName(p.s)}
+            </button>
+            <span className={isLong ? "text-positive" : "text-negative"}>
+              {isLong ? "Long" : "Short"}
+            </span>
+            <span className="text-right">
+              {qtyFmt(abs)} <span className="text-fg-dim">{baseOf(p.s)}</span>
+            </span>
+            <span className="text-right">{px(entry)}</span>
+            <span className="text-right">{mark != null ? px(mark) : "—"}</span>
+            <span
+              className={cn(
+                "text-right",
+                liqWarn ? "text-[#e0a53f]" : "text-fg-muted",
+              )}
+              title={liqWarn ? "Mark is within 10% of liquidation" : undefined}
+            >
+              {liq != null ? px(liq) : "—"}
+            </span>
+            <span className="text-right text-fg-muted">
+              {margin != null ? money(margin) : "—"}
+            </span>
+            <span className="text-right">{lev != null ? `${lev}×` : "—"}</span>
+            <span className={cn("text-right", upnlCls)}>
+              {ur == null
+                ? "—"
+                : `${ur >= 0 ? "+" : ""}${money(ur)}${roe != null ? ` (${roe >= 0 ? "+" : ""}${roe.toFixed(2)}%)` : ""}`}
+            </span>
+            <span className="flex justify-end gap-1">
+              <button
+                onClick={() => onClose(p, "market")}
+                className="rounded border border-line px-2 py-0.5 text-[10px] text-fg-muted transition-colors hover:border-negative/40 hover:text-negative"
+              >
+                Close
+              </button>
+              <button
+                onClick={() => onClose(p, "limit")}
+                className="rounded border border-line px-1.5 py-0.5 text-[10px] text-fg-dim transition-colors hover:text-fg"
+                title="Prefill a limit close in the ticket"
+              >
+                Limit
+              </button>
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }

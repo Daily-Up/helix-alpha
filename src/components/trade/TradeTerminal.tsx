@@ -113,6 +113,14 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
       .getElementById("terminal-ticket")
       ?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
+  // Close-position intent handed to the order ticket (opposite side, full size,
+  // reduce-only). Market opens the inline confirm; limit just prefills.
+  const [closeIntent, setCloseIntent] = useState<{
+    side: "buy" | "sell";
+    sizeBase: number;
+    type: "market" | "limit";
+    seq: number;
+  } | null>(null);
 
   // 1s clock for the funding countdown.
   useEffect(() => {
@@ -282,6 +290,33 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
       }
     },
     [account?.aid, rules?.id, refreshOpenOrders],
+  );
+
+  // Switch the terminal to a position's market (from the Positions table).
+  const onSelectSymbol = useCallback(
+    (sym: string) => {
+      const a = assets.find(
+        (x) => (x.sodex_symbol ?? "").toUpperCase() === sym.toUpperCase(),
+      );
+      if (a) setAssetId(a.id);
+    },
+    [assets],
+  );
+
+  // Close a position through the ticket: opposite side, full size, reduce-only.
+  const onClosePosition = useCallback(
+    (pos: SodexPerpsAccountState["P"][number], type: "market" | "limit") => {
+      const sz = Number(pos.sz);
+      if (!sz) return;
+      onSelectSymbol(pos.s); // move the ticket to the position's market first
+      setCloseIntent((prev) => ({
+        side: sz > 0 ? "sell" : "buy", // opposite side closes
+        sizeBase: Math.abs(sz),
+        type,
+        seq: (prev?.seq ?? 0) + 1,
+      }));
+    },
+    [onSelectSymbol],
   );
 
   // Bottom-panel height: load persisted, drag to resize, persist on release.
@@ -556,6 +591,7 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
               limitFill={limitFill}
               account={account}
               sideFill={sideFill}
+              closeIntent={closeIntent}
             />
           ) : null}
         </div>
@@ -582,6 +618,8 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
           openOrders={openOrders}
           onCancel={onCancelOrders}
           cancelBusy={cancelBusy}
+          onSelectSymbol={onSelectSymbol}
+          onClosePosition={onClosePosition}
           ready={tm.ready}
           digits={digits}
         />
