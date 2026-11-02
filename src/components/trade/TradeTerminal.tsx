@@ -150,6 +150,9 @@ export function TradeTerminal({
   const [cancelBusy, setCancelBusy] = useState(false);
   const [closeAllBusy, setCloseAllBusy] = useState(false);
   const [tpslBusy, setTpslBusy] = useState(false);
+  // Bumped after any order action so open history tabs refetch.
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const bumpHistory = useCallback(() => setHistoryRefreshKey((k) => k + 1), []);
   const { address: connectedMaster } = useAccount();
   const router = useRouter();
 
@@ -429,6 +432,7 @@ export function TradeTerminal({
           cancels,
         });
         await refreshOpenOrders();
+        bumpHistory();
       } catch (e) {
         showToast(`Cancel failed: ${(e as Error).message}`);
         console.warn("[cancel] failed:", (e as Error).message);
@@ -436,7 +440,7 @@ export function TradeTerminal({
         setCancelBusy(false);
       }
     },
-    [account?.aid, symbolMeta, refreshOpenOrders, router, showToast],
+    [account?.aid, symbolMeta, refreshOpenOrders, router, showToast, bumpHistory],
   );
 
   // Switch the terminal to a position's market (from the Positions table).
@@ -568,9 +572,10 @@ export function TradeTerminal({
       } finally {
         setCloseAllBusy(false);
         refreshOpenOrders();
+        bumpHistory();
       }
     },
-    [closeAllBusy, markBySymbol, connectedMaster, refreshOpenOrders],
+    [closeAllBusy, markBySymbol, connectedMaster, refreshOpenOrders, bumpHistory],
   );
 
   const builderRate = useMemo(() => {
@@ -804,7 +809,9 @@ export function TradeTerminal({
       })
       .map((o) => ({
         price: Number(o.price),
-        side: (o.side === 1 ? "buy" : "sell") as "buy" | "sell", // 1 = BUY
+        side: (o.side === 1 || o.side === "BUY" ? "buy" : "sell") as
+          | "buy"
+          | "sell",
         size: o.origQty ?? "",
       }));
   }, [openOrders, sodexSymbol]);
@@ -1019,6 +1026,8 @@ export function TradeTerminal({
               tpsl={tpslCtx}
               ready={tm.ready}
               digits={digits}
+              address={tm.address ?? null}
+              historyRefreshKey={historyRefreshKey}
             />
           </div>
         </div>

@@ -164,27 +164,114 @@ export interface SodexCancelOrderParams {
   cancels: SodexCancelItem[];
 }
 
-/** An open order from GET /accounts/{address}/orders (PerpsOrder). */
+/** An open order from GET /accounts/{address}/orders (PerpsOrder). NOTE: the
+ *  READ endpoints (orders, orders/history, trades) return side/type/status as
+ *  STRINGS ("SELL", "MARKET", "NEW"), unlike the numeric enums the PLACE path
+ *  sends — so these are string|number unions; use the sideIsBuy/orderTypeLabel
+ *  helpers rather than comparing to the numeric enums. */
 export interface SodexOpenOrder {
   orderID: number;
   clOrdID?: string;
   /** Symbol name, e.g. "BTC-USD". */
   symbol: string;
-  /** 1 = BUY, 2 = SELL. */
-  side: SodexSideValue;
-  /** 1 = LIMIT, 2 = MARKET. */
-  type: SodexOrderTypeValue;
-  timeInForce?: SodexTifValue;
+  /** "BUY" | "SELL" (reads) — or 1 = BUY, 2 = SELL (legacy numeric). */
+  side: SodexSideValue | string;
+  /** "MARKET" | "LIMIT" (reads) — or 1 = LIMIT, 2 = MARKET (legacy numeric). */
+  type: SodexOrderTypeValue | string;
+  timeInForce?: SodexTifValue | string;
   price?: string;
   /** Original quantity. */
   origQty?: string;
   funds?: string;
   /** Filled quantity. */
   executedQty: string;
-  status: number;
+  executedValue?: string;
+  status: number | string;
   createdAt?: number;
   updatedAt?: number;
   reduceOnly?: boolean;
+  positionSide?: string;
+  positionID?: number;
+  /** Trigger price for a stop order (TP/SL). */
+  stopPrice?: string;
+  /** "TAKE_PROFIT" | "STOP_LOSS" on a trigger order. */
+  stopType?: string;
+  /** Trigger reference, e.g. "MARK_PRICE". */
+  triggerType?: string;
+  builder?: { builderID: number; feeRate: number };
+}
+
+/** A fill from GET /accounts/{address}/trades. */
+export interface SodexTrade {
+  symbol: string;
+  tradeID: number;
+  orderID: number;
+  clOrdID?: string;
+  /** "BUY" | "SELL". */
+  side: string;
+  price: string;
+  quantity: string;
+  fee: string;
+  /** Builder fee — absent on fills with no builder. */
+  builderFee?: string;
+  feeCoin: string;
+  /** Fill time, ms. */
+  time: number;
+  isMaker: boolean;
+}
+
+/** An order from GET /accounts/{address}/orders/history (filled/cancelled/…). */
+export interface SodexOrderHistory {
+  symbol: string;
+  orderID: number;
+  clOrdID?: string;
+  side: string;
+  /** "MARKET" | "LIMIT". */
+  type: string;
+  timeInForce?: string;
+  price?: string;
+  origQty: string;
+  /** "FILLED" | "CANCELED" | "REJECTED" | "NEW" | … */
+  status: string;
+  executedQty: string;
+  executedValue?: string;
+  marginFrozen?: string;
+  createdAt: number;
+  updatedAt?: number;
+  positionSide?: string;
+  reduceOnly?: boolean;
+  stopPrice?: string;
+  /** "TAKE_PROFIT" | "STOP_LOSS" on a trigger order. */
+  stopType?: string;
+  triggerType?: string;
+  /** Reject/cancel reason if the gateway provides one (field name varies). */
+  rejectReason?: string;
+  reason?: string;
+  text?: string;
+}
+
+/** A closed/historical position from GET /accounts/{address}/positions/history. */
+export interface SodexClosedPosition {
+  id: number;
+  symbol: string;
+  marginMode?: string;
+  /** "LONG" | "SHORT". */
+  positionSide: string;
+  size: string;
+  avgEntryPrice: string;
+  avgClosePrice?: string;
+  realizedPnL: string;
+  cumTradingFee?: string;
+  cumFundingFee?: string;
+  cumClosedSize?: string;
+  maxSize?: string;
+  leverage?: number;
+  /** false = closed. */
+  active: boolean;
+  /** Opened, ms. */
+  createdAt: number;
+  /** Last update / closed, ms. */
+  updatedAt: number;
 }
 
 /**

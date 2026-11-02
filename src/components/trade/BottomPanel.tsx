@@ -8,7 +8,7 @@
  * show a short empty state with a Connect SoDEX CTA.
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { cn } from "@/components/ui/cn";
 import { AssetLogo } from "@/components/ui/AssetLogo";
@@ -19,14 +19,23 @@ import {
   type SodexPerpsAccountState,
   type SodexOpenOrder,
   type SodexFundingPayment,
+  type SodexTrade,
+  type SodexOrderHistory,
+  type SodexClosedPosition,
 } from "@/lib/sodex-onchain/types";
+import {
+  getAccountTrades,
+  getOrderHistory,
+  getPositionsHistory,
+} from "@/lib/sodex-onchain/client";
 
 export const BOTTOM_TABS = [
   "Positions",
   "Open Orders",
   "Trade History",
-  "Funding",
   "Order History",
+  "Closed Positions",
+  "Funding",
 ] as const;
 export type BottomTab = (typeof BOTTOM_TABS)[number];
 
@@ -92,6 +101,56 @@ const baseOf = (s: string) => s.split("-")[0] || s;
 const marginModeLabel = (m?: string) =>
   m ? m.charAt(0).toUpperCase() + m.slice(1).toLowerCase() : null;
 
+// Read endpoints return "BUY"/"SELL"/"MARKET"/"LIMIT"/"NEW" as STRINGS; the
+// place path uses the numeric enums. These helpers accept either.
+const sideIsBuy = (s: unknown) =>
+  s === "BUY" || s === "Buy" || s === SodexSide.BUY;
+const sideLabel = (s: unknown) => (sideIsBuy(s) ? "Buy" : "Sell");
+/** A row's display order type + whether it's a trigger (stop) order. */
+function orderTypeInfo(o: { type?: unknown; stopType?: string }): {
+  label: string;
+  isStop: boolean;
+} {
+  const st = (o.stopType ?? "").toString().toUpperCase();
+  if (st === "TAKE_PROFIT") return { label: "TP · Stop Market", isStop: true };
+  if (st === "STOP_LOSS") return { label: "SL · Stop Market", isStop: true };
+  const t = o.type;
+  if (t === "LIMIT" || t === SodexOrderType.LIMIT)
+    return { label: "Limit", isStop: false };
+  if (t === "MARKET" || t === SodexOrderType.MARKET)
+    return { label: "Market", isStop: false };
+  return { label: t != null ? String(t) : "—", isStop: false };
+}
+// Filled qty shown with the same decimals as the order size ("0" → "0.00000").
+const qtyDecimals = (s?: string) => {
+  const d = (s ?? "").split(".")[1];
+  return d ? d.length : 0;
+};
+const filledFmt = (filled?: string, size?: string) => {
+  const n = Number(filled ?? 0);
+  return Number.isFinite(n) ? n.toFixed(qtyDecimals(size)) : "0";
+};
+// Does a symbol pass the "Current market only" filter?
+const symbolMatches = (
+  sym: string,
+  currentOnly: boolean,
+  selectedSymbol: string | null,
+) => {
+  if (!currentOnly) return true;
+  const sel = (selectedSymbol ?? "").toUpperCase();
+  return sym.toUpperCase() === sel || baseOf(sym).toUpperCase() === baseOf(sel);
+};
+/** Status → tone for history rows. */
+const statusTone = (status: string) => {
+  const s = status.toUpperCase();
+  if (s === "FILLED" || s === "TRIGGERED") return "text-positive";
+  if (s === "CANCELED" || s === "CANCELLED" || s === "EXPIRED") return "text-fg-muted";
+  if (s === "REJECTED") return "text-negative";
+  return "text-fg";
+};
+const titleCase = (s: string) =>
+  s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : s;
+
 type Position = NonNullable<SodexPerpsAccountState["P"]>[number];
 
 /** Per-symbol funding snapshot: raw rate (fraction per interval) + next
@@ -137,6 +196,8 @@ export function BottomPanel({
   tpsl,
   ready,
   digits,
+  address,
+  historyRefreshKey,
 }: {
   tab: BottomTab;
   setTab: (t: BottomTab) => void;
@@ -167,6 +228,10 @@ export function BottomPanel({
   tpsl: TpSlCtx;
   ready: boolean;
   digits: number;
+  /** Master account address (0x…) for the history tabs' own fetches. */
+  address: string | null;
+  /** Bumps after any order action so open history tabs refetch. */
+  historyRefreshKey: number;
 }) {
   const [currentOnly, setCurrentOnly] = useState(false);
   const [closeAllOpen, setCloseAllOpen] = useState(false);
@@ -182,8 +247,9 @@ export function BottomPanel({
     Positions: positions.length,
     "Open Orders": orders.length,
     "Trade History": 0,
-    Funding: 0,
     "Order History": 0,
+    "Closed Positions": 0,
+    Funding: 0,
   };
 
   return (
@@ -220,13 +286,17 @@ export function BottomPanel({
             />
             Current market only
           </label>
-          <button
-            onClick={() => setCloseAllOpen(true)}
-            disabled={allPositions.length === 0 || closeAllBusy}
-            className="rounded border border-negative/50 px-2 py-0.5 text-[11px] font-medium text-negative transition-colors hover:bg-negative/10 disabled:opacity-40"
-          >
-            {closeAllBusy ? "Closing…" : "Close All"}
-          </button>
+          {/* Close All belongs to Positions only; Open Orders has its own
+              "Cancel all" inside the list. */}
+          {tab === "Positions" ? (
+            <button
+              onClick={() => setCloseAllOpen(true)}
+              disabled={allPositions.length === 0 || closeAllBusy}
+              className="rounded border border-negative/50 px-2 py-0.5 text-[11px] font-medium text-negative transition-colors hover:bg-negative/10 disabled:opacity-40"
+            >
+              {closeAllBusy ? "Closing…" : "Close All"}
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -264,9 +334,30 @@ export function BottomPanel({
             />
           )
         ) : tab === "Trade History" ? (
-          // TODO: wire to /api/sodex/my-trades (Helix's executed-trade log).
-          <Empty>Trade history coming soon.</Empty>
-        ) : tab === "Funding" ? (
+          <TradeHistoryView
+            address={address}
+            currentOnly={currentOnly}
+            selectedSymbol={selectedSymbol}
+            refreshKey={historyRefreshKey}
+            digits={digits}
+          />
+        ) : tab === "Order History" ? (
+          <OrderHistoryView
+            address={address}
+            currentOnly={currentOnly}
+            selectedSymbol={selectedSymbol}
+            refreshKey={historyRefreshKey}
+            digits={digits}
+          />
+        ) : tab === "Closed Positions" ? (
+          <ClosedPositionsView
+            address={address}
+            currentOnly={currentOnly}
+            selectedSymbol={selectedSymbol}
+            refreshKey={historyRefreshKey}
+            digits={digits}
+          />
+        ) : (
           <FundingView
             positions={positions}
             markBySymbol={markBySymbol}
@@ -275,13 +366,6 @@ export function BottomPanel({
             fundings={accountFundings}
             now={now}
           />
-        ) : (
-          // Order History — TODO: no SoDEX filled/cancelled/rejected history
-          // endpoint yet; fall back to an empty state.
-          <Empty>
-            Order history isn&apos;t available from SoDEX yet. (TODO: wire a
-            filled / cancelled / rejected orders endpoint when one exists.)
-          </Empty>
         )}
       </div>
 
@@ -991,23 +1075,28 @@ function CancelAllConfirm({
         </div>
         <div className="max-h-[240px] overflow-y-auto px-4 py-2">
           {orders.map((o) => {
-            const buy = o.side === SodexSide.BUY;
-            const isLimit = o.type === SodexOrderType.LIMIT;
+            const buy = sideIsBuy(o.side);
+            const { label: typeLabel, isStop } = orderTypeInfo(o);
+            const trig = isStop && Number(o.stopPrice) > 0 ? Number(o.stopPrice) : null;
             return (
               <div
                 key={o.orderID}
                 className="flex items-center justify-between py-1 font-[var(--font-jetbrains-mono)] text-[11.5px] tabular-nums"
               >
-                <span className="flex items-center gap-2">
-                  <span className="text-fg">{baseOf(o.symbol)}</span>
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="text-fg">{perpName(o.symbol)}</span>
                   <span className={buy ? "text-positive" : "text-negative"}>
                     {buy ? "Buy" : "Sell"}
                   </span>
-                  <span className="text-[9px] text-fg-dim">{isLimit ? "LMT" : "MKT"}</span>
+                  <span className="truncate text-[9px] text-fg-dim">{typeLabel}</span>
                 </span>
                 <span className="text-fg-muted">
                   {o.origQty ? qtyFmt(Number(o.origQty)) : "—"}
-                  {Number(o.price) > 0 ? ` @ ${px(o.price)}` : ""}
+                  {trig != null
+                    ? ` @ ${px(String(trig))} trig`
+                    : Number(o.price) > 0
+                      ? ` @ ${px(o.price)}`
+                      : ""}
                 </span>
               </div>
             );
@@ -1037,8 +1126,9 @@ function CancelAllConfirm({
   );
 }
 
+// Time | Market | Type | Side | Price | Trigger | Size | Filled | Cancel
 const OO_COLS =
-  "minmax(56px,1fr) 60px minmax(0,1fr) minmax(0,1fr) minmax(0,0.85fr) minmax(0,0.95fr) 56px";
+  "minmax(78px,0.95fr) minmax(74px,1fr) minmax(92px,1.3fr) 42px minmax(0,0.95fr) minmax(0,0.95fr) minmax(0,0.95fr) minmax(0,0.9fr) 50px";
 
 function OpenOrders({
   orders,
@@ -1064,28 +1154,27 @@ function OpenOrders({
           maximumFractionDigits: digits,
         })
       : "—";
-  // Orders can span markets (account-wide), so label the header by distinct
-  // market count unless they all share one symbol.
-  const markets = new Set(orders.map((o) => (o.symbol ?? "").toUpperCase()));
-  const header =
-    markets.size === 1 ? perpName(orders[0]?.symbol ?? "") : `${markets.size} markets`;
-  // "Cancel all" obeys the same filter the list is already showing: scoped to
-  // the selected market when "Current market only" is on, else every market.
-  const cancelAllLabel = currentOnly
-    ? `Cancel all (${perpName(selectedSymbol ?? "")})`
-    : `Cancel all (${orders.length} orders, all markets)`;
+  // Header + cancel-all scope must agree: "N open · BTC-PERP" when the current-
+  // market filter is on or all orders share one market, else "N open · all
+  // markets".
+  const markets = new Set(orders.map((o) => baseOf(o.symbol).toUpperCase()));
+  const scope = currentOnly
+    ? perpName(selectedSymbol ?? "")
+    : markets.size <= 1
+      ? perpName(orders[0]?.symbol ?? "")
+      : "all markets";
   return (
     <div className="text-[11.5px]">
       <div className="flex items-center justify-between border-b border-line px-4 py-1.5">
         <span className="text-[9px] uppercase tracking-wider text-fg-dim">
-          {orders.length} open · {header}
+          {orders.length} open · {scope}
         </span>
         <button
           onClick={() => setConfirmOpen(true)}
           disabled={busy || orders.length === 0}
           className="rounded border border-line px-2 py-0.5 text-[10px] text-fg-muted transition-colors hover:border-negative/40 hover:text-negative disabled:opacity-50"
         >
-          {busy ? "Cancelling…" : cancelAllLabel}
+          {busy ? "Cancelling…" : `Cancel all (${scope})`}
         </button>
       </div>
       {confirmOpen ? (
@@ -1093,7 +1182,7 @@ function OpenOrders({
           orders={orders}
           digits={digits}
           busy={busy}
-          scopeLabel={currentOnly ? perpName(selectedSymbol ?? "") : "all markets"}
+          scopeLabel={scope}
           onConfirm={() => {
             onCancel(orders);
             setConfirmOpen(false);
@@ -1105,35 +1194,54 @@ function OpenOrders({
         className="grid gap-2 border-b border-line px-4 py-1 text-[9px] uppercase tracking-wider text-fg-dim"
         style={{ gridTemplateColumns: OO_COLS }}
       >
+        <span>Time</span>
         <span>Market</span>
+        <span>Type</span>
         <span>Side</span>
         <span className="text-right">Price</span>
+        <span className="text-right">Trigger</span>
         <span className="text-right">Size</span>
         <span className="text-right">Filled</span>
-        <span className="text-right">Time</span>
         <span />
       </div>
       {orders.map((o) => {
-        const buy = o.side === SodexSide.BUY;
-        const isLimit = o.type === SodexOrderType.LIMIT;
+        const buy = sideIsBuy(o.side);
+        const { label: typeLabel, isStop } = orderTypeInfo(o);
         return (
           <div
             key={o.orderID}
             className="grid items-center gap-2 px-4 py-1.5 font-[var(--font-jetbrains-mono)] tabular-nums hover:bg-surface-2/40"
             style={{ gridTemplateColumns: OO_COLS }}
           >
-            <span className="truncate text-fg-muted">{baseOf(o.symbol)}</span>
+            <span className="text-fg-dim">{o.createdAt ? fmtDateTime(o.createdAt) : "—"}</span>
+            <span className="flex min-w-0 items-center gap-1.5">
+              <AssetLogo symbol={o.symbol} size={15} />
+              <span className="truncate text-fg">{perpName(o.symbol)}</span>
+            </span>
+            <span className="flex min-w-0 items-center gap-1 truncate">
+              <span className={cn("truncate", isStop ? "text-fg" : "text-fg-muted")}>
+                {typeLabel}
+              </span>
+              {o.reduceOnly ? (
+                <span className="shrink-0 rounded bg-surface-2 px-1 text-[8px] uppercase tracking-wide text-fg-dim">
+                  RO
+                </span>
+              ) : null}
+            </span>
             <span className={buy ? "text-positive" : "text-negative"}>
               {buy ? "Buy" : "Sell"}
-              <span className="ml-1 text-[9px] text-fg-dim">{isLimit ? "LMT" : "MKT"}</span>
             </span>
-            <span className="text-right">{px(o.price)}</span>
+            {/* Price: limit → limit price; market / stop-market → "Market". */}
+            <span className="text-right text-fg-muted">
+              {Number(o.price) > 0 ? px(o.price) : "Market"}
+            </span>
+            {/* Trigger: stop orders show the trigger price, never a bare "—". */}
+            <span className={cn("text-right", isStop ? "text-[#e0a53f]" : "text-fg-dim")}>
+              {isStop && Number(o.stopPrice) > 0 ? px(o.stopPrice) : "—"}
+            </span>
             <span className="text-right">{o.origQty ? qtyFmt(Number(o.origQty)) : "—"}</span>
             <span className="text-right text-fg-muted">
-              {o.executedQty ? qtyFmt(Number(o.executedQty)) : "0"}
-            </span>
-            <span className="text-right text-fg-dim">
-              {o.createdAt ? fmtTime(o.createdAt) : "—"}
+              {filledFmt(o.executedQty, o.origQty)}
             </span>
             <span className="text-right">
               <button
@@ -1144,6 +1252,405 @@ function OpenOrders({
                 Cancel
               </button>
             </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─────────────────────────── History tabs ───────────────────────────
+// Prices in history span markets, so size the precision to the value (the
+// selected market's `digits` is only a hint).
+const fmtPx = (v: number, digits = 2) =>
+  Number.isFinite(v)
+    ? v.toLocaleString(undefined, {
+        maximumFractionDigits: v >= 1000 ? 2 : v >= 1 ? Math.max(2, digits) : 6,
+      })
+    : "—";
+type FetchState = "loading" | "error" | "ready";
+
+/** Loading / error states for a history list (empty is the caller's to render,
+ *  so an empty list and an API error look different). */
+function HistoryStatus({ state, err }: { state: FetchState; err: string | null }) {
+  if (state === "error")
+    return (
+      <div className="flex flex-col items-center gap-1 px-4 py-8 text-center text-[12px]">
+        <span className="text-negative">Couldn’t load from SoDEX.</span>
+        {err ? <span className="text-[11px] text-fg-dim">{err}</span> : null}
+      </div>
+    );
+  return (
+    <div className="px-4 py-8 text-center text-[12px] text-fg-dim">Loading…</div>
+  );
+}
+
+/** Fetch a history list for the account, refetching on refreshKey / address.
+ *  Keeps the prior rows visible across a silent refresh. */
+function useAccountHistory<T>(
+  address: string | null,
+  refreshKey: number,
+  load: (addr: `0x${string}`) => Promise<T[]>,
+): { rows: T[]; state: FetchState; err: string | null } {
+  const [rows, setRows] = useState<T[]>([]);
+  const [state, setState] = useState<FetchState>("loading");
+  const [err, setErr] = useState<string | null>(null);
+  const loadRef = useRef(load);
+  loadRef.current = load;
+  const hasRows = useRef(false);
+  useEffect(() => {
+    if (!address) {
+      setRows([]);
+      hasRows.current = false;
+      setState("ready");
+      return;
+    }
+    let cancelled = false;
+    if (!hasRows.current) setState("loading");
+    loadRef
+      .current(address as `0x${string}`)
+      .then((data) => {
+        if (cancelled) return;
+        hasRows.current = data.length > 0;
+        setRows(data);
+        setErr(null);
+        setState("ready");
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setErr((e as Error).message || "request failed");
+        setState("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [address, refreshKey]);
+  return { rows, state, err };
+}
+
+type HistoryViewProps = {
+  address: string | null;
+  currentOnly: boolean;
+  selectedSymbol: string | null;
+  refreshKey: number;
+  digits: number;
+};
+
+const TH_COLS =
+  "minmax(92px,1fr) minmax(74px,0.95fr) 42px minmax(0,0.95fr) minmax(0,0.9fr) minmax(0,0.9fr) minmax(0,0.85fr) minmax(0,0.9fr) 52px";
+
+/** Trade History — fills, newest first, paged on scroll (limit + endTime). */
+function TradeHistoryView({
+  address,
+  currentOnly,
+  selectedSymbol,
+  refreshKey,
+  digits,
+}: HistoryViewProps) {
+  const PAGE = 100;
+  const [rows, setRows] = useState<SodexTrade[]>([]);
+  const [state, setState] = useState<FetchState>("loading");
+  const [err, setErr] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [done, setDone] = useState(false);
+  const hasRows = useRef(false);
+  const sentinel = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!address) {
+      setRows([]);
+      hasRows.current = false;
+      setState("ready");
+      return;
+    }
+    let cancelled = false;
+    if (!hasRows.current) setState("loading");
+    setDone(false);
+    getAccountTrades("mainnet", address as `0x${string}`, { limit: PAGE })
+      .then((data) => {
+        if (cancelled) return;
+        hasRows.current = data.length > 0;
+        setRows(data);
+        setDone(data.length < PAGE);
+        setErr(null);
+        setState("ready");
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setErr((e as Error).message || "request failed");
+        setState("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [address, refreshKey]);
+
+  const loadMore = useCallback(async () => {
+    if (!address || loadingMore || done || rows.length === 0) return;
+    setLoadingMore(true);
+    try {
+      const oldest = rows[rows.length - 1];
+      const older = await getAccountTrades("mainnet", address as `0x${string}`, {
+        limit: PAGE,
+        endTime: oldest.time - 1,
+      });
+      setRows((prev) => [...prev, ...older]);
+      if (older.length < PAGE) setDone(true);
+    } catch {
+      /* keep what we have */
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [address, loadingMore, done, rows]);
+
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (es) => es[0]?.isIntersecting && loadMore(),
+      { rootMargin: "160px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [loadMore]);
+
+  const shown = rows.filter((t) =>
+    symbolMatches(t.symbol, currentOnly, selectedSymbol),
+  );
+  if (state !== "ready") return <HistoryStatus state={state} err={err} />;
+  if (shown.length === 0) return <Empty>No trades in this range.</Empty>;
+  const totalFee = shown.reduce((s, t) => s + (Number(t.fee) || 0), 0);
+  const totalBuilder = shown.reduce((s, t) => s + (Number(t.builderFee) || 0), 0);
+
+  return (
+    <div className="text-[11.5px]">
+      <div className="flex items-center justify-between border-b border-line bg-surface-2/30 px-4 py-1 text-[10px] text-fg-dim">
+        <span>
+          {shown.length} fill{shown.length === 1 ? "" : "s"} loaded
+        </span>
+        <span className="font-[var(--font-jetbrains-mono)] tabular-nums">
+          Fees {money(totalFee, 4)} · Builder {money(totalBuilder, 4)}
+        </span>
+      </div>
+      <div
+        className="grid gap-2 border-b border-line px-4 py-1 text-[9px] uppercase tracking-wider text-fg-dim"
+        style={{ gridTemplateColumns: TH_COLS }}
+      >
+        <span>Time</span>
+        <span>Market</span>
+        <span>Side</span>
+        <span className="text-right">Price</span>
+        <span className="text-right">Size</span>
+        <span className="text-right">Value</span>
+        <span className="text-right">Fee</span>
+        <span className="text-right">Builder</span>
+        <span className="text-right">Role</span>
+      </div>
+      {shown.map((t) => {
+        const buy = sideIsBuy(t.side);
+        const price = Number(t.price);
+        const qty = Number(t.quantity);
+        return (
+          <div
+            key={t.tradeID}
+            className="grid items-center gap-2 px-4 py-1.5 font-[var(--font-jetbrains-mono)] tabular-nums hover:bg-surface-2/40"
+            style={{ gridTemplateColumns: TH_COLS }}
+          >
+            <span className="text-fg-dim">{fmtDateTime(t.time)}</span>
+            <span className="flex min-w-0 items-center gap-1.5">
+              <AssetLogo symbol={t.symbol} size={15} />
+              <span className="truncate text-fg">{perpName(t.symbol)}</span>
+            </span>
+            <span className={buy ? "text-positive" : "text-negative"}>
+              {buy ? "Buy" : "Sell"}
+            </span>
+            <span className="text-right">{fmtPx(price, digits)}</span>
+            <span className="text-right">{qtyFmt(qty)}</span>
+            <span className="text-right text-fg">{money(price * qty)}</span>
+            <span className="text-right text-fg-muted">{money(Number(t.fee), 4)}</span>
+            <span className="text-right text-fg-muted">
+              {t.builderFee ? money(Number(t.builderFee), 4) : "—"}
+            </span>
+            <span className="text-right text-fg-dim">{t.isMaker ? "Maker" : "Taker"}</span>
+          </div>
+        );
+      })}
+      {!done ? <div ref={sentinel} className="h-8" /> : null}
+      {loadingMore ? (
+        <div className="px-4 py-2 text-center text-[11px] text-fg-dim">Loading more…</div>
+      ) : null}
+    </div>
+  );
+}
+
+const OH_COLS =
+  "minmax(92px,1fr) minmax(70px,0.9fr) minmax(94px,1.25fr) 40px minmax(0,0.85fr) minmax(0,0.85fr) minmax(0,0.8fr) minmax(0,0.8fr) minmax(66px,0.85fr)";
+
+/** Order History — filled / cancelled / rejected / triggered orders. */
+function OrderHistoryView({
+  address,
+  currentOnly,
+  selectedSymbol,
+  refreshKey,
+  digits,
+}: HistoryViewProps) {
+  const load = useCallback(
+    (addr: `0x${string}`) => getOrderHistory("mainnet", addr, { limit: 200 }),
+    [],
+  );
+  const { rows, state, err } = useAccountHistory<SodexOrderHistory>(
+    address,
+    refreshKey,
+    load,
+  );
+  const shown = rows.filter((o) =>
+    symbolMatches(o.symbol, currentOnly, selectedSymbol),
+  );
+  if (state !== "ready") return <HistoryStatus state={state} err={err} />;
+  if (shown.length === 0) return <Empty>No order history in this range.</Empty>;
+  return (
+    <div className="text-[11.5px]">
+      <div
+        className="grid gap-2 border-b border-line px-4 py-1 text-[9px] uppercase tracking-wider text-fg-dim"
+        style={{ gridTemplateColumns: OH_COLS }}
+      >
+        <span>Time</span>
+        <span>Market</span>
+        <span>Type</span>
+        <span>Side</span>
+        <span className="text-right">Price</span>
+        <span className="text-right">Trigger</span>
+        <span className="text-right">Size</span>
+        <span className="text-right">Filled</span>
+        <span className="text-right">Status</span>
+      </div>
+      {shown.map((o) => {
+        const buy = sideIsBuy(o.side);
+        const { label: typeLabel, isStop } = orderTypeInfo(o);
+        const reason = o.rejectReason || o.reason || o.text || "";
+        return (
+          <div
+            key={o.orderID}
+            className="grid items-center gap-2 px-4 py-1.5 font-[var(--font-jetbrains-mono)] tabular-nums hover:bg-surface-2/40"
+            style={{ gridTemplateColumns: OH_COLS }}
+          >
+            <span className="text-fg-dim">{o.createdAt ? fmtDateTime(o.createdAt) : "—"}</span>
+            <span className="flex min-w-0 items-center gap-1.5">
+              <AssetLogo symbol={o.symbol} size={15} />
+              <span className="truncate text-fg">{perpName(o.symbol)}</span>
+            </span>
+            <span className="flex min-w-0 items-center gap-1 truncate">
+              <span className={cn("truncate", isStop ? "text-fg" : "text-fg-muted")}>
+                {typeLabel}
+              </span>
+              {o.reduceOnly ? (
+                <span className="shrink-0 rounded bg-surface-2 px-1 text-[8px] uppercase tracking-wide text-fg-dim">
+                  RO
+                </span>
+              ) : null}
+            </span>
+            <span className={buy ? "text-positive" : "text-negative"}>
+              {buy ? "Buy" : "Sell"}
+            </span>
+            <span className="text-right text-fg-muted">
+              {Number(o.price) > 0 ? fmtPx(Number(o.price), digits) : "Market"}
+            </span>
+            <span className={cn("text-right", isStop ? "text-[#e0a53f]" : "text-fg-dim")}>
+              {isStop && Number(o.stopPrice) > 0 ? fmtPx(Number(o.stopPrice), digits) : "—"}
+            </span>
+            <span className="text-right">{o.origQty ? qtyFmt(Number(o.origQty)) : "—"}</span>
+            <span className="text-right text-fg-muted">
+              {filledFmt(o.executedQty, o.origQty)}
+            </span>
+            <span
+              className={cn("truncate text-right", statusTone(o.status))}
+              title={reason ? `${titleCase(o.status)} — ${reason}` : undefined}
+            >
+              {titleCase(o.status)}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+const CP_COLS =
+  "minmax(84px,1fr) 46px minmax(0,0.9fr) minmax(0,0.95fr) minmax(0,0.95fr) minmax(0,1fr) minmax(90px,1fr) minmax(90px,1fr)";
+
+/** Closed Positions — realized history from positions/history (active=false). */
+function ClosedPositionsView({
+  address,
+  currentOnly,
+  selectedSymbol,
+  refreshKey,
+  digits,
+}: HistoryViewProps) {
+  const load = useCallback(
+    (addr: `0x${string}`) => getPositionsHistory("mainnet", addr, { limit: 100 }),
+    [],
+  );
+  const { rows, state, err } = useAccountHistory<SodexClosedPosition>(
+    address,
+    refreshKey,
+    load,
+  );
+  const shown = rows.filter(
+    (p) => !p.active && symbolMatches(p.symbol, currentOnly, selectedSymbol),
+  );
+  if (state !== "ready") return <HistoryStatus state={state} err={err} />;
+  if (shown.length === 0) return <Empty>No closed positions in this range.</Empty>;
+  return (
+    <div className="text-[11.5px]">
+      <div
+        className="grid gap-2 border-b border-line px-4 py-1 text-[9px] uppercase tracking-wider text-fg-dim"
+        style={{ gridTemplateColumns: CP_COLS }}
+      >
+        <span>Market</span>
+        <span>Side</span>
+        <span className="text-right">Size</span>
+        <span className="text-right">Entry</span>
+        <span className="text-right">Close</span>
+        <span className="text-right">Realized PnL</span>
+        <span className="text-right">Opened</span>
+        <span className="text-right">Closed</span>
+      </div>
+      {shown.map((p) => {
+        const isLong = (p.positionSide ?? "").toUpperCase() === "LONG";
+        const pnl = Number(p.realizedPnL);
+        const sizeStr = p.maxSize ?? p.cumClosedSize ?? p.size;
+        return (
+          <div
+            key={p.id}
+            className="grid items-center gap-2 px-4 py-1.5 font-[var(--font-jetbrains-mono)] tabular-nums hover:bg-surface-2/40"
+            style={{ gridTemplateColumns: CP_COLS }}
+          >
+            <span className="flex min-w-0 items-center gap-1.5">
+              <AssetLogo symbol={p.symbol} size={15} />
+              <span className="truncate text-fg">{perpName(p.symbol)}</span>
+            </span>
+            <span className={isLong ? "text-positive" : "text-negative"}>
+              {isLong ? "Long" : "Short"}
+            </span>
+            <span className="text-right text-fg-muted">
+              {sizeStr ? qtyFmt(Number(sizeStr)) : "—"}
+            </span>
+            <span className="text-right text-fg-muted">
+              {fmtPx(Number(p.avgEntryPrice), digits)}
+            </span>
+            <span className="text-right text-fg-muted">
+              {Number(p.avgClosePrice) > 0 ? fmtPx(Number(p.avgClosePrice), digits) : "—"}
+            </span>
+            <span
+              className={cn(
+                "text-right",
+                pnl > 0 ? "text-positive" : pnl < 0 ? "text-negative" : "text-fg-muted",
+              )}
+            >
+              {Number.isFinite(pnl) ? signedMoney(pnl) : "—"}
+            </span>
+            <span className="text-right text-fg-dim">{fmtDateTime(p.createdAt)}</span>
+            <span className="text-right text-fg-dim">{fmtDateTime(p.updatedAt)}</span>
           </div>
         );
       })}

@@ -31,10 +31,13 @@ import type {
   SodexApiKeyRow,
   SodexCancelItem,
   SodexCancelOrderParams,
+  SodexClosedPosition,
   SodexFundingPayment,
   SodexNewOrderBatch,
   SodexOpenOrder,
+  SodexOrderHistory,
   SodexRevokeApiKeyParams,
+  SodexTrade,
 } from "./types";
 import { SodexApiKeyType } from "./types";
 
@@ -789,4 +792,74 @@ export async function getAccountFundings(
   const res = await fetch(`${endpoint}/accounts/${address}/fundings?${qs}`);
   const data = await handle<SodexFundingPayment[]>(res);
   return data ?? [];
+}
+
+/** Shared history fetcher — GET /accounts/{address}/{path} with query params,
+ *  returning the `data` array (handles `{data:[]}` and `{data:{orders:[]}}`). */
+async function fetchAccountList<T>(
+  network: SodexNetwork,
+  address: `0x${string}`,
+  path: string,
+  params: Record<string, string | number | undefined>,
+  market: SodexMarket,
+): Promise<T[]> {
+  const { spotEndpoint, perpsEndpoint } = SODEX_NETWORKS[network];
+  const endpoint = market === "futures" ? perpsEndpoint : spotEndpoint;
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v != null && v !== "") qs.set(k, String(v));
+  }
+  const q = qs.toString();
+  const res = await fetch(`${endpoint}/accounts/${address}/${path}${q ? `?${q}` : ""}`);
+  const data = await handle<T[] | { orders?: T[]; list?: T[] }>(res);
+  if (Array.isArray(data)) return data;
+  return data?.orders ?? data?.list ?? [];
+}
+
+/** GET /accounts/{address}/trades — fills (most-recent first). */
+export function getAccountTrades(
+  network: SodexNetwork,
+  address: `0x${string}`,
+  opts: { symbol?: string; limit?: number; startTime?: number; endTime?: number } = {},
+  market: SodexMarket = "futures",
+): Promise<SodexTrade[]> {
+  return fetchAccountList<SodexTrade>(
+    network,
+    address,
+    "trades",
+    { limit: opts.limit ?? 100, symbol: opts.symbol, startTime: opts.startTime, endTime: opts.endTime },
+    market,
+  );
+}
+
+/** GET /accounts/{address}/orders/history — filled/cancelled/rejected orders. */
+export function getOrderHistory(
+  network: SodexNetwork,
+  address: `0x${string}`,
+  opts: { symbol?: string; limit?: number; startTime?: number; endTime?: number } = {},
+  market: SodexMarket = "futures",
+): Promise<SodexOrderHistory[]> {
+  return fetchAccountList<SodexOrderHistory>(
+    network,
+    address,
+    "orders/history",
+    { limit: opts.limit ?? 100, symbol: opts.symbol, startTime: opts.startTime, endTime: opts.endTime },
+    market,
+  );
+}
+
+/** GET /accounts/{address}/positions/history — closed/historical positions. */
+export function getPositionsHistory(
+  network: SodexNetwork,
+  address: `0x${string}`,
+  opts: { symbol?: string; limit?: number } = {},
+  market: SodexMarket = "futures",
+): Promise<SodexClosedPosition[]> {
+  return fetchAccountList<SodexClosedPosition>(
+    network,
+    address,
+    "positions/history",
+    { limit: opts.limit ?? 100, symbol: opts.symbol },
+    market,
+  );
 }

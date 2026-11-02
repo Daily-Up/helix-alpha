@@ -95,9 +95,14 @@ export function PriceChart({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tradeLinesRef = useRef<any[]>([]);
   const candlesRef = useRef<Candle[]>([]);
-  // Position levels the price scale should always keep in view (entry / TP /
-  // SL), so the dashed trigger lines aren't scrolled off the top or bottom.
-  const levelsRef = useRef<number[]>([]);
+  // Entry price the autoscale may nudge the range to include (only when it's
+  // within ~5% of the candle range). TP/SL/order lines are NOT kept in view —
+  // off-screen ones get an edge marker instead.
+  const entryRef = useRef<number | null>(null);
+  // Edge markers for off-screen lines: { text, color, dir }.
+  const [edges, setEdges] = useState<
+    { text: string; color: string; dir: "up" | "down" }[]
+  >([]);
 
   const digits = (candles[candles.length - 1]?.close ?? 1) < 10 ? 4 : 2;
 
@@ -181,19 +186,26 @@ export function PriceChart({
           precision: decimalsFromTick(tickSize),
           minMove: tickSize && tickSize > 0 ? tickSize : 0.01,
         },
-        // Keep the position's entry / TP / SL inside the visible range so the
-        // dashed trigger lines never scroll off-screen.
+        // Autoscale to the CANDLES only — never stretch to TP/SL/order lines
+        // (that squashes the candles). The one exception: nudge the range to
+        // include the entry when it's within ~5% of the candle range, so the
+        // entry line stays visible without distorting the chart. Off-screen
+        // TP/SL/order lines get an edge marker instead (see edge effect).
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         autoscaleInfoProvider: (orig: () => any) => {
           const res = orig();
-          const lv = levelsRef.current;
-          if (!res || !res.priceRange || lv.length === 0) return res;
-          let { minValue, maxValue } = res.priceRange;
-          for (const v of lv) {
-            if (v < minValue) minValue = v;
-            if (v > maxValue) maxValue = v;
-          }
-          return { ...res, priceRange: { minValue, maxValue } };
+          const entry = entryRef.current;
+          if (!res || !res.priceRange || entry == null || entry <= 0) return res;
+          const { minValue, maxValue } = res.priceRange;
+          const pad = (maxValue - minValue) * 0.05;
+          if (entry < minValue - pad || entry > maxValue + pad) return res;
+          return {
+            ...res,
+            priceRange: {
+              minValue: Math.min(minValue, entry),
+              maxValue: Math.max(maxValue, entry),
+            },
+          };
         },
       });
       const vol = chart.addHistogramSeries({
@@ -390,16 +402,51 @@ export function PriceChart({
         `${o.side === "buy" ? "Buy" : "Sell"} ${o.size}`,
       );
     }
-    // Keep the active management levels (entry / TP / SL) in view, then force
-    // the price scale to recompute so the dashed lines are always on-screen.
-    levelsRef.current = [positionEntry, tpPrice, slPrice].filter(
-      (v): v is number => v != null && v > 0,
-    );
+    // Autoscale may nudge to include entry (within ~5%); recompute the scale.
+    entryRef.current = positionEntry != null && positionEntry > 0 ? positionEntry : null;
     try {
       series.priceScale().applyOptions({ autoScale: true });
     } catch {
       /* no-op */
     }
+
+    // Edge markers for lines outside the visible price range. priceToCoordinate
+    // gives a y in [0,height] when visible, else above (<0) or below (>height).
+    const computeEdges = () => {
+      const s = candleRef.current;
+      const el = containerRef.current;
+      if (!s || !el) return;
+      const h = el.clientHeight;
+      const items: { price: number; text: string; color: string }[] = [];
+      if (tpPrice != null && tpPrice > 0)
+        items.push({ price: tpPrice, text: `TP ${px(tpPrice)}`, color: UP });
+      if (slPrice != null && slPrice > 0)
+        items.push({ price: slPrice, text: `SL ${px(slPrice)}`, color: DOWN });
+      if (positionLiq != null && positionLiq > 0)
+        items.push({ price: positionLiq, text: `Liq ${px(positionLiq)}`, color: DOWN });
+      for (const o of orderLines ?? [])
+        items.push({
+          price: o.price,
+          text: `${o.side === "buy" ? "Buy" : "Sell"} ${px(o.price)}`,
+          color: o.side === "buy" ? UP : DOWN,
+        });
+      const out: { text: string; color: string; dir: "up" | "down" }[] = [];
+      for (const it of items) {
+        const y = s.priceToCoordinate(it.price);
+        if (y == null) continue;
+        if (y < 0) out.push({ text: `${it.text} ↑`, color: it.color, dir: "up" });
+        else if (y > h) out.push({ text: `${it.text} ↓`, color: it.color, dir: "down" });
+      }
+      setEdges((prev) =>
+        prev.length === out.length &&
+        prev.every((p, i) => p.text === out[i].text && p.dir === out[i].dir)
+          ? prev
+          : out,
+      );
+    };
+    computeEdges();
+    const t = setInterval(computeEdges, 400);
+    return () => clearInterval(t);
   }, [
     ready,
     positionEntry,
@@ -471,6 +518,37 @@ export function PriceChart({
           ) : null}
         </div>
         <div ref={containerRef} className="h-full w-full" />
+        {/* Edge markers for TP/SL/order lines outside the visible price range. */}
+        {edges.some((e) => e.dir === "up") ? (
+          <div className="pointer-events-none absolute right-[60px] top-1 z-10 flex flex-col items-end gap-0.5">
+            {edges
+              .filter((e) => e.dir === "up")
+              .map((e, i) => (
+                <span
+                  key={i}
+                  className="rounded px-1 py-0.5 text-[9px] font-semibold tabular-nums"
+                  style={{ color: e.color, background: "rgba(10,12,16,0.6)" }}
+                >
+                  {e.text}
+                </span>
+              ))}
+          </div>
+        ) : null}
+        {edges.some((e) => e.dir === "down") ? (
+          <div className="pointer-events-none absolute bottom-1 right-[60px] z-10 flex flex-col items-end gap-0.5">
+            {edges
+              .filter((e) => e.dir === "down")
+              .map((e, i) => (
+                <span
+                  key={i}
+                  className="rounded px-1 py-0.5 text-[9px] font-semibold tabular-nums"
+                  style={{ color: e.color, background: "rgba(10,12,16,0.6)" }}
+                >
+                  {e.text}
+                </span>
+              ))}
+          </div>
+        ) : null}
         {err ? (
           <div className="absolute inset-0 flex items-center justify-center text-sm text-fg-dim">
             Chart unavailable — {err}
