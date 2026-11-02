@@ -13,14 +13,11 @@
  */
 
 import { useState } from "react";
-import { WagmiProvider, http } from "wagmi";
+import { WagmiProvider, createConfig, http } from "wagmi";
 import { mainnet } from "wagmi/chains";
+import { injected } from "wagmi/connectors";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import {
-  RainbowKitProvider,
-  darkTheme,
-  getDefaultConfig,
-} from "@rainbow-me/rainbowkit";
+import { RainbowKitProvider, darkTheme } from "@rainbow-me/rainbowkit";
 import "@rainbow-me/rainbowkit/styles.css";
 
 /**
@@ -42,13 +39,14 @@ import "@rainbow-me/rainbowkit/styles.css";
  * to keep wagmi happy. The wallet never has to switch.
  */
 
-const WALLETCONNECT_PROJECT_ID =
-  process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ?? "helix-buildathon-demo";
-
-const wagmiConfig = getDefaultConfig({
-  appName: "Helix",
-  projectId: WALLETCONNECT_PROJECT_ID,
+// Injected (browser-extension) wallets ONLY — MetaMask, Rabby, OKX, Coinbase
+// extension, etc. Desktop-only; NO WalletConnect/Reown (its project-id
+// requirement and its CSP origins were removed with it). EIP-6963 discovery
+// (wagmi's multiInjectedProviderDiscovery, on by default) surfaces each
+// installed extension with its own name + icon in the RainbowKit modal.
+const wagmiConfig = createConfig({
   chains: [mainnet],
+  connectors: [injected()],
   transports: { [mainnet.id]: http() },
   ssr: true,
 });

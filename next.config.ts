@@ -21,13 +21,15 @@ import type { NextConfig } from "next";
  * scripts). That opts every route into dynamic rendering, so it's deferred
  * past the buildathon rather than shipped here.
  *
+ * Wallets are INJECTED-ONLY (desktop extensions via EIP-6963), so there are
+ * no WalletConnect/Reown origins to allow — the wallet talks to the page
+ * through window.ethereum, not the network.
+ *
  * connect-src enumerates every origin the browser actually calls:
  *   - SoDEX gateway, REST + WS, mainnet + testnet   (*.sodex.dev)
  *   - SoSoValue open API                            (openapi.sosovalue.com)
  *   - DefiLlama price/flow data                      (*.llama.fi hosts)
  *   - SoDEX chain RPC + explorer                     (*.valuechain.xyz)
- *   - WalletConnect / Reown relay, explorer, pulse, web3modal (used by
- *     RainbowKit's connect modal + WalletConnect QR)
  *   - eth.merkle.io  (viem's default mainnet RPC — wagmi `http()` uses it
  *     for ENS / balance reads after a wallet connects)
  */
@@ -35,20 +37,18 @@ const csp = [
   `default-src 'self'`,
   `script-src 'self' 'unsafe-inline'`,
   `style-src 'self' 'unsafe-inline'`,
-  `img-src 'self' data: blob: https://explorer-api.walletconnect.com`,
+  `img-src 'self' data: blob:`,
   `font-src 'self'`,
   [
+    // Injected wallets only (desktop) — no WalletConnect/Reown origins.
     `connect-src 'self'`,
     `https://*.sodex.dev wss://*.sodex.dev`,
     `https://openapi.sosovalue.com`,
     `https://coins.llama.fi https://defillama-datasets.llama.fi`,
     `https://*.valuechain.xyz`,
-    `https://*.walletconnect.com https://*.walletconnect.org`,
-    `wss://*.walletconnect.com wss://*.walletconnect.org`,
-    `https://*.reown.com https://api.web3modal.org`,
     `https://eth.merkle.io`,
   ].join(" "),
-  `frame-src https://verify.walletconnect.com`,
+  `frame-src 'none'`,
   `object-src 'none'`,
   `base-uri 'self'`,
   `frame-ancestors 'none'`,
