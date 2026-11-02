@@ -8,7 +8,7 @@
  * show a short empty state with a Connect SoDEX CTA.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { cn } from "@/components/ui/cn";
 import { AssetLogo } from "@/components/ui/AssetLogo";
@@ -98,7 +98,7 @@ export function BottomPanel({
   setTab: (t: BottomTab) => void;
   account: SodexPerpsAccountState | null;
   openOrders: SodexOpenOrder[];
-  onCancel: (orderIDs: number[]) => void;
+  onCancel: (orders: SodexOpenOrder[]) => void;
   cancelBusy: boolean;
   /** Switch the terminal to a position's market (click the market name). */
   onSelectSymbol: (sodexSymbol: string) => void;
@@ -200,7 +200,14 @@ export function BottomPanel({
           orders.length === 0 ? (
             <Empty>No open orders.</Empty>
           ) : (
-            <OpenOrders orders={orders} onCancel={onCancel} busy={cancelBusy} digits={digits} />
+            <OpenOrders
+              orders={orders}
+              onCancel={onCancel}
+              busy={cancelBusy}
+              digits={digits}
+              currentOnly={currentOnly}
+              selectedSymbol={selectedSymbol}
+            />
           )
         ) : tab === "Trade History" ? (
           // TODO: wire to /api/sodex/my-trades (Helix's executed-trade log).
@@ -258,8 +265,12 @@ function Empty({ children, cta }: { children: React.ReactNode; cta?: boolean }) 
 // Market | Amount | Value | Avg Open | Mark | uPnL | Liq | Margin | Funding | TP/SL | Close.
 // minmax() so the columns spread to fill a wide panel and the table scrolls
 // (parent overflow-auto) rather than clipping when the panel is narrow.
+// Columns distribute by fr and compress to the panel width (only Market keeps
+// a small floor), so the table never forces a horizontal scroll — it fits the
+// chart+book width at 1366 and breathes at 1920. (Funding dropped: SoDEX
+// exposes no per-position funding, so it was always "—".)
 const POS_COLS =
-  "minmax(168px,1.8fr) minmax(100px,1.1fr) minmax(84px,1fr) minmax(88px,1fr) minmax(88px,1fr) minmax(122px,1.4fr) minmax(92px,1fr) minmax(80px,0.95fr) minmax(68px,0.8fr) minmax(92px,1fr) minmax(92px,1fr) minmax(72px,0.8fr)";
+  "minmax(96px,1.7fr) minmax(0,1.05fr) minmax(0,0.95fr) minmax(0,0.95fr) minmax(0,0.95fr) minmax(0,1.35fr) minmax(0,1fr) minmax(0,0.82fr) minmax(0,0.95fr) minmax(0,0.95fr) minmax(0,0.78fr)";
 
 /** Read a (possibly runtime-only) stopPrice off an open order. */
 function stopPriceOf(o: SodexOpenOrder): number | null {
@@ -331,13 +342,12 @@ function PositionsView({
     "uPnL",
     "Liquidation",
     "Margin",
-    "Funding",
     "SL",
     "TP",
     "",
   ];
   return (
-    <div className="min-w-[1120px] text-[11.5px]">
+    <div className="min-w-0 text-[11.5px]">
       <div
         className="grid gap-2 border-b border-line px-4 py-1.5 text-[9px] uppercase tracking-wider text-fg-dim"
         style={{ gridTemplateColumns: POS_COLS }}
@@ -443,13 +453,6 @@ function PositionsView({
             {/* Margin */}
             <span className="text-right text-fg-muted">
               {margin != null ? money(margin) : "—"}
-            </span>
-            {/* Funding */}
-            <span
-              className="text-right text-fg-dim"
-              title="Per-position funding isn't exposed by SoDEX yet"
-            >
-              —
             </span>
             {/* SL */}
             <TriggerCell value={sl} tone="neg" px={px} onEdit={() => openModal(p, "sl")} />
@@ -630,18 +633,22 @@ function CloseAllConfirm({
   );
 }
 
-const OO_COLS = "72px 1fr 1fr 1fr 1fr 64px";
-
-function OpenOrders({
+/** Confirm dialog for "Cancel all" — lists every order the click will cancel,
+ *  scoped exactly to what the list is showing (current market, or all). */
+function CancelAllConfirm({
   orders,
-  onCancel,
-  busy,
   digits,
+  busy,
+  scopeLabel,
+  onConfirm,
+  onClose,
 }: {
   orders: SodexOpenOrder[];
-  onCancel: (orderIDs: number[]) => void;
-  busy: boolean;
   digits: number;
+  busy: boolean;
+  scopeLabel: string;
+  onConfirm: () => void;
+  onClose: () => void;
 }) {
   const px = (v?: string) =>
     v != null && Number.isFinite(Number(v))
@@ -650,24 +657,144 @@ function OpenOrders({
           maximumFractionDigits: digits,
         })
       : "—";
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  const n = orders.length;
+  return (
+    <div
+      className="fixed inset-0 z-[90] flex items-center justify-center p-4"
+      style={{ background: "rgba(0,0,0,0.6)" }}
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md overflow-hidden rounded-lg border border-negative/40 bg-surface shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="border-b border-line px-4 py-2.5 text-[13px] font-semibold text-fg">
+          Cancel {n} order{n === 1 ? "" : "s"} · {scopeLabel}
+        </div>
+        <div className="max-h-[240px] overflow-y-auto px-4 py-2">
+          {orders.map((o) => {
+            const buy = o.side === SodexSide.BUY;
+            const isLimit = o.type === SodexOrderType.LIMIT;
+            return (
+              <div
+                key={o.orderID}
+                className="flex items-center justify-between py-1 font-[var(--font-jetbrains-mono)] text-[11.5px] tabular-nums"
+              >
+                <span className="flex items-center gap-2">
+                  <span className="text-fg">{baseOf(o.symbol)}</span>
+                  <span className={buy ? "text-positive" : "text-negative"}>
+                    {buy ? "Buy" : "Sell"}
+                  </span>
+                  <span className="text-[9px] text-fg-dim">{isLimit ? "LMT" : "MKT"}</span>
+                </span>
+                <span className="text-fg-muted">
+                  {o.origQty ? qtyFmt(Number(o.origQty)) : "—"}
+                  {Number(o.price) > 0 ? ` @ ${px(o.price)}` : ""}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+        <p className="px-4 pb-2 pt-1 text-[10px] text-fg-dim">
+          Sends a signed cancel for each order above. Real orders on SoDEX mainnet.
+        </p>
+        <div className="flex gap-2 border-t border-line px-4 py-3">
+          <button
+            onClick={onConfirm}
+            disabled={busy}
+            className="flex-1 rounded border border-negative/60 bg-negative/15 py-2 text-[13px] font-semibold text-negative transition-colors hover:bg-negative/25 disabled:opacity-60"
+          >
+            {busy ? "Cancelling…" : `Cancel ${n} order${n === 1 ? "" : "s"}`}
+          </button>
+          <button
+            onClick={onClose}
+            disabled={busy}
+            className="flex-1 rounded border border-line py-2 text-[13px] text-fg-muted hover:text-fg"
+          >
+            Keep orders
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const OO_COLS =
+  "minmax(56px,1fr) 60px minmax(0,1fr) minmax(0,1fr) minmax(0,0.85fr) minmax(0,0.95fr) 56px";
+
+function OpenOrders({
+  orders,
+  onCancel,
+  busy,
+  digits,
+  currentOnly,
+  selectedSymbol,
+}: {
+  orders: SodexOpenOrder[];
+  onCancel: (orders: SodexOpenOrder[]) => void;
+  busy: boolean;
+  digits: number;
+  /** Whether the panel's "Current market only" filter is on. */
+  currentOnly: boolean;
+  selectedSymbol: string | null;
+}) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const px = (v?: string) =>
+    v != null && Number.isFinite(Number(v))
+      ? Number(v).toLocaleString(undefined, {
+          minimumFractionDigits: digits,
+          maximumFractionDigits: digits,
+        })
+      : "—";
+  // Orders can span markets (account-wide), so label the header by distinct
+  // market count unless they all share one symbol.
+  const markets = new Set(orders.map((o) => (o.symbol ?? "").toUpperCase()));
+  const header =
+    markets.size === 1 ? perpName(orders[0]?.symbol ?? "") : `${markets.size} markets`;
+  // "Cancel all" obeys the same filter the list is already showing: scoped to
+  // the selected market when "Current market only" is on, else every market.
+  const cancelAllLabel = currentOnly
+    ? `Cancel all (${perpName(selectedSymbol ?? "")})`
+    : `Cancel all (${orders.length} orders, all markets)`;
   return (
     <div className="text-[11.5px]">
       <div className="flex items-center justify-between border-b border-line px-4 py-1.5">
         <span className="text-[9px] uppercase tracking-wider text-fg-dim">
-          {orders.length} open · {orders[0]?.symbol}
+          {orders.length} open · {header}
         </span>
         <button
-          onClick={() => onCancel(orders.map((o) => o.orderID))}
-          disabled={busy}
+          onClick={() => setConfirmOpen(true)}
+          disabled={busy || orders.length === 0}
           className="rounded border border-line px-2 py-0.5 text-[10px] text-fg-muted transition-colors hover:border-negative/40 hover:text-negative disabled:opacity-50"
         >
-          {busy ? "Cancelling…" : "Cancel all"}
+          {busy ? "Cancelling…" : cancelAllLabel}
         </button>
       </div>
+      {confirmOpen ? (
+        <CancelAllConfirm
+          orders={orders}
+          digits={digits}
+          busy={busy}
+          scopeLabel={currentOnly ? perpName(selectedSymbol ?? "") : "all markets"}
+          onConfirm={() => {
+            onCancel(orders);
+            setConfirmOpen(false);
+          }}
+          onClose={() => setConfirmOpen(false)}
+        />
+      ) : null}
       <div
         className="grid gap-2 border-b border-line px-4 py-1 text-[9px] uppercase tracking-wider text-fg-dim"
         style={{ gridTemplateColumns: OO_COLS }}
       >
+        <span>Market</span>
         <span>Side</span>
         <span className="text-right">Price</span>
         <span className="text-right">Size</span>
@@ -684,6 +811,7 @@ function OpenOrders({
             className="grid items-center gap-2 px-4 py-1.5 font-[var(--font-jetbrains-mono)] tabular-nums hover:bg-surface-2/40"
             style={{ gridTemplateColumns: OO_COLS }}
           >
+            <span className="truncate text-fg-muted">{baseOf(o.symbol)}</span>
             <span className={buy ? "text-positive" : "text-negative"}>
               {buy ? "Buy" : "Sell"}
               <span className="ml-1 text-[9px] text-fg-dim">{isLimit ? "LMT" : "MKT"}</span>
@@ -698,7 +826,7 @@ function OpenOrders({
             </span>
             <span className="text-right">
               <button
-                onClick={() => onCancel([o.orderID])}
+                onClick={() => onCancel([o])}
                 disabled={busy}
                 className="rounded border border-line px-1.5 py-0.5 text-[10px] text-fg-muted transition-colors hover:border-negative/40 hover:text-negative disabled:opacity-50"
               >

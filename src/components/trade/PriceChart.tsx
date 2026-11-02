@@ -56,6 +56,8 @@ export function PriceChart({
   tickSize,
   positionEntry,
   positionLiq,
+  tpPrice,
+  slPrice,
   orderLines,
 }: {
   symbol: string;
@@ -68,6 +70,9 @@ export function PriceChart({
   /** Open-position entry + liquidation price for this symbol (price lines). */
   positionEntry?: number | null;
   positionLiq?: number | null;
+  /** Take-profit / stop-loss trigger prices for this symbol's position. */
+  tpPrice?: number | null;
+  slPrice?: number | null;
   /** Open orders for this symbol, drawn as side-coloured price lines. */
   orderLines?: ChartOrderLine[];
 }) {
@@ -90,6 +95,9 @@ export function PriceChart({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tradeLinesRef = useRef<any[]>([]);
   const candlesRef = useRef<Candle[]>([]);
+  // Position levels the price scale should always keep in view (entry / TP /
+  // SL), so the dashed trigger lines aren't scrolled off the top or bottom.
+  const levelsRef = useRef<number[]>([]);
 
   const digits = (candles[candles.length - 1]?.close ?? 1) < 10 ? 4 : 2;
 
@@ -172,6 +180,20 @@ export function PriceChart({
           type: "price",
           precision: decimalsFromTick(tickSize),
           minMove: tickSize && tickSize > 0 ? tickSize : 0.01,
+        },
+        // Keep the position's entry / TP / SL inside the visible range so the
+        // dashed trigger lines never scroll off-screen.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        autoscaleInfoProvider: (orig: () => any) => {
+          const res = orig();
+          const lv = levelsRef.current;
+          if (!res || !res.priceRange || lv.length === 0) return res;
+          let { minValue, maxValue } = res.priceRange;
+          for (const v of lv) {
+            if (v < minValue) minValue = v;
+            if (v > maxValue) maxValue = v;
+          }
+          return { ...res, priceRange: { minValue, maxValue } };
         },
       });
       const vol = chart.addHistogramSeries({
@@ -327,9 +349,9 @@ export function PriceChart({
     }
   }, [levels, ready, candles]);
 
-  // Position (entry neutral, liq red-dashed) + open-order (side-coloured,
-  // labelled with size) price lines. Cleared + redrawn when they change or the
-  // symbol switches.
+  // Position (entry neutral, liq red-dashed), TP (green dashed) / SL (red
+  // dashed), and open-order (side-coloured, labelled with size) price lines.
+  // Cleared + redrawn when they change or the symbol switches.
   useEffect(() => {
     const series = candleRef.current;
     if (!ready || !series) return;
@@ -352,10 +374,14 @@ export function PriceChart({
           title,
         }),
       );
+    const px = (n: number) => fmt(n, decimalsFromTick(tickSize));
     if (positionEntry != null && positionEntry > 0)
       add(positionEntry, NEUTRAL, 0, "Entry");
     if (positionLiq != null && positionLiq > 0)
       add(positionLiq, DOWN, 2, "Liq");
+    if (tpPrice != null && tpPrice > 0) add(tpPrice, UP, 2, `TP ${px(tpPrice)}`);
+    if (slPrice != null && slPrice > 0)
+      add(slPrice, DOWN, 2, `SL ${px(slPrice)}`);
     for (const o of orderLines ?? []) {
       add(
         o.price,
@@ -364,7 +390,27 @@ export function PriceChart({
         `${o.side === "buy" ? "Buy" : "Sell"} ${o.size}`,
       );
     }
-  }, [ready, positionEntry, positionLiq, orderLines, symbol, candles.length]);
+    // Keep the active management levels (entry / TP / SL) in view, then force
+    // the price scale to recompute so the dashed lines are always on-screen.
+    levelsRef.current = [positionEntry, tpPrice, slPrice].filter(
+      (v): v is number => v != null && v > 0,
+    );
+    try {
+      series.priceScale().applyOptions({ autoScale: true });
+    } catch {
+      /* no-op */
+    }
+  }, [
+    ready,
+    positionEntry,
+    positionLiq,
+    tpPrice,
+    slPrice,
+    orderLines,
+    symbol,
+    tickSize,
+    candles.length,
+  ]);
 
   const up = legend ? legend.close >= legend.open : true;
   const chg = legend ? legend.close - legend.open : 0;

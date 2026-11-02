@@ -11,6 +11,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { cn } from "@/components/ui/cn";
 import { AssetLogo } from "@/components/ui/AssetLogo";
 import { AssetPicker } from "./AssetPicker";
@@ -138,6 +139,19 @@ export function TradeTerminal({
   const [closeAllBusy, setCloseAllBusy] = useState(false);
   const [tpslBusy, setTpslBusy] = useState(false);
   const { address: connectedMaster } = useAccount();
+  const router = useRouter();
+
+  // Transient terminal toast (errors like an un-resolvable cancel). Auto-clears.
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 5000);
+  }, []);
+  useEffect(() => () => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+  }, []);
   const [bottomH, setBottomH] = useState(DEFAULT_BOTTOM);
   const [sideFill, setSideFill] = useState<{
     side: "buy" | "sell";
@@ -312,8 +326,10 @@ export function TradeTerminal({
     };
   }, [tm.ready, tm.address]);
 
-  // Open orders for the CURRENT symbol (read-only, polled). Scoping to the
-  // symbol keeps "Cancel all" per-symbol.
+  // Open orders ACCOUNT-WIDE (every symbol), read-only, polled on the account
+  // interval. The bottom panel + chart key these by symbol, so switching
+  // markets never clears another market's TP/SL or open orders. "Current
+  // market only" (in the panel) is the sole per-symbol filter.
   const refreshOpenOrders = useCallback(async () => {
     if (!tm.ready || !tm.address) {
       setOpenOrders([]);
@@ -321,24 +337,49 @@ export function TradeTerminal({
     }
     try {
       const all = await getOpenOrders("mainnet", tm.address as `0x${string}`);
-      const sym = (sodexSymbol ?? "").toUpperCase();
-      setOpenOrders(all.filter((o) => (o.symbol ?? "").toUpperCase() === sym));
+      setOpenOrders(all);
     } catch {
       /* keep last */
     }
-  }, [tm.ready, tm.address, sodexSymbol]);
+  }, [tm.ready, tm.address]);
   useEffect(() => {
     refreshOpenOrders();
-    const t = setInterval(refreshOpenOrders, 4000);
+    const t = setInterval(refreshOpenOrders, 5000);
     return () => clearInterval(t);
   }, [refreshOpenOrders]);
 
-  // Cancel orders by id (per-row or cancel-all), then refresh. Signs with the
-  // local API key; symbolID comes from the current market's rules.
+  // Cancel orders (per-row or cancel-all), then refresh. Signs with the local
+  // API key. Orders can span multiple markets (account-wide fetch), so each
+  // cancel must carry its OWN symbolID, resolved from the order's symbol via
+  // symbolMeta. There is NO fallback to the selected market's id: signing a
+  // cancel under the wrong market is exactly the bug this guards against. If a
+  // symbolID can't be resolved, cancel nothing, tell the user, and refresh
+  // symbolMeta so a retry a moment later succeeds.
   const onCancelOrders = useCallback(
-    async (orderIDs: number[]) => {
+    async (orders: SodexOpenOrder[]) => {
       const key = readLocalKey("mainnet");
-      if (!key || !account?.aid || !rules?.id || orderIDs.length === 0) return;
+      if (!key || !account?.aid || orders.length === 0) return;
+      const resolved = orders.map((o) => ({
+        o,
+        symbolID: symbolMeta[(o.symbol ?? "").toUpperCase()]?.symbolID,
+      }));
+      const missing = resolved.filter((r) => r.symbolID == null);
+      if (missing.length > 0) {
+        const names = [
+          ...new Set(
+            missing.map((r) => (r.o.symbol ?? "?").replace(/-USDC?$/i, "-PERP")),
+          ),
+        ].join(", ");
+        showToast(
+          `Can't cancel: market data for ${names} not loaded, retry in a moment`,
+        );
+        router.refresh(); // re-pull symbolMeta (server-provided) and retry
+        return;
+      }
+      const cancels = resolved.map((r) => ({
+        symbolID: r.symbolID as number,
+        orderID: r.o.orderID,
+      }));
       setCancelBusy(true);
       try {
         await cancelOrders({
@@ -346,16 +387,17 @@ export function TradeTerminal({
           apiKeyName: key.name || undefined,
           privateKey: key.privateKey,
           accountID: account.aid,
-          cancels: orderIDs.map((orderID) => ({ symbolID: rules.id, orderID })),
+          cancels,
         });
         await refreshOpenOrders();
       } catch (e) {
+        showToast(`Cancel failed: ${(e as Error).message}`);
         console.warn("[cancel] failed:", (e as Error).message);
       } finally {
         setCancelBusy(false);
       }
     },
-    [account?.aid, rules?.id, refreshOpenOrders],
+    [account?.aid, symbolMeta, refreshOpenOrders, router, showToast],
   );
 
   // Switch the terminal to a position's market (from the Positions table).
@@ -669,28 +711,64 @@ export function TradeTerminal({
   const levels =
     setup && setup.asset.id === assetId ? setup.setup.key_levels : undefined;
 
-  // Current-symbol position (entry/liq) + open orders → chart price lines.
+  // Current-symbol position → chart price lines. Entry/liq from the account
+  // state; TP/SL from the SAME account-wide open orders the panel reads (the
+  // selected symbol's reduce-only stops), classified above/below entry exactly
+  // as the Positions SL/TP columns do. Keyed by symbol, so a market switch
+  // redraws from live data instead of clearing.
   const chartPosition = useMemo(() => {
-    const p = account?.P?.find(
-      (x) => (x.s ?? "").toUpperCase() === (sodexSymbol ?? "").toUpperCase(),
-    );
-    if (!p || Number(p.sz) === 0) return { entry: null, liq: null };
+    const sym = (sodexSymbol ?? "").toUpperCase();
+    const p = account?.P?.find((x) => (x.s ?? "").toUpperCase() === sym);
+    if (!p || Number(p.sz) === 0)
+      return { entry: null, liq: null, tp: null, sl: null };
+    const entry = Number(p.ep) || null;
+    const isLong = Number(p.sz) >= 0;
+    const stopPx = (o: SodexOpenOrder) =>
+      Number((o as { stopPrice?: string }).stopPrice);
+    const stops = openOrders.filter((o) => {
+      const sp = stopPx(o);
+      return (
+        (o.symbol ?? "").toUpperCase() === sym &&
+        o.reduceOnly &&
+        Number.isFinite(sp) &&
+        sp > 0
+      );
+    });
+    const tp =
+      entry != null
+        ? (stops.find((o) => (isLong ? stopPx(o) > entry : stopPx(o) < entry)) ??
+          null)
+        : null;
+    const sl =
+      entry != null
+        ? (stops.find((o) => (isLong ? stopPx(o) < entry : stopPx(o) > entry)) ??
+          null)
+        : null;
     return {
-      entry: Number(p.ep) || null,
+      entry,
       liq: p.lp ? Number(p.lp) : null,
+      tp: tp ? stopPx(tp) : null,
+      sl: sl ? stopPx(sl) : null,
     };
-  }, [account, sodexSymbol]);
-  const chartOrderLines = useMemo(
-    () =>
-      openOrders
-        .filter((o) => o.price != null && Number.isFinite(Number(o.price)))
-        .map((o) => ({
-          price: Number(o.price),
-          side: (o.side === 1 ? "buy" : "sell") as "buy" | "sell", // 1 = BUY
-          size: o.origQty ?? "",
-        })),
-    [openOrders],
-  );
+  }, [account, sodexSymbol, openOrders]);
+  // Plain (limit) order lines for the SELECTED symbol only. Stops are drawn as
+  // TP/SL lines instead, so exclude reduce-only stops and price-less orders.
+  const chartOrderLines = useMemo(() => {
+    const sym = (sodexSymbol ?? "").toUpperCase();
+    return openOrders
+      .filter((o) => {
+        if ((o.symbol ?? "").toUpperCase() !== sym) return false;
+        const sp = Number((o as { stopPrice?: string }).stopPrice);
+        if (Number.isFinite(sp) && sp > 0) return false; // a stop → TP/SL line
+        const px = Number(o.price);
+        return o.price != null && Number.isFinite(px) && px > 0;
+      })
+      .map((o) => ({
+        price: Number(o.price),
+        side: (o.side === 1 ? "buy" : "sell") as "buy" | "sell", // 1 = BUY
+        size: o.origQty ?? "",
+      }));
+  }, [openOrders, sodexSymbol]);
 
   async function runSetup() {
     if (!assetId) return;
@@ -806,6 +884,8 @@ export function TradeTerminal({
                   tickSize={rules?.tickSize}
                   positionEntry={chartPosition.entry}
                   positionLiq={chartPosition.liq}
+                  tpPrice={chartPosition.tp}
+                  slPrice={chartPosition.sl}
                   orderLines={chartOrderLines}
                 />
               ) : (
@@ -941,6 +1021,16 @@ export function TradeTerminal({
           Sell / Short
         </button>
       </div>
+
+      {/* Transient error toast (e.g. a cancel whose market data isn't loaded). */}
+      {toast ? (
+        <div
+          role="status"
+          className="pointer-events-none fixed bottom-6 left-1/2 z-[100] max-w-[90vw] -translate-x-1/2 rounded-md border border-negative/50 bg-surface px-4 py-2.5 text-center text-[12.5px] text-fg shadow-2xl"
+        >
+          {toast}
+        </div>
+      ) : null}
     </div>
   );
 }
