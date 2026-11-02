@@ -18,6 +18,7 @@ import { SetupCard, type SetupResponse } from "./SetupCard";
 import { PriceChart } from "./PriceChart";
 import { OrderBook, type BookLevel } from "./OrderBook";
 import { OrderPanel, type SymbolRules } from "./OrderPanel";
+import { AccountPanel } from "./AccountPanel";
 import type { Trade } from "./TradesTape";
 import { BottomPanel, type BottomTab } from "./BottomPanel";
 import { useTradeMode } from "@/lib/sodex-onchain/useTradeMode";
@@ -570,84 +571,120 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
         </button>
       </div>
 
-      {/* ── Body: chart | book | ticket. Fills the remaining height; each
-          panel scrolls internally on desktop. Below lg it stacks (chart →
-          form → book) and the body scrolls. ── */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_210px_284px] lg:grid-rows-[minmax(0,1fr)] lg:overflow-hidden">
-        {/* Chart cell (relative so the AI-Setup output can float over it).
-            Fixed height on mobile (grid rows are auto there); from lg it
-            stretches to the single 1fr row and the chart fills it. */}
-        <div className="relative order-1 h-[440px] border-line px-3 py-2 lg:h-auto lg:min-h-0 lg:overflow-hidden lg:border-r">
-          {sodexSymbol ? (
-            <PriceChart
-              symbol={sodexSymbol}
-              label={`${selected?.symbol ?? ""}-${isPerp ? "PERP" : "SPOT"} · SoDEX`}
-              market={market}
-              levels={levels}
-              tickSize={rules?.tickSize}
-              positionEntry={chartPosition.entry}
-              positionLiq={chartPosition.liq}
-              orderLines={chartOrderLines}
-            />
-          ) : (
-            <div className="flex h-full min-h-[360px] items-center justify-center text-sm text-fg-dim">
-              No SoDEX market for this asset.
-            </div>
-          )}
+      {/* ── Body: [chart + book] stacked over the bottom tabs on the left,
+          with the order ticket as a full-height column on the right (ticket +
+          account). The bottom tabs span only the chart + book width. Below lg
+          it all stacks and the body scrolls. ── */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
+        {/* LEFT: chart + book on top, resize handle + bottom tabs below. */}
+        <div className="flex min-w-0 flex-col lg:min-h-0 lg:flex-1">
+          {/* chart + book */}
+          <div className="grid grid-cols-1 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_210px] lg:overflow-hidden">
+            {/* Chart cell (relative so the AI-Setup output can float over it). */}
+            <div className="relative h-[440px] border-line px-3 py-2 lg:h-auto lg:min-h-0 lg:overflow-hidden lg:border-r">
+              {sodexSymbol ? (
+                <PriceChart
+                  symbol={sodexSymbol}
+                  label={`${selected?.symbol ?? ""}-${isPerp ? "PERP" : "SPOT"} · SoDEX`}
+                  market={market}
+                  levels={levels}
+                  tickSize={rules?.tickSize}
+                  positionEntry={chartPosition.entry}
+                  positionLiq={chartPosition.liq}
+                  orderLines={chartOrderLines}
+                />
+              ) : (
+                <div className="flex h-full min-h-[360px] items-center justify-center text-sm text-fg-dim">
+                  No SoDEX market for this asset.
+                </div>
+              )}
 
-          {/* AI Setup output floats over the chart; the levels are drawn on
-              the chart itself, so this card is dismissible without losing them. */}
-          {(setup && setup.asset.id === assetId) || setupLoading || setupError ? (
-            <div className="absolute bottom-3 left-3 z-20 flex max-h-[72%] w-[min(360px,calc(100%-24px))] flex-col overflow-hidden rounded-lg border border-line bg-surface/95 shadow-2xl backdrop-blur">
-              <div className="flex shrink-0 items-center justify-between border-b border-line px-3 py-1.5">
-                <span className="text-[11px] font-medium text-accent-2">AI Setup</span>
-                {!setupLoading ? (
-                  <button
-                    onClick={() => {
-                      setSetup(null);
-                      setSetupError(null);
-                    }}
-                    className="text-[14px] leading-none text-fg-dim hover:text-fg"
-                    aria-label="Dismiss setup"
-                  >
-                    ×
-                  </button>
-                ) : null}
-              </div>
-              <div className="min-h-0 overflow-y-auto p-3">
-                {setupError ? (
-                  <div className="text-sm text-negative">{setupError}</div>
-                ) : setupLoading ? (
-                  <div className="py-4 text-center text-sm text-fg-dim">
-                    Pulling {selected?.symbol} news + price, thinking through the setup…
+              {/* AI Setup output floats over the chart; the levels are drawn on
+                  the chart itself, so this card is dismissible without them. */}
+              {(setup && setup.asset.id === assetId) || setupLoading || setupError ? (
+                <div className="absolute bottom-3 left-3 z-20 flex max-h-[72%] w-[min(360px,calc(100%-24px))] flex-col overflow-hidden rounded-lg border border-line bg-surface/95 shadow-2xl backdrop-blur">
+                  <div className="flex shrink-0 items-center justify-between border-b border-line px-3 py-1.5">
+                    <span className="text-[11px] font-medium text-accent-2">AI Setup</span>
+                    {!setupLoading ? (
+                      <button
+                        onClick={() => {
+                          setSetup(null);
+                          setSetupError(null);
+                        }}
+                        className="text-[14px] leading-none text-fg-dim hover:text-fg"
+                        aria-label="Dismiss setup"
+                      >
+                        ×
+                      </button>
+                    ) : null}
                   </div>
-                ) : setup ? (
-                  <SetupCard data={setup} />
-                ) : null}
-              </div>
+                  <div className="min-h-0 overflow-y-auto p-3">
+                    {setupError ? (
+                      <div className="text-sm text-negative">{setupError}</div>
+                    ) : setupLoading ? (
+                      <div className="py-4 text-center text-sm text-fg-dim">
+                        Pulling {selected?.symbol} news + price, thinking through the setup…
+                      </div>
+                    ) : setup ? (
+                      <SetupCard data={setup} />
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
             </div>
-          ) : null}
+
+            {/* Order book */}
+            <div className="border-t border-line lg:min-h-0 lg:overflow-y-auto lg:border-t-0">
+              <OrderBook
+                bids={bids}
+                asks={asks}
+                markPrice={mark}
+                loading={mktLoading}
+                digits={digits}
+                tickSize={rules?.tickSize ?? 0}
+                onPriceClick={setLimitFill}
+                trades={trades}
+                tradesLoading={tradesLoading}
+              />
+            </div>
+          </div>
+
+          {/* Resize handle (desktop) — drag to resize the bottom tabs. */}
+          <div
+            onMouseDown={startBottomDrag}
+            className="group hidden shrink-0 cursor-row-resize items-center justify-center border-t border-line bg-surface-2/20 py-[3px] transition-colors hover:bg-accent/15 lg:flex"
+            title="Drag to resize"
+            role="separator"
+            aria-orientation="horizontal"
+          >
+            <div className="h-0.5 w-10 rounded-full bg-line-2 group-hover:bg-accent/50" />
+          </div>
+
+          {/* Bottom tabs — span only the chart + book width, not the ticket. */}
+          <div
+            className="shrink-0 overflow-hidden border-t border-line lg:border-t-0"
+            style={{ height: bottomH }}
+          >
+            <BottomPanel
+              tab={bottomTab}
+              setTab={setBottomTab}
+              account={account}
+              openOrders={openOrders}
+              onCancel={onCancelOrders}
+              cancelBusy={cancelBusy}
+              onSelectSymbol={onSelectSymbol}
+              onClosePosition={onClosePosition}
+              markBySymbol={markBySymbol}
+              ready={tm.ready}
+              digits={digits}
+            />
+          </div>
         </div>
 
-        {/* Order book */}
-        <div className="order-3 border-t border-line lg:order-2 lg:min-h-0 lg:overflow-y-auto lg:border-t-0">
-          <OrderBook
-            bids={bids}
-            asks={asks}
-            markPrice={mark}
-            loading={mktLoading}
-            digits={digits}
-            tickSize={rules?.tickSize ?? 0}
-            onPriceClick={setLimitFill}
-            trades={trades}
-            tradesLoading={tradesLoading}
-          />
-        </div>
-
-        {/* Order ticket */}
+        {/* RIGHT: full-height ticket column — order ticket + account summary. */}
         <div
           id="terminal-ticket"
-          className="order-2 border-t border-line lg:order-3 lg:min-h-0 lg:overflow-y-auto lg:border-l lg:border-t-0"
+          className="flex flex-col border-t border-line lg:min-h-0 lg:w-[284px] lg:shrink-0 lg:border-l lg:border-t-0"
         >
           {selected && sodexSymbol ? (
             <OrderPanel
@@ -664,36 +701,8 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
               closeIntent={closeIntent}
             />
           ) : null}
+          <AccountPanel account={account} ready={tm.ready} />
         </div>
-      </div>
-
-      {/* ── Resize handle + bottom panel ── */}
-      <div
-        onMouseDown={startBottomDrag}
-        className="group hidden shrink-0 cursor-row-resize items-center justify-center border-t border-line bg-surface-2/20 py-[3px] transition-colors hover:bg-accent/15 lg:flex"
-        title="Drag to resize"
-        role="separator"
-        aria-orientation="horizontal"
-      >
-        <div className="h-0.5 w-10 rounded-full bg-line-2 group-hover:bg-accent/50" />
-      </div>
-      <div
-        className="shrink-0 overflow-hidden border-t border-line lg:border-t-0"
-        style={{ height: bottomH }}
-      >
-        <BottomPanel
-          tab={bottomTab}
-          setTab={setBottomTab}
-          account={account}
-          openOrders={openOrders}
-          onCancel={onCancelOrders}
-          cancelBusy={cancelBusy}
-          onSelectSymbol={onSelectSymbol}
-          onClosePosition={onClosePosition}
-          markBySymbol={markBySymbol}
-          ready={tm.ready}
-          digits={digits}
-        />
       </div>
 
       {/* Mobile sticky Buy/Sell bar — jumps to the ticket and sets the side. */}
