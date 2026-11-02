@@ -47,6 +47,15 @@ export interface PlaceLiveOrderArgs {
   sizeInput: string;
   stopInput: string;
   targetInput: string;
+  /** Order type. "MARKET" (default) keeps the original behaviour exactly;
+   *  "LIMIT" submits a resting/marketable limit at `limitPrice`. */
+  orderType?: "MARKET" | "LIMIT";
+  /** LIMIT only — the price, already tick-rounded + range-validated by the
+   *  caller. Quantity is sizeUsd/limitPrice rounded to the symbol precision. */
+  limitPrice?: number;
+  /** LIMIT only — time-in-force. POST_ONLY maps to SoDEX GTX (maker-only);
+   *  default GTC (resting). IOC is marketable. */
+  timeInForce?: "GTC" | "IOC" | "POST_ONLY";
   /** UI-state writers — kept as callbacks so the body stays verbatim. */
   setMsg: (m: string | null) => void;
   setBusy: (b: boolean) => void;
@@ -63,11 +72,15 @@ export async function placeLiveOrder(args: PlaceLiveOrderArgs): Promise<void> {
     sizeInput,
     stopInput,
     targetInput,
+    orderType = "MARKET",
+    limitPrice,
+    timeInForce = "GTC",
     setMsg,
     setBusy,
     setConfirming,
     setTradesToday,
   } = args;
+  const isLimit = orderType === "LIMIT";
     const key = readLocalKey(network);
     if (!key) {
       setMsg("✗ Set up a trading identity on /settings/connect-sodex first.");
@@ -81,6 +94,14 @@ export async function placeLiveOrder(args: PlaceLiveOrderArgs): Promise<void> {
       setMsg(
         `✗ Size must be at least SoDEX's ~$${SODEX_MIN_NOTIONAL_USD} minimum.`,
       );
+      setConfirming(false);
+      return;
+    }
+    if (
+      isLimit &&
+      (!Number.isFinite(limitPrice as number) || (limitPrice as number) <= 0)
+    ) {
+      setMsg("✗ Enter a valid limit price.");
       setConfirming(false);
       return;
     }
@@ -165,7 +186,7 @@ export async function placeLiveOrder(args: PlaceLiveOrderArgs): Promise<void> {
       // Order params by venue. Spot MARKET accepts exactly one of
       // {funds, quantity}: BUY→funds (USD), SELL→quantity. Futures (perps)
       // are quantity-based for both sides — the side alone sets long/short.
-      const order: SodexNewOrderEntry =
+      let order: SodexNewOrderEntry =
         market === "futures"
           ? {
               symbolID: symbolId,
@@ -192,6 +213,38 @@ export async function placeLiveOrder(args: PlaceLiveOrderArgs): Promise<void> {
                 timeInForce: SodexTimeInForce.IOC,
                 quantity: qty,
               };
+
+      // LIMIT override (3b-pre). The MARKET `order` built above is left
+      // byte-for-byte unchanged; for a LIMIT request we replace it with a LIMIT
+      // entry that routes through the SAME placeOrderBatch, so the builder-fee
+      // field attaches identically (placeOrderBatch injects `builder` type-
+      // agnostically). No TP/SL brackets on LIMIT this commit — a reduce-only
+      // bracket placed before a resting limit fills would misbehave.
+      if (isLimit) {
+        const limitPx = limitPrice as number;
+        const limitQty = (sizeUsd / limitPx).toFixed(qtyPrecision);
+        if (Number(limitQty) <= 0) {
+          throw new Error(
+            `Computed quantity ${limitQty} is zero — increase size or adjust the limit price.`,
+          );
+        }
+        const pxDp = resolved.pricePrecision ?? 2;
+        const tif =
+          timeInForce === "IOC"
+            ? SodexTimeInForce.IOC
+            : timeInForce === "POST_ONLY"
+              ? SodexTimeInForce.GTX
+              : SodexTimeInForce.GTC;
+        order = {
+          symbolID: symbolId,
+          clOrdID,
+          side: isBuy ? SodexSide.BUY : SodexSide.SELL,
+          type: SodexOrderType.LIMIT,
+          timeInForce: tif,
+          price: limitPx.toFixed(pxDp),
+          quantity: limitQty,
+        };
+      }
 
       const sodexResp = await placeOrderBatch({
         network,
@@ -231,7 +284,7 @@ export async function placeLiveOrder(args: PlaceLiveOrderArgs): Promise<void> {
       //    already filled; these are best-effort so a bracket failure never
       //    unwinds a successful entry — we just surface it.
       let bracket = "";
-      if (market === "futures" && referencePrice > 0) {
+      if (!isLimit && market === "futures" && referencePrice > 0) {
         const stopPct = Number.parseFloat(stopInput);
         const targetPct = Number.parseFloat(targetInput);
         const pxDp = resolved.pricePrecision ?? 4;
