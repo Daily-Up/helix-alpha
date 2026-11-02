@@ -20,8 +20,9 @@ export interface PickerAsset {
 
 const GROUPS: Array<{ label: string; kinds: string[] }> = [
   { label: "Crypto", kinds: ["token", "rwa"] },
-  { label: "Equities", kinds: ["stock"] },
+  { label: "Stocks", kinds: ["stock"] },
   { label: "Indices", kinds: ["index"] },
+  { label: "Commodities", kinds: ["commodity"] },
   { label: "Other", kinds: ["treasury", "macro"] },
 ];
 
