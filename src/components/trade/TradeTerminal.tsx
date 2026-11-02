@@ -101,6 +101,9 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
   const [limitFill, setLimitFill] = useState<number | null>(null);
   const [account, setAccount] = useState<SodexPerpsAccountState | null>(null);
   const [openOrders, setOpenOrders] = useState<SodexOpenOrder[]>([]);
+  // Live mark per symbol across ALL open positions (not just the selected
+  // market), from the all-tickers poll below.
+  const [allMarks, setAllMarks] = useState<Record<string, number>>({});
   const [cancelBusy, setCancelBusy] = useState(false);
   const [bottomH, setBottomH] = useState(DEFAULT_BOTTOM);
   const [sideFill, setSideFill] = useState<{
@@ -163,6 +166,36 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
       clearInterval(t);
     };
   }, [sodexSymbol, market]);
+
+  // Marks for EVERY open position's symbol, so positions on markets other than
+  // the selected one still show a live mark (and liq warning) instead of "—".
+  // SoDEX /markets/tickers returns all symbols in one request; poll it at the
+  // selected ticker's cadence, and only while there are open positions.
+  const hasOpenPositions = (account?.P ?? []).some((p) => Number(p.sz) !== 0);
+  useEffect(() => {
+    if (!hasOpenPositions) {
+      setAllMarks({});
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      try {
+        const r = await fetch(`/api/sodex/tickers?market=perp`);
+        const j = await r.json();
+        if (cancelled || !j.ok) return;
+        setAllMarks(j.marks ?? {});
+      } catch {
+        /* keep last good marks */
+      }
+    };
+    load();
+    const t = setInterval(load, 4000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [hasOpenPositions]);
 
   // Symbol trading rules (fees / leverage / margin tiers / precision), once
   // per symbol — shared by the ticket (fees, liq) and the book (grouping).
@@ -371,14 +404,15 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
   const mark = num(ticker?.markPrice) ?? num(ticker?.lastPx);
   const digits = mark != null && mark < 10 ? 4 : 2;
 
-  // Live mark per symbol for the Positions table. The ticker only covers the
-  // currently-selected market, so any other symbol resolves to "—" downstream
-  // rather than a value derived from uPNL.
-  const markBySymbol = useMemo<Record<string, number>>(
-    () =>
-      sodexSymbol && mark != null ? { [sodexSymbol.toUpperCase()]: mark } : {},
-    [sodexSymbol, mark],
-  );
+  // Live mark per symbol for the Positions table: start from the all-symbols
+  // perps ticker poll (covers every open position), then overlay the selected
+  // market's live mark so its row stays exactly in sync with the header. A
+  // symbol with no ticker yet resolves to "—" downstream — never a derived value.
+  const markBySymbol = useMemo<Record<string, number>>(() => {
+    const m: Record<string, number> = { ...allMarks };
+    if (sodexSymbol && mark != null) m[sodexSymbol.toUpperCase()] = mark;
+    return m;
+  }, [allMarks, sodexSymbol, mark]);
   const oracle = num(ticker?.indexPrice);
   const lastPrice = num(ticker?.lastPx);
   const bestBid = bids[0] ? Number(bids[0].price) : null;
