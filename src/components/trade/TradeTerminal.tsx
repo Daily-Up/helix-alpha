@@ -370,6 +370,15 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
   // Mark = perp mark price, else last. Everything anchors to this.
   const mark = num(ticker?.markPrice) ?? num(ticker?.lastPx);
   const digits = mark != null && mark < 10 ? 4 : 2;
+
+  // Live mark per symbol for the Positions table. The ticker only covers the
+  // currently-selected market, so any other symbol resolves to "—" downstream
+  // rather than a value derived from uPNL.
+  const markBySymbol = useMemo<Record<string, number>>(
+    () =>
+      sodexSymbol && mark != null ? { [sodexSymbol.toUpperCase()]: mark } : {},
+    [sodexSymbol, mark],
+  );
   const oracle = num(ticker?.indexPrice);
   const lastPrice = num(ticker?.lastPx);
   const bestBid = bids[0] ? Number(bids[0].price) : null;
@@ -647,6 +656,7 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
           cancelBusy={cancelBusy}
           onSelectSymbol={onSelectSymbol}
           onClosePosition={onClosePosition}
+          markBySymbol={markBySymbol}
           ready={tm.ready}
           digits={digits}
         />

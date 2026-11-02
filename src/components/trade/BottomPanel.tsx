@@ -48,6 +48,7 @@ export function BottomPanel({
   cancelBusy,
   onSelectSymbol,
   onClosePosition,
+  markBySymbol,
   ready,
   digits,
 }: {
@@ -61,6 +62,8 @@ export function BottomPanel({
   onSelectSymbol: (sodexSymbol: string) => void;
   /** Close/limit-close a position through the order ticket. */
   onClosePosition: (position: Position, type: "market" | "limit") => void;
+  /** Live mark price keyed by sodex symbol (currently-selected market only). */
+  markBySymbol: Record<string, number>;
   ready: boolean;
   digits: number;
 }) {
@@ -108,6 +111,7 @@ export function BottomPanel({
             <PositionsView
               positions={positions}
               digits={digits}
+              markBySymbol={markBySymbol}
               onSelect={onSelectSymbol}
               onClose={onClosePosition}
             />
@@ -212,11 +216,13 @@ const POS_COLS =
 function PositionsView({
   positions,
   digits,
+  markBySymbol,
   onSelect,
   onClose,
 }: {
   positions: Position[];
   digits: number;
+  markBySymbol: Record<string, number>;
   onSelect: (sodexSymbol: string) => void;
   onClose: (position: Position, type: "market" | "limit") => void;
 }) {
@@ -250,8 +256,10 @@ function PositionsView({
         const ur = p.ur != null ? Number(p.ur) : null;
         const lev = p.l ?? null;
         const liq = p.lp ? Number(p.lp) : null;
-        // Mark from SoDEX uPNL: ur = (mark − entry) × sz → mark = entry + ur/sz.
-        const mark = ur != null && sz !== 0 ? entry + ur / sz : null;
+        // Live mark from the market ticker for this symbol — never a value
+        // derived from uPNL. Only the selected market has a ticker, so other
+        // symbols resolve to null and render "—".
+        const mark = markBySymbol[p.s.toUpperCase()] ?? null;
         // Margin = notional / leverage; ROE% = uPNL / margin.
         const margin = lev && lev > 0 ? (abs * entry) / lev : null;
         const roe =
