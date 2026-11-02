@@ -17,7 +17,8 @@ import { AssetPicker } from "./AssetPicker";
 import { SetupCard, type SetupResponse } from "./SetupCard";
 import { PriceChart } from "./PriceChart";
 import { OrderBook, type BookLevel } from "./OrderBook";
-import { OrderPanel } from "./OrderPanel";
+import { OrderPanel, type SymbolRules } from "./OrderPanel";
+import type { Trade } from "./TradesTape";
 
 export interface TerminalAsset {
   id: string;
@@ -76,6 +77,10 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
   const [mktLoading, setMktLoading] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [bottomTab, setBottomTab] = useState<(typeof BOTTOM_TABS)[number]>("Positions");
+  const [rules, setRules] = useState<SymbolRules | null>(null);
+  const [trades, setTrades] = useState<Trade[]>([]);
+  const [tradesLoading, setTradesLoading] = useState(false);
+  const [limitFill, setLimitFill] = useState<number | null>(null);
 
   // 1s clock for the funding countdown.
   useEffect(() => {
@@ -95,9 +100,13 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
         );
         const j = await r.json();
         if (cancelled || !j.ok) return;
-        setTicker(j.ticker);
-        setBids(j.bids ?? []);
-        setAsks(j.asks ?? []);
+        // Coalesce the book/ticker updates into one frame.
+        requestAnimationFrame(() => {
+          if (cancelled) return;
+          setTicker(j.ticker);
+          setBids(j.bids ?? []);
+          setAsks(j.asks ?? []);
+        });
       } catch {
         /* keep last good values */
       } finally {
@@ -109,6 +118,61 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
     setAsks([]);
     load();
     const t = setInterval(load, 4000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [sodexSymbol, market]);
+
+  // Symbol trading rules (fees / leverage / margin tiers / precision), once
+  // per symbol — shared by the ticket (fees, liq) and the book (grouping).
+  useEffect(() => {
+    if (!sodexSymbol) {
+      setRules(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(
+          `/api/sodex/rules?symbol=${encodeURIComponent(sodexSymbol)}&market=${isPerp ? "perp" : "spot"}`,
+        );
+        const j = await r.json();
+        if (!cancelled && j.ok) setRules(j.rules as SymbolRules);
+      } catch {
+        /* keep last */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sodexSymbol, isPerp]);
+
+  // Trades tape — polled, rAF-batched like the book.
+  useEffect(() => {
+    if (!sodexSymbol) return;
+    let cancelled = false;
+    const load = async () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      setTradesLoading(true);
+      try {
+        const r = await fetch(
+          `/api/sodex/trades?symbol=${encodeURIComponent(sodexSymbol)}&market=${market}&limit=40`,
+        );
+        const j = await r.json();
+        if (cancelled || !j.ok) return;
+        requestAnimationFrame(() => {
+          if (!cancelled) setTrades(j.trades ?? []);
+        });
+      } catch {
+        /* keep last */
+      } finally {
+        if (!cancelled) setTradesLoading(false);
+      }
+    };
+    setTrades([]);
+    load();
+    const t = setInterval(load, 3000);
     return () => {
       cancelled = true;
       clearInterval(t);
@@ -309,8 +373,11 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
             asks={asks}
             markPrice={mark}
             loading={mktLoading}
-            symbol={selected?.symbol ?? ""}
             digits={digits}
+            tickSize={rules?.tickSize ?? 0}
+            onPriceClick={setLimitFill}
+            trades={trades}
+            tradesLoading={tradesLoading}
           />
         </div>
 
@@ -324,6 +391,8 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
               markPrice={mark}
               lastPrice={lastPrice}
               midPrice={midPrice}
+              rules={rules}
+              limitFill={limitFill}
             />
           ) : null}
         </div>

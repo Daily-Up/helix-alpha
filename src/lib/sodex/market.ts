@@ -17,6 +17,7 @@ import type {
   SodexOrderBook,
   SodexSymbol,
   SodexTicker,
+  SodexTrade,
 } from "./types";
 
 export type SodexMarket = "spot" | "perp";
@@ -81,6 +82,32 @@ export async function getOrderBook(
     bids: (raw.bids ?? []).map(([price, size]) => ({ price, size })),
     asks: (raw.asks ?? []).map(([price, size]) => ({ price, size })),
   };
+}
+
+/**
+ * GET /markets/{symbol}/trades?limit= — recent public trades.
+ * Rows come back as {t:id, T:ms, s:symbol, S:side, p:price, q:qty}; we
+ * normalize to SodexTrade. Newest-first as returned by SoDEX.
+ */
+export async function getTrades(
+  symbol: string,
+  market: SodexMarket = "spot",
+  limit = 40,
+): Promise<SodexTrade[]> {
+  const raw = await spotGet<
+    Array<{ t: number; T: number; s: string; S: string; p: string; q: string }>
+  >(`/markets/${encodeURIComponent(symbol)}/trades`, {
+    query: { limit },
+    baseOverride: baseFor(market),
+  });
+  return (raw ?? []).map((r) => ({
+    id: r.t,
+    time: r.T,
+    symbol: r.s,
+    side: r.S === "SELL" ? "SELL" : "BUY",
+    price: r.p,
+    size: r.q,
+  }));
 }
 
 /**

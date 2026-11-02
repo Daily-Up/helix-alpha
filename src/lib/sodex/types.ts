@@ -65,6 +65,19 @@ export interface SodexCoin {
   precision: number;
 }
 
+/** One public trade from /markets/{symbol}/trades (normalized). */
+export interface SodexTrade {
+  /** Trade id. */
+  id: number;
+  /** Match time (ms). */
+  time: number;
+  symbol: string;
+  side: "BUY" | "SELL";
+  /** Price / size, decimal strings. */
+  price: string;
+  size: string;
+}
+
 /** /markets/tickers shape. Numeric fields stringified. */
 export interface SodexTicker {
   symbol: string;

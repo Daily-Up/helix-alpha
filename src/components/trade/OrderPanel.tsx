@@ -111,6 +111,8 @@ export function OrderPanel({
   markPrice,
   lastPrice,
   midPrice,
+  rules,
+  limitFill,
 }: {
   symbol: string;
   sodexSymbol: string;
@@ -118,6 +120,8 @@ export function OrderPanel({
   markPrice: number | null;
   lastPrice?: number | null;
   midPrice?: number | null;
+  rules: SymbolRules | null;
+  limitFill?: number | null;
 }) {
   const tm = useTradeMode(NETWORK);
   const { address: connectedMaster } = useAccount();
@@ -145,29 +149,13 @@ export function OrderPanel({
   const [msg, setMsg] = useState<string | null>(null);
   const [, setTradesToday] = useState(() => readTradesToday(NETWORK));
 
-  // ── Symbol rules (fees / leverage / margin tiers), fetched once per symbol ──
-  const [rules, setRules] = useState<SymbolRules | null>(null);
+  // Book click → switch to Limit + prefill that price.
   useEffect(() => {
-    if (!sodexSymbol) {
-      setRules(null);
-      return;
+    if (limitFill != null && limitFill > 0) {
+      setType("limit");
+      setLimitPxInput(String(limitFill));
     }
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await fetch(
-          `/api/sodex/rules?symbol=${encodeURIComponent(sodexSymbol)}&market=${isPerp ? "perp" : "spot"}`,
-        );
-        const j = await r.json();
-        if (!cancelled && j.ok) setRules(j.rules as SymbolRules);
-      } catch {
-        /* keep last */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [sodexSymbol, isPerp]);
+  }, [limitFill]);
 
   // Clamp leverage to the symbol max once rules load.
   useEffect(() => {
