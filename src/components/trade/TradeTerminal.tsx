@@ -93,6 +93,16 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
   const [limitFill, setLimitFill] = useState<number | null>(null);
   const [account, setAccount] = useState<SodexPerpsAccountState | null>(null);
   const [bottomH, setBottomH] = useState(DEFAULT_BOTTOM);
+  const [sideFill, setSideFill] = useState<{
+    side: "buy" | "sell";
+    seq: number;
+  } | null>(null);
+  const onMobileSide = (side: "buy" | "sell") => {
+    setSideFill((p) => ({ side, seq: (p?.seq ?? 0) + 1 }));
+    document
+      .getElementById("terminal-ticket")
+      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
 
   // 1s clock for the funding countdown.
   useEffect(() => {
@@ -331,7 +341,7 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-lg border border-line bg-surface">
+    <div className="trade-terminal flex h-full flex-col overflow-hidden rounded-lg border border-line bg-surface">
       {/* ── Header stat row ── */}
       <div className="flex shrink-0 flex-wrap items-center gap-x-7 gap-y-3 border-b border-line bg-surface-2/40 px-4 py-2.5">
         <div className="flex items-center gap-2.5">
@@ -414,7 +424,7 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
           {sodexSymbol ? (
             <PriceChart
               symbol={sodexSymbol}
-              label={`${selected?.symbol ?? ""} · ${isPerp ? "perp" : "spot"} · SoDEX`}
+              label={`${selected?.symbol ?? ""}-${isPerp ? "PERP" : "SPOT"} · SoDEX`}
               market={market}
               levels={levels}
             />
@@ -474,7 +484,10 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
         </div>
 
         {/* Order ticket */}
-        <div className="order-2 border-t border-line lg:order-3 lg:min-h-0 lg:overflow-y-auto lg:border-l lg:border-t-0">
+        <div
+          id="terminal-ticket"
+          className="order-2 border-t border-line lg:order-3 lg:min-h-0 lg:overflow-y-auto lg:border-l lg:border-t-0"
+        >
           {selected && sodexSymbol ? (
             <OrderPanel
               symbol={selected.symbol}
@@ -486,6 +499,7 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
               rules={rules}
               limitFill={limitFill}
               account={account}
+              sideFill={sideFill}
             />
           ) : null}
         </div>
@@ -494,14 +508,17 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
       {/* ── Resize handle + bottom panel ── */}
       <div
         onMouseDown={startBottomDrag}
-        className="group flex shrink-0 cursor-row-resize items-center justify-center border-t border-line bg-surface-2/20 py-[3px] transition-colors hover:bg-accent/15"
+        className="group hidden shrink-0 cursor-row-resize items-center justify-center border-t border-line bg-surface-2/20 py-[3px] transition-colors hover:bg-accent/15 lg:flex"
         title="Drag to resize"
         role="separator"
         aria-orientation="horizontal"
       >
         <div className="h-0.5 w-10 rounded-full bg-line-2 group-hover:bg-accent/50" />
       </div>
-      <div className="shrink-0 overflow-hidden" style={{ height: bottomH }}>
+      <div
+        className="shrink-0 overflow-hidden border-t border-line lg:border-t-0"
+        style={{ height: bottomH }}
+      >
         <BottomPanel
           tab={bottomTab}
           setTab={setBottomTab}
@@ -510,6 +527,24 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
           markPrice={mark}
           digits={digits}
         />
+      </div>
+
+      {/* Mobile sticky Buy/Sell bar — jumps to the ticket and sets the side. */}
+      <div className="flex shrink-0 gap-2 border-t border-line bg-surface p-2 lg:hidden">
+        <button
+          onClick={() => onMobileSide("buy")}
+          className="flex-1 rounded-md py-2.5 text-[14px] font-semibold text-[#0b0e11]"
+          style={{ backgroundColor: "#0ecb81" }}
+        >
+          Buy / Long
+        </button>
+        <button
+          onClick={() => onMobileSide("sell")}
+          className="flex-1 rounded-md py-2.5 text-[14px] font-semibold text-[#0b0e11]"
+          style={{ backgroundColor: "#f6465d" }}
+        >
+          Sell / Short
+        </button>
       </div>
     </div>
   );

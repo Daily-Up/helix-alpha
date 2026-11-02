@@ -115,6 +115,7 @@ export function OrderPanel({
   rules,
   limitFill,
   account,
+  sideFill,
 }: {
   symbol: string;
   sodexSymbol: string;
@@ -125,6 +126,7 @@ export function OrderPanel({
   rules: SymbolRules | null;
   limitFill?: number | null;
   account: SodexPerpsAccountState | null;
+  sideFill?: { side: "buy" | "sell"; seq: number } | null;
 }) {
   const tm = useTradeMode(NETWORK);
   const { address: connectedMaster } = useAccount();
@@ -159,6 +161,12 @@ export function OrderPanel({
       setLimitPxInput(String(limitFill));
     }
   }, [limitFill]);
+
+  // Mobile Buy/Sell bar → set the side (seq makes repeated taps re-fire).
+  useEffect(() => {
+    if (sideFill) setSide(sideFill.side);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sideFill?.seq]);
 
   // Clamp leverage to the symbol max once rules load.
   useEffect(() => {

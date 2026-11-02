@@ -1,0 +1,46 @@
+/* =============================================================================
+   Terminal-scoped exchange palette.
+
+   Re-maps the app's design tokens INSIDE the trade terminal only (anything
+   under the trade-terminal class), so the ticket, order book and chart read
+   like a pro exchange while the rest of Helix keeps its brand theme. Both
+   the raw tokens (used by a few inline var() styles) and the Tailwind
+   color tokens (used by the bg, text and border utilities) are overridden.
+
+   The accent (Helix orange) is intentionally NOT overridden — it stays
+   brand-only (logo, active nav), never a trade action.
+============================================================================= */
+.trade-terminal {
+  --bg: #0b0e11;
+  --surface: #12161c;
+  --surface-2: #1a1f27;
+  --line: #232a33;
+  --line-2: #2d3540;
+  --fg: #e6e8eb;
+  --fg-muted: #848e9c;
+  --fg-dim: #5e6875;
+  --positive: #0ecb81;
+  --negative: #f6465d;
+
+  --color-bg: #0b0e11;
+  --color-surface: #12161c;
+  --color-surface-2: #1a1f27;
+  --color-line: #232a33;
+  --color-line-2: #2d3540;
+  --color-fg: #e6e8eb;
+  --color-fg-muted: #848e9c;
+  --color-fg-dim: #5e6875;
+  --color-positive: #0ecb81;
+  --color-negative: #f6465d;
+}
+
+/* Honour reduced-motion: no price flashes / transitions inside the terminal. */
+@media (prefers-reduced-motion: reduce) {
+  .trade-terminal *,
+  .trade-terminal *::before,
+  .trade-terminal *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
