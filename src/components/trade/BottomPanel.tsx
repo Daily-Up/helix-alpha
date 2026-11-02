@@ -29,14 +29,12 @@ export function BottomPanel({
   setTab,
   account,
   ready,
-  markPrice,
   digits,
 }: {
   tab: BottomTab;
   setTab: (t: BottomTab) => void;
   account: SodexPerpsAccountState | null;
   ready: boolean;
-  markPrice: number | null;
   digits: number;
 }) {
   const positions = (account?.P ?? []).filter((p) => Number(p.sz) !== 0);
@@ -82,17 +80,28 @@ export function BottomPanel({
             <Empty>No open positions.</Empty>
           ) : (
             <Table
-              head={["Market", "Size", "Entry", "uPNL"]}
+              head={["Market", "Size", "Entry", "Liq", "Lev", "uPNL"]}
               rows={positions.map((p) => {
                 const sz = Number(p.sz);
                 const entry = Number(p.ep);
-                const upnl =
-                  markPrice != null && entry > 0
-                    ? (markPrice - entry) * sz
-                    : null;
+                // Use SoDEX's authoritative values from /state (not estimates).
+                const liq = p.lp ? Number(p.lp) : null;
+                const upnl = p.ur != null ? Number(p.ur) : null;
+                const lev = p.l ?? null;
+                const mode = p.m
+                  ? p.m.charAt(0) + p.m.slice(1).toLowerCase()
+                  : "";
+                const px = (v: number) =>
+                  v.toLocaleString(undefined, {
+                    minimumFractionDigits: digits,
+                    maximumFractionDigits: digits,
+                  });
                 return [
                   <span key="m" className="text-fg">
                     {p.s}
+                    {mode ? (
+                      <span className="ml-1 text-[9px] text-fg-dim">{mode}</span>
+                    ) : null}
                   </span>,
                   <span
                     key="s"
@@ -101,7 +110,11 @@ export function BottomPanel({
                     {sz >= 0 ? "+" : ""}
                     {qtyFmt(sz)}
                   </span>,
-                  <span key="e">{entry.toFixed(digits)}</span>,
+                  <span key="e">{px(entry)}</span>,
+                  <span key="lq" className="text-fg-muted">
+                    {liq != null ? px(liq) : "—"}
+                  </span>,
+                  <span key="lv">{lev != null ? `${lev}×` : "—"}</span>,
                   <span
                     key="u"
                     className={

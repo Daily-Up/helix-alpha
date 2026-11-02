@@ -524,7 +524,6 @@ export function TradeTerminal({ assets }: { assets: TerminalAsset[] }) {
           setTab={setBottomTab}
           account={account}
           ready={tm.ready}
-          markPrice={mark}
           digits={digits}
         />
       </div>

@@ -3,13 +3,14 @@
 /**
  * OrderPanel — the single-source perp order ticket (Arcus/TrueNorth parity).
  *
- * Owns side, order type, size, leverage, TP/SL and post-only. Market and
+ * Owns side, order type, size, TP/SL and post-only. Market and
  * Limit both submit through placeLiveOrder() (builder code 8409 attached in
  * the signing path). Submit opens an INLINE confirm step in this same panel;
  * Confirm places the order. Fees come from the symbol's maker/taker rate +
- * getBuilderCode(); the liquidation estimate uses the maintenance-margin tier
- * selected by position notional. Account rows are read-only from the perps
- * account state; a Connect CTA shows until the browser is live.
+ * getBuilderCode(). Leverage + margin mode are READ-ONLY (set on SoDEX, not
+ * from here); no liquidation estimate is shown for a new order — the real one
+ * comes from SoDEX's `lp` once a position is open. Account rows are read-only
+ * from the perps account state; a Connect CTA shows until the browser is live.
  *
  * NEVER auto-submits — a real mainnet order needs the explicit Confirm click.
  */
@@ -29,7 +30,6 @@ import {
   type KeyExpiry,
 } from "@/lib/sodex-onchain/local-keys";
 import { useAccount } from "wagmi";
-import { LeverageModal } from "./LeverageModal";
 
 const LONG = "#0ecb81";
 const SHORT = "#f6465d";
@@ -73,38 +73,6 @@ const pxFmt = (v: number | null | undefined, digits: number) =>
         maximumFractionDigits: digits,
       });
 
-/**
- * Estimated isolated-margin liquidation price, using the maintenance-margin
- * tier chosen by POSITION NOTIONAL (not leverage). The applicable tier is the
- * first whose `maxNotionalValue` ≥ notional; `mmr` = its maintenanceMarginRate,
- * `ded` = its maintenanceDeduction. Formula (Binance-style isolated):
- *   long:  liq = (entry − entry/lev − ded/qty) / (1 − mmr)
- *   short: liq = (entry + entry/lev + ded/qty) / (1 + mmr)
- * Returns null when inputs or tiers are missing — the caller omits the row
- * rather than show a wrong number.
- */
-function estLiqPrice(a: {
-  isLong: boolean;
-  entry: number | null;
-  qty: number;
-  notional: number;
-  leverage: number;
-  tiers: SymbolRules["marginTiers"];
-}): number | null {
-  const { isLong, entry, qty, notional, leverage, tiers } = a;
-  if (!tiers || tiers.length === 0) return null;
-  if (!entry || entry <= 0 || qty <= 0 || leverage <= 0 || notional <= 0)
-    return null;
-  const tier =
-    tiers.find((t) => notional <= t.maxNotionalValue) ?? tiers[tiers.length - 1];
-  const mmr = tier.maintenanceMarginRate;
-  const ded = tier.maintenanceDeduction;
-  const liq = isLong
-    ? (entry - entry / leverage - ded / qty) / (1 - mmr)
-    : (entry + entry / leverage + ded / qty) / (1 + mmr);
-  return Number.isFinite(liq) && liq > 0 ? liq : null;
-}
-
 export function OrderPanel({
   symbol,
   sodexSymbol,
@@ -140,12 +108,9 @@ export function OrderPanel({
   const [sizeUnit, setSizeUnit] = useState<"usd" | "base">("usd");
   const [limitPxInput, setLimitPxInput] = useState("");
   const [postOnly, setPostOnly] = useState(false);
-  const [leverage, setLeverage] = useState(10);
-  const [marginMode, setMarginMode] = useState<"cross" | "isolated">("cross");
   const [tpsl, setTpsl] = useState(false);
   const [stopInput, setStopInput] = useState("");
   const [targetInput, setTargetInput] = useState("");
-  const [levModal, setLevModal] = useState(false);
 
   // ── Confirm / submit state ──
   const [confirming, setConfirming] = useState(false);
@@ -167,11 +132,6 @@ export function OrderPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sideFill?.seq]);
 
-  // Clamp leverage to the symbol max once rules load.
-  useEffect(() => {
-    if (rules?.maxLeverage)
-      setLeverage((l) => Math.min(l, rules.maxLeverage as number));
-  }, [rules?.maxLeverage]);
 
   // Available + current position, derived from the account state (fetched
   // once in the terminal and shared with the bottom tabs).
@@ -184,8 +144,21 @@ export function OrderPanel({
       availableUsd: Number(account.am) || 0,
       positionSz: pos ? Number(pos.sz) || 0 : 0,
       positionEntry: pos ? Number(pos.ep) || null : null,
+      // Actual leverage + margin mode for this symbol (from /state), if open.
+      leverage: pos?.l ?? null,
+      marginMode: pos?.m ?? null,
     };
   }, [account, sodexSymbol]);
+
+  // Leverage is READ-ONLY: the ticket does NOT send leverage or margin mode to
+  // SoDEX (there is no updateLeverage/setMargin call), so the order inherits the
+  // account's current settings. We display the account's actual leverage for
+  // this symbol when a position exists, else the contract default. Used only to
+  // size the slider's buying power.
+  const displayLeverage = acct?.leverage ?? rules?.initLeverage ?? 10;
+  const marginModeLabel = acct?.marginMode
+    ? acct.marginMode.charAt(0) + acct.marginMode.slice(1).toLowerCase()
+    : null;
 
   // Key expiry → re-authorize gate (mirrors ExecuteLiveButton; S3).
   const [keyExpiry, setKeyExpiry] = useState<KeyExpiry | null>(null);
@@ -209,7 +182,7 @@ export function OrderPanel({
 
   // Buying power → slider ceiling. Falls back to a nominal $1000 pre-connect.
   const buyingPower =
-    acct?.availableUsd != null ? acct.availableUsd * leverage : null;
+    acct?.availableUsd != null ? acct.availableUsd * displayLeverage : null;
   const sliderMax = buyingPower && buyingPower > 0 ? buyingPower : 1000;
   const pct = Math.max(0, Math.min(100, Math.round((sizeUsd / sliderMax) * 100)));
 
@@ -245,21 +218,6 @@ export function OrderPanel({
   const builderFeeUsd = sizeUsd * builderRate;
   const totalFeeUsd = exchangeFeeUsd + builderFeeUsd;
   const totalRate = exchangeRate + builderRate;
-
-  const liqPrice = useMemo(
-    () =>
-      isPerp
-        ? estLiqPrice({
-            isLong,
-            entry: entryPrice,
-            qty,
-            notional: sizeUsd,
-            leverage,
-            tiers: rules?.marginTiers ?? null,
-          })
-        : null,
-    [isPerp, isLong, entryPrice, qty, sizeUsd, leverage, rules?.marginTiers],
-  );
 
   // TP/SL resulting prices (market only this build).
   const stopPct = Number(stopInput);
@@ -364,38 +322,20 @@ export function OrderPanel({
 
   return (
     <div className="flex h-full flex-col gap-3 overflow-y-auto p-4">
-      {/* Margin mode + leverage */}
+      {/* Leverage + margin mode — READ-ONLY. The ticket does not set these on
+          SoDEX, so the order inherits the account's current settings. */}
       {isPerp ? (
-        <div className="grid grid-cols-[1fr_auto_1fr] gap-1 rounded-md border border-line p-1 text-[12px]">
-          <button
-            onClick={() => setMarginMode("cross")}
-            className={cn(
-              "rounded py-1 transition-colors",
-              marginMode === "cross"
-                ? "bg-surface-2 text-fg"
-                : "text-fg-dim hover:text-fg",
-            )}
-          >
-            Cross
-          </button>
-          <button
-            onClick={() => setLevModal(true)}
-            className="px-3 font-medium text-fg tabular-nums hover:text-accent-2"
-            title="Adjust leverage"
-          >
-            {leverage}×
-          </button>
-          <button
-            onClick={() => setMarginMode("isolated")}
-            className={cn(
-              "rounded py-1 transition-colors",
-              marginMode === "isolated"
-                ? "bg-surface-2 text-fg"
-                : "text-fg-dim hover:text-fg",
-            )}
-          >
-            Isolated
-          </button>
+        <div
+          className="flex items-center justify-between rounded-md border border-line px-3 py-1.5 text-[12px]"
+          title="Leverage and margin mode are set on SoDEX — the order inherits your account's current settings for this market."
+        >
+          <span className="text-fg-dim">{marginModeLabel ?? "Leverage"}</span>
+          <span className="font-medium text-fg tabular-nums">
+            {displayLeverage}×
+            {acct?.leverage == null ? (
+              <span className="ml-1 text-[10px] text-fg-dim">default</span>
+            ) : null}
+          </span>
         </div>
       ) : null}
 
@@ -636,7 +576,6 @@ export function OrderPanel({
             entry={entryPrice}
             type={type}
             postOnly={postOnly}
-            liq={liqPrice}
             stop={stopPrice}
             target={targetPrice}
             exchangeFeeUsd={exchangeFeeUsd}
@@ -685,9 +624,6 @@ export function OrderPanel({
 
       {/* Order details */}
       <div className="flex flex-col gap-1.5 border-t border-line pt-3 text-[11.5px]">
-        {liqPrice != null ? (
-          <Row label="Est. Liquidation" value={pxFmt(liqPrice, digits)} />
-        ) : null}
         <Row label="Order Value" value={money(sizeUsd > 0 ? sizeUsd : null)} />
         <Row
           label={type === "market" ? "Expected Price" : "Limit Price"}
@@ -704,16 +640,6 @@ export function OrderPanel({
         />
       </div>
 
-      <LeverageModal
-        open={levModal}
-        value={leverage}
-        max={rules?.maxLeverage ?? 20}
-        onConfirm={(l) => {
-          setLeverage(l);
-          setLevModal(false);
-        }}
-        onClose={() => setLevModal(false)}
-      />
     </div>
   );
 }
@@ -761,7 +687,6 @@ function ConfirmStep(p: {
   entry: number | null;
   type: "market" | "limit";
   postOnly: boolean;
-  liq: number | null;
   stop: number | null;
   target: number | null;
   exchangeFeeUsd: number;
@@ -800,9 +725,6 @@ function ConfirmStep(p: {
           label={p.type === "limit" ? "Limit Price" : "Est. Entry"}
           value={pxFmt(p.entry, p.digits)}
         />
-        {p.liq != null ? (
-          <CRow label="Est. Liq Price" value={pxFmt(p.liq, p.digits)} />
-        ) : null}
         {p.stop != null ? (
           <CRow label="Stop Price" value={pxFmt(p.stop, p.digits)} tone={SHORT} />
         ) : null}

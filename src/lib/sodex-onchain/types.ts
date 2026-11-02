@@ -89,14 +89,24 @@ export interface SodexPerpsAccountState {
   /** Open positions. sz is signed (positive long / negative short / 0 closed). */
   P: Array<{
     i: number;
+    /** Symbol name, e.g. "BTC-USD". */
     s: string;
+    /** Margin mode: "CROSS" | "ISOLATED". */
+    m?: string;
+    /** Position side, e.g. "BOTH". */
+    ps?: number | string;
     sz: string;
+    /** Entry price. */
     ep: string;
-    ps: number;
     cr?: string;
-    m?: number;
+    /** Unrealised PnL (signed). */
+    ur?: string;
+    /** Leverage, e.g. 10. */
+    l?: number;
+    /** Liquidation price. */
+    lp?: string;
   }>;
-  /** Open orders. */
+  /** Open orders (PerpsOrder shape; see getOpenOrders). */
   O: unknown[];
   /** Subaccounts. */
   S: unknown[];
