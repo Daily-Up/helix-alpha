@@ -179,12 +179,12 @@ export function CloseModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: "rgba(0,0,0,0.6)" }}
+      className="trade-modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "rgba(0,0,0,0.66)", backdropFilter: "blur(2px)" }}
       onClick={onClose}
     >
       <div
-        className="flex max-h-[90vh] w-[480px] max-w-full flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-2xl"
+        className="trade-modal-panel flex max-h-[90vh] w-[480px] max-w-full flex-col overflow-hidden rounded-xl border border-line bg-surface-2 shadow-2xl shadow-black/50"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Title */}

@@ -1269,7 +1269,7 @@ function Stat({
   title?: string;
 }) {
   return (
-    <div className="flex flex-col" title={title}>
+    <div className="flex flex-col border-l border-line/70 pl-4" title={title}>
       <span className="text-[11px] uppercase tracking-wide text-fg-dim">
         {label}
       </span>
@@ -1302,11 +1302,11 @@ function MarkPrice({ value, digits }: { value: number | null; digits: number }) 
     prev.current = value;
   }, [value]);
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col border-l border-line/70 pl-4">
       <span className="text-[11px] uppercase tracking-wide text-fg-dim">Mark</span>
       <span
         className={cn(
-          "w-fit rounded px-1 font-[var(--font-jetbrains-mono)] text-[21px] font-semibold leading-tight tabular-nums transition-colors duration-150 motion-reduce:transition-none",
+          "-ml-1 w-fit rounded px-1 font-[var(--font-jetbrains-mono)] text-[22px] font-semibold leading-tight tabular-nums transition-colors duration-150 motion-reduce:transition-none",
           flash === "up"
             ? "bg-positive/25 text-positive"
             : flash === "down"

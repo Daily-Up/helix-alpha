@@ -11,27 +11,38 @@
    brand-only (logo, active nav), never a trade action.
 ============================================================================= */
 .trade-terminal {
+  /* 3 surface levels: page → panel → raised (inputs, popovers, modals). */
   --bg: #0b0e11;
-  --surface: #12161c;
-  --surface-2: #1a1f27;
-  --line: #232a33;
-  --line-2: #2d3540;
+  --surface: #11151b;
+  --surface-2: #171c23;
+  --line: #1f262f;
+  --line-2: #2a3340;
+  /* Text: primary / secondary / muted. */
   --fg: #e6e8eb;
-  --fg-muted: #848e9c;
-  --fg-dim: #5e6875;
+  --fg-muted: #9aa4b2;
+  --fg-dim: #5f6b7a;
   --positive: #0ecb81;
   --negative: #f6465d;
+  /* Neutral primary action (no Helix orange on trade controls). */
+  --accent-trade: #3b82f6;
+  --accent-trade-hover: #4c8ef7;
 
   --color-bg: #0b0e11;
-  --color-surface: #12161c;
-  --color-surface-2: #1a1f27;
-  --color-line: #232a33;
-  --color-line-2: #2d3540;
+  --color-surface: #11151b;
+  --color-surface-2: #171c23;
+  --color-line: #1f262f;
+  --color-line-2: #2a3340;
   --color-fg: #e6e8eb;
-  --color-fg-muted: #848e9c;
-  --color-fg-dim: #5e6875;
+  --color-fg-muted: #9aa4b2;
+  --color-fg-dim: #5f6b7a;
   --color-positive: #0ecb81;
   --color-negative: #f6465d;
+
+  /* Inter for UI chrome; JetBrains Mono (tabular) stays for every number via
+     the font-[var(--font-jetbrains-mono)] utility already on numeric cells. */
+  font-family: var(--font-inter), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, sans-serif;
+  letter-spacing: -0.006em;
 }
 
 /* Focus, terminal-wide, fixed at the source.
@@ -49,6 +60,32 @@
 .trade-terminal :is(input, select, textarea, button, a, [tabindex]):focus-visible {
   outline: none;
   box-shadow: none;
+}
+
+/* Modal entrance: backdrop fades, panel fades + scales in (150ms). */
+@keyframes trade-modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes trade-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.trade-modal-backdrop {
+  animation: trade-backdrop-in 150ms ease-out;
+}
+.trade-modal-panel {
+  animation: trade-modal-in 150ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 /* Honour reduced-motion: no price flashes / transitions inside the terminal. */

@@ -567,7 +567,7 @@ function PositionsView({
         return (
           <div
             key={key}
-            className="grid items-center gap-2 px-4 py-2 font-[var(--font-jetbrains-mono)] tabular-nums transition-colors hover:bg-surface-2/50"
+            className="grid min-h-[44px] items-center gap-2 px-4 py-2 font-[var(--font-jetbrains-mono)] tabular-nums transition-colors duration-150 hover:bg-surface-2/60"
             style={{ gridTemplateColumns: POS_COLS }}
           >
             {/* Market: icon + symbol + side / leverage / margin-mode badges */}

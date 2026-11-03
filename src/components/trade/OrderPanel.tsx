@@ -367,46 +367,57 @@ export function OrderPanel({
         </div>
       ) : null}
 
-      {/* Side toggle */}
-      <div className="grid grid-cols-2 gap-2">
+      {/* Side toggle — segmented control with a sliding active pill. */}
+      <div className="relative grid grid-cols-2 rounded-lg bg-surface-2 p-1">
+        <span
+          aria-hidden
+          className="pointer-events-none absolute top-1 bottom-1 rounded-md transition-all duration-150 ease-out"
+          style={{
+            left: isLong ? "4px" : "50%",
+            right: isLong ? "50%" : "4px",
+            backgroundColor: isLong ? LONG : SHORT,
+          }}
+        />
         <button
           onClick={() => pickSide("buy")}
-          className="rounded-md py-2 text-[13px] font-semibold transition-colors"
-          style={
-            isLong
-              ? { backgroundColor: LONG, color: "#0b0e11" }
-              : { backgroundColor: "var(--surface-2,#1a1f27)", color: "#848e9c" }
-          }
+          className={cn(
+            "relative z-10 rounded-md py-2 text-[13px] font-semibold transition-colors",
+            isLong ? "text-[#0b0e11]" : "text-fg-muted hover:text-fg",
+          )}
         >
           {isPerp ? "Buy / Long" : "Buy"}
         </button>
         <button
           onClick={() => pickSide("sell")}
-          className="rounded-md py-2 text-[13px] font-semibold transition-colors"
-          style={
-            !isLong
-              ? { backgroundColor: SHORT, color: "#0b0e11" }
-              : { backgroundColor: "var(--surface-2,#1a1f27)", color: "#848e9c" }
-          }
+          className={cn(
+            "relative z-10 rounded-md py-2 text-[13px] font-semibold transition-colors",
+            !isLong ? "text-[#0b0e11]" : "text-fg-muted hover:text-fg",
+          )}
         >
           {isPerp ? "Sell / Short" : "Sell"}
         </button>
       </div>
 
-      {/* Market / Limit */}
-      <div className="flex items-center gap-4 text-[12px]">
+      {/* Market / Limit — underline tabs with a blue indicator. */}
+      <div className="flex items-center gap-5 border-b border-line text-[12px]">
         {(["market", "limit"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setType(t)}
             className={cn(
-              "capitalize transition-colors",
-              type === t
-                ? "border-b-2 border-accent pb-0.5 font-medium text-fg"
-                : "text-fg-dim hover:text-fg",
+              "relative pb-2 capitalize transition-colors",
+              type === t ? "font-medium text-fg" : "text-fg-dim hover:text-fg-muted",
             )}
           >
             {t}
+            <span
+              aria-hidden
+              className="absolute inset-x-0 -bottom-px h-[2px] rounded-full transition-opacity duration-150"
+              style={{
+                backgroundColor: "var(--accent-trade)",
+                opacity: type === t ? 1 : 0,
+              }}
+            />
           </button>
         ))}
       </div>
@@ -625,8 +636,10 @@ export function OrderPanel({
             onClick={requestConfirm}
             disabled={busy || sizeUsd <= 0}
             className={cn(
-              "w-full rounded-md py-2.5 text-[14px] font-semibold transition-opacity",
-              sizeUsd <= 0 ? "cursor-not-allowed opacity-50" : "hover:opacity-90",
+              "w-full rounded-md py-3 text-[14px] font-semibold transition-all duration-150",
+              sizeUsd <= 0
+                ? "cursor-not-allowed opacity-50"
+                : "hover:-translate-y-px hover:shadow-lg hover:brightness-[1.06]",
             )}
             style={{ backgroundColor: sideColor, color: "#0b0e11" }}
           >
