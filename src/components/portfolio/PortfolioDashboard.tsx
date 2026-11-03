@@ -24,6 +24,7 @@ import {
 import { EquityChart } from "./EquityChart";
 import { OverviewCard } from "./OverviewCard";
 import { SegmentedTabs } from "./SegmentedTabs";
+import { SpotTab } from "./SpotTab";
 
 type TopTab = "Spot" | "Perpetuals";
 
@@ -141,7 +142,11 @@ export function PortfolioDashboard() {
         </div>
         <div className="p-4">
           {tab === "Spot" ? (
-            <TabPlaceholder>Spot balances &amp; history — wiring next.</TabPlaceholder>
+            <SpotTab
+              address={address}
+              spotEquity={composition?.spot_equity ?? null}
+              volume30dSpot={tradeStats?.volume30d.spot ?? null}
+            />
           ) : (
             <TabPlaceholder>
               Perpetuals positions &amp; orders — reusing the terminal&apos;s
