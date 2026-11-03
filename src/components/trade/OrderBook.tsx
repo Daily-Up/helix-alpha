@@ -82,10 +82,10 @@ const BookRow = memo(function BookRow({
     >
       <div
         className={cn(
-          "absolute inset-y-0 right-0",
+          "absolute inset-y-[1px] right-0 rounded-l-[3px] transition-[width] duration-200",
           side === "ask" ? "bg-negative" : "bg-positive",
         )}
-        style={{ width: `${pct}%`, opacity: 0.15 }}
+        style={{ width: `${pct}%`, opacity: 0.18 }}
       />
       <span
         className={cn(
@@ -246,9 +246,21 @@ export function OrderBook({
           </div>
 
           {asks.length === 0 && bids.length === 0 ? (
-            <div className="px-3 py-10 text-center text-[11px] text-fg-dim">
-              {loading ? "Loading book…" : "Book unavailable"}
-            </div>
+            loading ? (
+              <div className="flex flex-col gap-1.5 px-3 py-3">
+                {Array.from({ length: 13 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="trade-skeleton h-[11px]"
+                    style={{ width: `${55 + ((i * 37) % 40)}%`, opacity: i === 6 ? 1 : 0.6 }}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="px-3 py-10 text-center text-[11px] text-fg-dim">
+                Book unavailable
+              </div>
+            )
           ) : (
             <div className="flex flex-col">
               {/* Asks (best nearest the mid, at the bottom) */}
@@ -265,16 +277,16 @@ export function OrderBook({
                 ))}
               </div>
 
-              {/* Fixed mid row */}
-              <div className="flex items-center justify-between border-y border-line bg-surface-2/50 px-3 py-1.5">
+              {/* Mid row — mark price pill + spread badge */}
+              <div className="flex items-center justify-between gap-2 border-y border-line bg-surface-2/50 px-3 py-2">
                 <span
                   className={cn(
-                    "flex items-center gap-1 font-[var(--font-jetbrains-mono)] text-[13px] font-medium tabular-nums",
+                    "flex items-center gap-1 rounded-md px-2 py-0.5 font-[var(--font-jetbrains-mono)] text-[13px] font-semibold tabular-nums transition-colors duration-150",
                     dir === "down"
-                      ? "text-negative"
+                      ? "bg-negative/15 text-negative"
                       : dir === "up"
-                        ? "text-positive"
-                        : "text-fg",
+                        ? "bg-positive/15 text-positive"
+                        : "bg-surface text-fg",
                   )}
                 >
                   {markPrice != null ? fmtPx(markPrice) : "—"}
@@ -284,10 +296,13 @@ export function OrderBook({
                     </span>
                   ) : null}
                 </span>
-                <span className="text-[10px] text-fg-dim">
+                <span
+                  className="rounded border border-line bg-surface px-1.5 py-0.5 font-[var(--font-jetbrains-mono)] text-[9.5px] tabular-nums text-fg-muted"
+                  title="Bid/ask spread"
+                >
                   {spread != null
                     ? `${fmtPx(spread)} · ${spreadPct != null ? spreadPct.toFixed(3) : "—"}%`
-                    : ""}
+                    : "—"}
                 </span>
               </div>
 
@@ -304,6 +319,29 @@ export function OrderBook({
                   />
                 ))}
               </div>
+
+              {/* Buy/sell pressure — bid vs ask volume share of the visible book */}
+              {(() => {
+                const bidVol = bidCells.reduce((s, r) => s + (Number(r?.size) || 0), 0);
+                const askVol = askCells.reduce((s, r) => s + (Number(r?.size) || 0), 0);
+                const tot = bidVol + askVol;
+                const bidPct = tot > 0 ? (bidVol / tot) * 100 : 50;
+                return (
+                  <div className="border-t border-line px-3 py-2">
+                    <div className="mb-1 flex items-center justify-between font-[var(--font-jetbrains-mono)] text-[9.5px] tabular-nums">
+                      <span className="text-positive">B {bidPct.toFixed(0)}%</span>
+                      <span className="text-negative">{(100 - bidPct).toFixed(0)}% S</span>
+                    </div>
+                    <div className="flex h-1.5 overflow-hidden rounded-full bg-surface">
+                      <div
+                        className="bg-positive transition-all duration-300 ease-out"
+                        style={{ width: `${bidPct}%` }}
+                      />
+                      <div className="flex-1 bg-negative" />
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
         </>

@@ -88,6 +88,27 @@
   animation: trade-modal-in 150ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* Skeleton shimmer for loading cells (instead of a bare "—"). */
+@keyframes trade-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+.trade-skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 25%,
+    var(--line-2) 50%,
+    var(--surface-2) 75%
+  );
+  background-size: 200% 100%;
+  animation: trade-shimmer 1.5s ease-in-out infinite;
+  border-radius: 4px;
+}
+
 /* Honour reduced-motion: no price flashes / transitions inside the terminal. */
 @media (prefers-reduced-motion: reduce) {
   .trade-terminal *,

@@ -11,8 +11,16 @@ import { useEffect, useRef, useState } from "react";
 import { cn } from "@/components/ui/cn";
 import type { SetupLevel } from "./SetupCard";
 
-const INTERVALS = ["15m", "1h", "4h", "1d"] as const;
+const INTERVALS = ["1m", "5m", "15m", "1h", "4h", "1d"] as const;
 type Interval = (typeof INTERVALS)[number];
+const INTERVAL_LABEL: Record<Interval, string> = {
+  "1m": "1m",
+  "5m": "5m",
+  "15m": "15m",
+  "1h": "1H",
+  "4h": "4H",
+  "1d": "1D",
+};
 
 interface Candle {
   time: number;
@@ -23,8 +31,8 @@ interface Candle {
   volume: number;
 }
 
-const UP = "#26a69a";
-const DOWN = "#ef5350";
+const UP = "#0ecb81";
+const DOWN = "#f6465d";
 // Volume bars use the terminal palette (green up / red down), semi-opaque.
 const VOL_UP = "rgba(14,203,129,0.5)";
 const VOL_DOWN = "rgba(246,70,93,0.5)";
@@ -169,8 +177,8 @@ export function PriceChart({
         },
         crosshair: {
           mode: LWC.CrosshairMode.Normal,
-          vertLine: { color: "rgba(255,255,255,0.2)", labelBackgroundColor: "#2a2a2e" },
-          horzLine: { color: "rgba(255,255,255,0.2)", labelBackgroundColor: "#2a2a2e" },
+          vertLine: { color: "rgba(230,232,235,0.22)", labelBackgroundColor: "#171c23" },
+          horzLine: { color: "rgba(230,232,235,0.22)", labelBackgroundColor: "#171c23" },
         },
         autoSize: true,
       });
@@ -461,22 +469,24 @@ export function PriceChart({
   return (
     <div className="flex h-full flex-col">
       {/* Timeframe controls */}
-      <div className="flex shrink-0 items-center gap-0.5 border-b border-line px-1 pb-2">
-        {INTERVALS.map((iv) => (
-          <button
-            key={iv}
-            onClick={() => setIntervalSel(iv)}
-            className={cn(
-              "rounded px-2 py-1 text-[11px] font-medium transition-colors",
-              iv === interval
-                ? "bg-surface-2 text-fg"
-                : "text-fg-dim hover:text-fg-muted",
-            )}
-          >
-            {iv}
-          </button>
-        ))}
-        <span className="ml-2 text-[10px] text-fg-dim">
+      <div className="flex shrink-0 items-center gap-2 border-b border-line px-2 pb-2">
+        <div className="flex items-center gap-0.5 rounded-md bg-surface-2 p-0.5">
+          {INTERVALS.map((iv) => (
+            <button
+              key={iv}
+              onClick={() => setIntervalSel(iv)}
+              className={cn(
+                "rounded px-2 py-1 text-[11px] font-medium tabular-nums transition-colors duration-150",
+                iv === interval
+                  ? "bg-surface text-fg shadow-sm"
+                  : "text-fg-dim hover:text-fg-muted",
+              )}
+            >
+              {INTERVAL_LABEL[iv]}
+            </button>
+          ))}
+        </div>
+        <span className="text-[10px] text-fg-dim">
           {loading ? "loading…" : ""}
         </span>
         <a

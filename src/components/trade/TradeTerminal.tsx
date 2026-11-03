@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/components/ui/cn";
 import { AssetLogo } from "@/components/ui/AssetLogo";
+import { CheckCircle2, XCircle, AlertTriangle, Info } from "lucide-react";
 import { AssetPicker } from "./AssetPicker";
 import { SetupCard, type SetupResponse } from "./SetupCard";
 import { PriceChart } from "./PriceChart";
@@ -164,7 +165,7 @@ export function TradeTerminal({
   const showToast = useCallback((msg: string) => {
     setToast(msg);
     if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), 5000);
+    toastTimer.current = setTimeout(() => setToast(null), 4000);
   }, []);
   useEffect(() => () => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -1244,15 +1245,59 @@ export function TradeTerminal({
         </button>
       </div>
 
-      {/* Transient error toast (e.g. a cancel whose market data isn't loaded). */}
-      {toast ? (
-        <div
-          role="status"
-          className="pointer-events-none fixed bottom-6 left-1/2 z-[100] max-w-[90vw] -translate-x-1/2 rounded-md border border-negative/50 bg-surface px-4 py-2.5 text-center text-[12.5px] text-fg shadow-2xl"
-        >
-          {toast}
-        </div>
-      ) : null}
+      {/* Transient toast — bottom-right raised card, icon + title + detail. */}
+      {toast
+        ? (() => {
+            const kind = toast.startsWith("✓")
+              ? "ok"
+              : toast.startsWith("✗")
+                ? "err"
+                : toast.startsWith("⚠")
+                  ? "warn"
+                  : "info";
+            const body = toast.replace(/^[✓✗⚠]\s*/, "");
+            const color =
+              kind === "ok"
+                ? "#0ecb81"
+                : kind === "err"
+                  ? "#f6465d"
+                  : kind === "warn"
+                    ? "#e0a53f"
+                    : "var(--accent-trade)";
+            const Icon =
+              kind === "ok"
+                ? CheckCircle2
+                : kind === "err"
+                  ? XCircle
+                  : kind === "warn"
+                    ? AlertTriangle
+                    : Info;
+            const title =
+              kind === "ok"
+                ? "Done"
+                : kind === "err"
+                  ? "Failed"
+                  : kind === "warn"
+                    ? "Heads up"
+                    : "Notice";
+            return (
+              <div
+                role="status"
+                className="trade-modal-panel fixed bottom-5 right-5 z-[100] flex max-w-[360px] items-start gap-2.5 rounded-lg border border-line bg-surface-2 px-3.5 py-3 shadow-2xl shadow-black/50"
+              >
+                <Icon size={17} strokeWidth={2.25} style={{ color }} className="mt-px shrink-0" />
+                <div className="min-w-0">
+                  <div className="text-[12px] font-semibold" style={{ color }}>
+                    {title}
+                  </div>
+                  <div className="mt-0.5 break-words text-[12px] leading-snug text-fg-muted">
+                    {body}
+                  </div>
+                </div>
+              </div>
+            );
+          })()
+        : null}
     </div>
   );
 }

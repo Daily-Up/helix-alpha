@@ -1,59 +1,82 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
+import {
+  LayoutDashboard,
+  CandlestickChart,
+  Zap,
+  Newspaper,
+  Wallet,
+  LineChart,
+  Rss,
+  Lock,
+  LayoutGrid,
+  ArrowLeftRight,
+  Landmark,
+  Globe,
+  Plug,
+  Shapes,
+  GraduationCap,
+  Gauge,
+  Bot,
+  Clock,
+  Activity,
+  type LucideIcon,
+} from "lucide-react";
 import { isPublicMode } from "@/lib/public-mode";
+import { cn } from "@/components/ui/cn";
 
 interface NavItem {
   href: string;
   label: string;
+  icon: LucideIcon;
   /** Hidden from the sidebar when public-mode is on (judges, public viewers). */
   internal?: boolean;
 }
 
 // Trader-facing navigation. Four clear groups, no NEW/SOON/BETA badges.
-// Unfinished stubs (Pattern Library, Learnings, Calibration) and ops
-// surfaces (Agent Activity, Cron & Audit, System Health) are grouped
-// under "internal" and hidden on the public deploy — dev still sees them.
-// Asset Universe is demoted to a footer link (raw reference data).
 const NAV: Array<{ section: string; items: NavItem[] }> = [
   {
     section: "Trade",
     items: [
-      { href: "/app", label: "Dashboard" },
-      { href: "/trade", label: "Trade Terminal" },
-      { href: "/signals", label: "Live Signals" },
-      { href: "/briefing", label: "Daily Briefing" },
+      { href: "/app", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/trade", label: "Trade Terminal", icon: CandlestickChart },
+      { href: "/signals", label: "Live Signals", icon: Zap },
+      { href: "/briefing", label: "Daily Briefing", icon: Newspaper },
     ],
   },
   {
     section: "Portfolio",
     items: [
-      { href: "/portfolio", label: "Portfolio" },
-      { href: "/index-fund", label: "AlphaIndex" },
+      { href: "/portfolio", label: "Portfolio", icon: Wallet },
+      { href: "/index-fund", label: "AlphaIndex", icon: LineChart },
     ],
   },
   {
     section: "Markets",
     items: [
-      { href: "/events", label: "Event Stream" },
-      { href: "/unlocks", label: "Token Unlocks" },
-      { href: "/sectors", label: "Sector Rotation" },
-      { href: "/etfs", label: "ETF Flows" },
-      { href: "/treasuries", label: "Treasury Watch" },
-      { href: "/macro", label: "Macro Bridge" },
+      { href: "/events", label: "Event Stream", icon: Rss },
+      { href: "/unlocks", label: "Token Unlocks", icon: Lock },
+      { href: "/sectors", label: "Sector Rotation", icon: LayoutGrid },
+      { href: "/etfs", label: "ETF Flows", icon: ArrowLeftRight },
+      { href: "/treasuries", label: "Treasury Watch", icon: Landmark },
+      { href: "/macro", label: "Macro Bridge", icon: Globe },
     ],
   },
   {
     section: "Live Trading",
-    items: [{ href: "/settings/connect-sodex", label: "Connect SoDEX" }],
+    items: [{ href: "/settings/connect-sodex", label: "Connect SoDEX", icon: Plug }],
   },
   {
     section: "Internal",
     items: [
-      { href: "/patterns", label: "Pattern Library", internal: true },
-      { href: "/learnings", label: "Learnings", internal: true },
-      { href: "/calibration", label: "Calibration", internal: true },
-      { href: "/agents", label: "Agent Activity", internal: true },
-      { href: "/jobs", label: "Cron & Audit", internal: true },
-      { href: "/system-health", label: "System Health", internal: true },
+      { href: "/patterns", label: "Pattern Library", icon: Shapes, internal: true },
+      { href: "/learnings", label: "Learnings", icon: GraduationCap, internal: true },
+      { href: "/calibration", label: "Calibration", icon: Gauge, internal: true },
+      { href: "/agents", label: "Agent Activity", icon: Bot, internal: true },
+      { href: "/jobs", label: "Cron & Audit", icon: Clock, internal: true },
+      { href: "/system-health", label: "System Health", icon: Activity, internal: true },
     ],
   },
 ];
@@ -74,10 +97,13 @@ export function Sidebar() {
  */
 export function SidebarContent({ onNavigate }: { onNavigate?: () => void } = {}) {
   const publicMode = isPublicMode();
+  const pathname = usePathname() ?? "";
   const sections = NAV.map((section) => ({
     ...section,
     items: section.items.filter((item) => !(publicMode && item.internal)),
   })).filter((section) => section.items.length > 0);
+  const isActive = (href: string) =>
+    pathname === href || (href.length > 1 && pathname.startsWith(href + "/"));
   return (
     <>
       <Link
@@ -101,17 +127,38 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void } = {})
               {section.section}
             </div>
             <ul className="flex flex-col gap-0.5">
-              {section.items.map((item) => (
-                <li key={item.href}>
-                  <Link
-                    href={item.href}
-                    onClick={onNavigate}
-                    className="flex items-center rounded px-2 py-1.5 text-sm text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg"
-                  >
-                    <span>{item.label}</span>
-                  </Link>
-                </li>
-              ))}
+              {section.items.map((item) => {
+                const active = isActive(item.href);
+                const Icon = item.icon;
+                return (
+                  <li key={item.href}>
+                    <Link
+                      href={item.href}
+                      onClick={onNavigate}
+                      aria-current={active ? "page" : undefined}
+                      className={cn(
+                        "relative flex items-center gap-2.5 rounded-md py-1.5 pl-3 pr-2 text-sm transition-colors duration-150",
+                        active
+                          ? "bg-accent/10 font-medium text-accent-2"
+                          : "text-fg-muted hover:bg-surface-2 hover:text-fg",
+                      )}
+                    >
+                      {active ? (
+                        <span
+                          aria-hidden
+                          className="absolute left-0 top-1.5 bottom-1.5 w-[2px] rounded-full bg-accent"
+                        />
+                      ) : null}
+                      <Icon
+                        size={16}
+                        strokeWidth={active ? 2.25 : 1.9}
+                        className={cn("shrink-0", active ? "text-accent-2" : "text-fg-dim")}
+                      />
+                      <span className="truncate">{item.label}</span>
+                    </Link>
+                  </li>
+                );
+              })}
             </ul>
           </div>
         ))}

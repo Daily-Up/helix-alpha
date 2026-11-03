@@ -39,6 +39,15 @@ export function AccountPanel({
     : null;
   const marginRatio =
     equity != null && equity > 0 && used != null ? (used / equity) * 100 : null;
+  // Health colour: comfortable → caution → danger.
+  const ratioColor =
+    marginRatio == null
+      ? "#5f6b7a"
+      : marginRatio < 50
+        ? "#0ecb81"
+        : marginRatio < 80
+          ? "#e0a53f"
+          : "#f6465d";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto border-t border-line p-3">
@@ -64,20 +73,50 @@ export function AccountPanel({
           </Link>
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
-          <ARow label="Equity" value={money(equity)} />
-          <ARow label="Available" value={money(available)} />
-          <ARow label="Margin used" value={money(used)} />
-          <ARow
-            label="Margin ratio"
-            value={marginRatio != null ? `${marginRatio.toFixed(2)}%` : "—"}
-          />
-          <ARow
-            label="Unrealized PnL"
-            value={signedMoney(upnl)}
-            tone={upnl == null || upnl === 0 ? "default" : upnl > 0 ? "positive" : "negative"}
-            className="col-span-2"
-          />
+        <div className="flex flex-col gap-3">
+          {/* Equity — the headline figure. */}
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-fg-dim">
+              Equity
+            </div>
+            <div className="font-[var(--font-jetbrains-mono)] text-[22px] font-semibold leading-tight tabular-nums text-fg">
+              {money(equity)}
+            </div>
+          </div>
+          {/* The rest, two columns. */}
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">
+            <ARow label="Available" value={money(available)} />
+            <ARow label="Margin used" value={money(used)} />
+            <ARow
+              label="Unrealized PnL"
+              value={signedMoney(upnl)}
+              tone={upnl == null || upnl === 0 ? "default" : upnl > 0 ? "positive" : "negative"}
+              className="col-span-2"
+            />
+          </div>
+          {/* Margin ratio — progress bar, green → amber → red. */}
+          <div>
+            <div className="mb-1 flex items-center justify-between text-[10px]">
+              <span className="uppercase tracking-wider text-fg-dim">
+                Margin ratio
+              </span>
+              <span
+                className="font-[var(--font-jetbrains-mono)] tabular-nums"
+                style={{ color: ratioColor }}
+              >
+                {marginRatio != null ? `${marginRatio.toFixed(2)}%` : "—"}
+              </span>
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface">
+              <div
+                className="h-full rounded-full transition-all duration-300 ease-out"
+                style={{
+                  width: `${Math.min(100, Math.max(marginRatio ?? 0, marginRatio ? 2 : 0))}%`,
+                  backgroundColor: ratioColor,
+                }}
+              />
+            </div>
+          </div>
         </div>
       )}
     </div>

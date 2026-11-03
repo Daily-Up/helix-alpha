@@ -285,7 +285,7 @@ export function BottomPanel({
               key={t}
               onClick={() => setTab(t)}
               className={cn(
-                "flex shrink-0 items-center gap-1.5 whitespace-nowrap transition-colors",
+                "relative flex shrink-0 items-center gap-1.5 whitespace-nowrap transition-colors",
                 tab === t ? "font-medium text-fg" : "text-fg-dim hover:text-fg-muted",
               )}
             >
@@ -295,6 +295,14 @@ export function BottomPanel({
                   {counts[t]}
                 </span>
               ) : null}
+              <span
+                aria-hidden
+                className="absolute inset-x-0 -bottom-2 h-[2px] rounded-full transition-opacity duration-150"
+                style={{
+                  backgroundColor: "var(--accent-trade)",
+                  opacity: tab === t ? 1 : 0,
+                }}
+              />
             </button>
           ))}
         </div>
