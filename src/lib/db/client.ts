@@ -87,10 +87,80 @@ export function closeDb(): void {
 }
 
 /**
- * Apply schema.sql against the given client. Idempotent — every CREATE
- * uses IF NOT EXISTS, every ALTER is wrapped in a try/catch by the
- * caller. Used by tests building an in-memory client; production runs
- * the schema once via `ensureSchema()` below on first DB call.
+ * Split a SQL script into individual statements on top-level `;`, ignoring
+ * semicolons that live inside line comments (`-- …`), block comments or
+ * string / identifier literals (`'…'`, `"…"`). schema.sql has no triggers or
+ * BEGIN…END blocks, so a top-level `;` always ends a statement — but it is
+ * full of comments and string literals that contain semicolons (e.g.
+ * `-- Helix asset id ("tok-arb"); NULL if not in universe`), so a plain
+ * `split(";")` would shred real statements. Comments are dropped (replaced by
+ * whitespace); literals are copied through verbatim.
+ */
+function splitSqlStatements(src: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let i = 0;
+  const n = src.length;
+  while (i < n) {
+    const ch = src[i];
+    const next = src[i + 1];
+    // Line comment → drop to end of line, preserving the newline.
+    if (ch === "-" && next === "-") {
+      const eol = src.indexOf("\n", i);
+      i = eol === -1 ? n : eol;
+      cur += "\n";
+      continue;
+    }
+    // Block comment (covers both /* and /**) → drop, leave a space behind.
+    if (ch === "/" && next === "*") {
+      const end = src.indexOf("*/", i + 2);
+      i = end === -1 ? n : end + 2;
+      cur += " ";
+      continue;
+    }
+    // String literal or quoted identifier → copy verbatim, honouring the
+    // SQL doubled-quote escape ('' and "").
+    if (ch === "'" || ch === '"') {
+      const q = ch;
+      cur += ch;
+      i++;
+      while (i < n) {
+        if (src[i] === q) {
+          if (src[i + 1] === q) {
+            cur += q + q;
+            i += 2;
+            continue;
+          }
+          cur += q;
+          i++;
+          break;
+        }
+        cur += src[i];
+        i++;
+      }
+      continue;
+    }
+    // Top-level statement terminator.
+    if (ch === ";") {
+      const t = cur.trim();
+      if (t.length > 0) out.push(t);
+      cur = "";
+      i++;
+      continue;
+    }
+    cur += ch;
+    i++;
+  }
+  const tail = cur.trim();
+  if (tail.length > 0) out.push(tail);
+  return out;
+}
+
+/**
+ * Apply schema.sql against the given client. Idempotent and resilient: every
+ * statement runs on its own, so one failure can't block the rest. Used by
+ * tests building an in-memory client; production runs the schema once via
+ * `ensureSchema()` below on first DB call.
  */
 export async function bootstrapSchema(client: Client): Promise<void> {
   const schemaPath = resolve(process.cwd(), "src/lib/db/schema.sql");
@@ -98,9 +168,27 @@ export async function bootstrapSchema(client: Client): Promise<void> {
     throw new Error(`schema.sql not found at ${schemaPath}`);
   }
   const schemaSrc = readFileSync(schemaPath, "utf8");
-  // libSQL's executeMultiple runs an arbitrary script (CREATE statements
-  // separated by semicolons). Perfect fit for schema.sql.
-  await client.executeMultiple(schemaSrc);
+  // Run every statement INDEPENDENTLY so one failure can't block the rest.
+  // We used to call executeMultiple(), which runs the whole script as a single
+  // unit — so one error aborted the script and silently skipped every table
+  // after it. The classic trigger: `ALTER TABLE … ADD COLUMN` (SQLite has no
+  // "ADD COLUMN IF NOT EXISTS") throwing "duplicate column name" on an
+  // already-migrated DB, which used to skip macro_calibration, schema_version
+  // and equity_snapshots. CREATEs are already `IF NOT EXISTS`; the
+  // non-idempotent ADD COLUMNs throw a benign "duplicate column" we swallow.
+  const statements = splitSqlStatements(schemaSrc);
+  for (const sql of statements) {
+    try {
+      await client.execute(sql);
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      // Benign on a DB that already has this table/column — that's the whole
+      // point of an idempotent bootstrap. Anything else is worth surfacing,
+      // but it still must not stop the remaining statements.
+      if (/duplicate column name|already exists/i.test(msg)) continue;
+      console.warn(`[db] schema statement skipped: ${msg}`);
+    }
+  }
 }
 
 /**
