@@ -13,6 +13,7 @@ import Link from "next/link";
 import { cn } from "@/components/ui/cn";
 import { AssetLogo } from "@/components/ui/AssetLogo";
 import { TpSlModal, type TpSlMeta } from "./TpSlModal";
+import { CloseModal } from "./CloseModal";
 import {
   SodexSide,
   SodexOrderType,
@@ -174,6 +175,10 @@ export type TpSlCtx = {
   meta: Record<string, TpSlMeta>;
   /** Live mark price per symbol. */
   markBySymbol: Record<string, number>;
+  /** Selected market + its mid/last, for the Close modal's Mid/Last quick-fill. */
+  selSymbol: string | null;
+  selMid: number | null;
+  selLast: number | null;
   builderRate: number;
   busy: boolean;
   /** Placement is disabled until the SoDEX trigger payload fix is approved. */
@@ -221,8 +226,11 @@ export function BottomPanel({
   cancelBusy: boolean;
   /** Switch the terminal to a position's market (click the market name). */
   onSelectSymbol: (sodexSymbol: string) => void;
-  /** Close/limit-close a single position through the order ticket. */
-  onClosePosition: (position: Position, type: "market" | "limit") => void;
+  /** Close (or partially close) a position from the Close modal — reduce-only. */
+  onClosePosition: (
+    position: Position,
+    opts: { sizeBase: number; type: "market" | "limit"; limitPrice?: number },
+  ) => Promise<{ ok: boolean; error?: string }>;
   /** Market reduce-only close EVERY open position (through the live path). */
   onCloseAll: (positions: Position[]) => void;
   closeAllBusy: boolean;
@@ -485,12 +493,17 @@ function PositionsView({
   selectedSymbol: string | null;
   tpsl: TpSlCtx;
   onSelect: (sodexSymbol: string) => void;
-  onClose: (position: Position, type: "market" | "limit") => void;
+  onClose: (
+    position: Position,
+    opts: { sizeBase: number; type: "market" | "limit"; limitPrice?: number },
+  ) => Promise<{ ok: boolean; error?: string }>;
 }) {
-  // Open ⋯ menu + TP/SL modal state.
+  // Open ⋯ menu + TP/SL + Close modal state.
   const [menuRow, setMenuRow] = useState<string | null>(null);
   const [modal, setModal] = useState<{ pos: Position; focus: "tp" | "sl" } | null>(null);
   const openModal = (pos: Position, focus: "tp" | "sl") => setModal({ pos, focus });
+  const [closeModal, setCloseModal] = useState<{ pos: Position; limit: boolean } | null>(null);
+  const openClose = (pos: Position, limit: boolean) => setCloseModal({ pos, limit });
   const HEAD = [
     "Market",
     "Amount",
@@ -659,9 +672,9 @@ function PositionsView({
             {/* Close (×) + ⋯ menu (Set TP/SL · Limit close) */}
             <span className="relative flex items-center justify-end gap-1">
               <button
-                onClick={() => onClose(p, "market")}
+                onClick={() => openClose(p, false)}
                 className="rounded border border-negative/50 px-1.5 text-[12px] leading-5 text-negative transition-colors hover:bg-negative/10"
-                title="Market close (reduce-only, full size)"
+                title="Close position (reduce-only)"
               >
                 ×
               </button>
@@ -687,7 +700,7 @@ function PositionsView({
                     </button>
                     <button
                       onClick={() => {
-                        onClose(p, "limit");
+                        openClose(p, true);
                         setMenuRow(null);
                       }}
                       className="block w-full px-3 py-1.5 text-left text-[11px] text-fg-muted hover:bg-surface-2 hover:text-fg"
@@ -713,6 +726,27 @@ function PositionsView({
           busy={tpsl.busy}
           onSet={tpsl.onSet}
           onClose={() => setModal(null)}
+        />
+      ) : null}
+      {closeModal ? (
+        <CloseModal
+          position={closeModal.pos}
+          meta={tpsl.meta[(closeModal.pos.s ?? "").toUpperCase()] ?? null}
+          mark={tpsl.markBySymbol[(closeModal.pos.s ?? "").toUpperCase()] ?? null}
+          mid={
+            closeModal.pos.s.toUpperCase() === (tpsl.selSymbol ?? "").toUpperCase()
+              ? tpsl.selMid
+              : null
+          }
+          last={
+            closeModal.pos.s.toUpperCase() === (tpsl.selSymbol ?? "").toUpperCase()
+              ? tpsl.selLast
+              : null
+          }
+          builderRate={tpsl.builderRate}
+          limitDefault={closeModal.limit}
+          onSubmit={onClose}
+          onClose={() => setCloseModal(null)}
         />
       ) : null}
     </div>

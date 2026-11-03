@@ -183,14 +183,6 @@ export function TradeTerminal({
       .getElementById("terminal-ticket")
       ?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
-  // Close-position intent handed to the order ticket (opposite side, full size,
-  // reduce-only). Market opens the inline confirm; limit just prefills.
-  const [closeIntent, setCloseIntent] = useState<{
-    side: "buy" | "sell";
-    sizeBase: number;
-    type: "market" | "limit";
-    seq: number;
-  } | null>(null);
 
   // 1s clock for the funding countdown.
   useEffect(() => {
@@ -457,22 +449,6 @@ export function TradeTerminal({
     [assets],
   );
 
-  // Close a position through the ticket: opposite side, full size, reduce-only.
-  const onClosePosition = useCallback(
-    (pos: SodexPerpsAccountState["P"][number], type: "market" | "limit") => {
-      const sz = Number(pos.sz);
-      if (!sz) return;
-      onSelectSymbol(pos.s); // move the ticket to the position's market first
-      setCloseIntent((prev) => ({
-        side: sz > 0 ? "sell" : "buy", // opposite side closes
-        sizeBase: Math.abs(sz),
-        type,
-        seq: (prev?.seq ?? 0) + 1,
-      }));
-    },
-    [onSelectSymbol],
-  );
-
   // Bottom-panel height: load persisted, drag to resize, persist on release.
   const bottomHRef = useRef(DEFAULT_BOTTOM);
   const draggingBottom = useRef(false);
@@ -563,6 +539,69 @@ export function TradeTerminal({
     for (const [sym, meta] of Object.entries(symbolMeta)) m[sym] = meta.tickSize;
     return m;
   }, [symbolMeta]);
+
+  // Close (or partially close) a position from the Close modal: a reduce-only
+  // order on the opposite side, through the existing placeLiveOrder path (no
+  // signing change). Size is in base units; we pass the USD notional the path
+  // expects (base × price). Result is surfaced as a toast, positions re-synced.
+  const onClosePosition = useCallback(
+    async (
+      pos: SodexPerpsAccountState["P"][number],
+      opts: { sizeBase: number; type: "market" | "limit"; limitPrice?: number },
+    ): Promise<{ ok: boolean; error?: string }> => {
+      const key = readLocalKey("mainnet");
+      if (!key) {
+        showToast("Connect a SoDEX key first.");
+        return { ok: false, error: "Connect a SoDEX key first." };
+      }
+      const sz = Number(pos.sz);
+      if (!sz || !(opts.sizeBase > 0)) {
+        return { ok: false, error: "Nothing to close." };
+      }
+      const mk = markBySymbol[pos.s.toUpperCase()] ?? Number(pos.ep);
+      const px =
+        opts.type === "limit" && opts.limitPrice ? opts.limitPrice : mk;
+      let resultMsg: string | null = null;
+      await placeLiveOrder({
+        network: "mainnet",
+        signal: {
+          signal_id: `close-${pos.s}-${Date.now().toString(36)}`,
+          symbol: pos.s,
+          side: sz > 0 ? "sell" : "buy", // opposite side closes
+          price_usd: px,
+        },
+        identityAddress: key.address ?? null,
+        connectedMaster,
+        sizeInput: String(opts.sizeBase * px),
+        stopInput: "",
+        targetInput: "",
+        orderType: opts.type === "limit" ? "LIMIT" : "MARKET",
+        limitPrice: opts.type === "limit" ? opts.limitPrice : undefined,
+        timeInForce: opts.type === "limit" ? "GTC" : undefined,
+        reduceOnly: true,
+        setMsg: (m) => {
+          resultMsg = m;
+        },
+        setBusy: () => {},
+        setConfirming: () => {},
+        setTradesToday: () => {},
+      });
+      refreshAccount();
+      refreshOpenOrders();
+      bumpHistory();
+      if (resultMsg) showToast(resultMsg);
+      const ok = !resultMsg || !(resultMsg as string).startsWith("✗");
+      return { ok, error: ok ? undefined : (resultMsg ?? "Close failed.") };
+    },
+    [
+      markBySymbol,
+      connectedMaster,
+      refreshAccount,
+      refreshOpenOrders,
+      bumpHistory,
+      showToast,
+    ],
+  );
 
   // Close ALL positions — a market reduce-only close for each, through the same
   // live path as a single close (no signing changes). The local API key signs;
@@ -816,24 +855,37 @@ export function TradeTerminal({
     [account?.aid, symbolMeta, refreshOpenOrders, verifyOrderGone, showToast],
   );
 
-  const tpslCtx = useMemo(
-    () => ({
-      meta: symbolMeta,
-      markBySymbol,
-      builderRate,
-      busy: tpslBusy,
-      placementEnabled: TPSL_PLACEMENT_ENABLED,
-      onSet: onSetTpSl,
-      onRemove: onRemoveTrigger,
-    }),
-    [symbolMeta, markBySymbol, builderRate, tpslBusy, onSetTpSl, onRemoveTrigger],
-  );
   const oracle = num(ticker?.indexPrice);
   const lastPrice = num(ticker?.lastPx);
   const bestBid = bids[0] ? Number(bids[0].price) : null;
   const bestAsk = asks[0] ? Number(asks[0].price) : null;
   const midPrice =
     bestBid != null && bestAsk != null ? (bestBid + bestAsk) / 2 : mark;
+  const tpslCtx = useMemo(
+    () => ({
+      meta: symbolMeta,
+      markBySymbol,
+      selSymbol: sodexSymbol,
+      selMid: midPrice ?? null,
+      selLast: lastPrice ?? null,
+      builderRate,
+      busy: tpslBusy,
+      placementEnabled: TPSL_PLACEMENT_ENABLED,
+      onSet: onSetTpSl,
+      onRemove: onRemoveTrigger,
+    }),
+    [
+      symbolMeta,
+      markBySymbol,
+      sodexSymbol,
+      midPrice,
+      lastPrice,
+      builderRate,
+      tpslBusy,
+      onSetTpSl,
+      onRemoveTrigger,
+    ],
+  );
   const changeAbs = num(ticker?.change);
   const changePct = ticker?.changePct ?? null;
   const up = (changePct ?? 0) >= 0;
@@ -1164,7 +1216,6 @@ export function TradeTerminal({
               limitFill={limitFill}
               account={account}
               sideFill={sideFill}
-              closeIntent={closeIntent}
               onPlaced={() => {
                 refreshAccount();
                 refreshOpenOrders();
