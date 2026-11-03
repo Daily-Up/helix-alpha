@@ -357,8 +357,18 @@ export async function placeLiveOrder(args: PlaceLiveOrderArgs): Promise<void> {
         if (failed.length) bracket += ` · ⚠ ${failed.join("; ")}`;
       }
 
+      const verb = reduceOnly
+        ? "Closed"
+        : signal.side.toLowerCase() === "buy"
+          ? "Bought"
+          : "Sold";
+      const sizeStr = sizeUsd.toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+      const mkt = fmtSodexSymbol(signal.symbol).replace(/-USDC?$/i, "-PERP");
       setMsg(
-        `✓ ${signal.side.toUpperCase()} $${sizeUsd} ${fmtSodexSymbol(signal.symbol)} on ${SODEX_NETWORKS[network].label}${bracket}`,
+        `✓ ${verb} $${sizeStr} ${mkt} on ${SODEX_NETWORKS[network].label}${bracket}`,
       );
     } catch (err) {
       const errMsg = (err as Error).message;
