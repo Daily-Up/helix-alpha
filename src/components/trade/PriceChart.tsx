@@ -387,66 +387,61 @@ export function PriceChart({
         }),
       );
     const px = (n: number) => fmt(n, decimalsFromTick(tickSize));
+
+    // Candle price range (the autoscale target). Any TP/SL/liq/order line OUTSIDE
+    // this range is NOT drawn as a price line — it becomes an edge marker on the
+    // price axis instead, so the scale is never stretched to fit it.
+    let cMax = -Infinity;
+    let cMin = Infinity;
+    for (const c of candles) {
+      if (c.high > cMax) cMax = c.high;
+      if (c.low < cMin) cMin = c.low;
+    }
+    const hasRange = Number.isFinite(cMax) && Number.isFinite(cMin);
+    const out: { text: string; color: string; dir: "up" | "down" }[] = [];
+    const place = (
+      price: number,
+      color: string,
+      style: number,
+      lineTitle: string,
+      edgeLabel: string,
+    ) => {
+      if (!hasRange || (price >= cMin && price <= cMax)) {
+        add(price, color, style, lineTitle);
+      } else if (price > cMax) {
+        out.push({ text: `${edgeLabel} ↑`, color, dir: "up" });
+      } else {
+        out.push({ text: `${edgeLabel} ↓`, color, dir: "down" });
+      }
+    };
+
+    // Entry stays a price line (the autoscale nudges it into view when within
+    // ~5%). TP / SL / Liq / orders follow the same edge-or-line rule.
     if (positionEntry != null && positionEntry > 0)
       add(positionEntry, NEUTRAL, 0, "Entry");
     if (positionLiq != null && positionLiq > 0)
-      add(positionLiq, DOWN, 2, "Liq");
-    if (tpPrice != null && tpPrice > 0) add(tpPrice, UP, 2, `TP ${px(tpPrice)}`);
+      place(positionLiq, DOWN, 2, "Liq", `Liq ${px(positionLiq)}`);
+    if (tpPrice != null && tpPrice > 0)
+      place(tpPrice, UP, 2, `TP ${px(tpPrice)}`, `TP ${px(tpPrice)}`);
     if (slPrice != null && slPrice > 0)
-      add(slPrice, DOWN, 2, `SL ${px(slPrice)}`);
+      place(slPrice, DOWN, 2, `SL ${px(slPrice)}`, `SL ${px(slPrice)}`);
     for (const o of orderLines ?? []) {
-      add(
-        o.price,
-        o.side === "buy" ? UP : DOWN,
-        1,
-        `${o.side === "buy" ? "Buy" : "Sell"} ${o.size}`,
-      );
+      const label = o.side === "buy" ? "Buy" : "Sell";
+      place(o.price, o.side === "buy" ? UP : DOWN, 1, `${label} ${o.size}`, `${label} ${px(o.price)}`);
     }
-    // Autoscale may nudge to include entry (within ~5%); recompute the scale.
+
     entryRef.current = positionEntry != null && positionEntry > 0 ? positionEntry : null;
     try {
       series.priceScale().applyOptions({ autoScale: true });
     } catch {
       /* no-op */
     }
-
-    // Edge markers for lines outside the visible price range. priceToCoordinate
-    // gives a y in [0,height] when visible, else above (<0) or below (>height).
-    const computeEdges = () => {
-      const s = candleRef.current;
-      const el = containerRef.current;
-      if (!s || !el) return;
-      const h = el.clientHeight;
-      const items: { price: number; text: string; color: string }[] = [];
-      if (tpPrice != null && tpPrice > 0)
-        items.push({ price: tpPrice, text: `TP ${px(tpPrice)}`, color: UP });
-      if (slPrice != null && slPrice > 0)
-        items.push({ price: slPrice, text: `SL ${px(slPrice)}`, color: DOWN });
-      if (positionLiq != null && positionLiq > 0)
-        items.push({ price: positionLiq, text: `Liq ${px(positionLiq)}`, color: DOWN });
-      for (const o of orderLines ?? [])
-        items.push({
-          price: o.price,
-          text: `${o.side === "buy" ? "Buy" : "Sell"} ${px(o.price)}`,
-          color: o.side === "buy" ? UP : DOWN,
-        });
-      const out: { text: string; color: string; dir: "up" | "down" }[] = [];
-      for (const it of items) {
-        const y = s.priceToCoordinate(it.price);
-        if (y == null) continue;
-        if (y < 0) out.push({ text: `${it.text} ↑`, color: it.color, dir: "up" });
-        else if (y > h) out.push({ text: `${it.text} ↓`, color: it.color, dir: "down" });
-      }
-      setEdges((prev) =>
-        prev.length === out.length &&
-        prev.every((p, i) => p.text === out[i].text && p.dir === out[i].dir)
-          ? prev
-          : out,
-      );
-    };
-    computeEdges();
-    const t = setInterval(computeEdges, 400);
-    return () => clearInterval(t);
+    setEdges((prev) =>
+      prev.length === out.length &&
+      prev.every((p, i) => p.text === out[i].text && p.dir === out[i].dir)
+        ? prev
+        : out,
+    );
   }, [
     ready,
     positionEntry,
@@ -535,7 +530,7 @@ export function PriceChart({
           </div>
         ) : null}
         {edges.some((e) => e.dir === "down") ? (
-          <div className="pointer-events-none absolute bottom-1 right-[60px] z-10 flex flex-col items-end gap-0.5">
+          <div className="pointer-events-none absolute bottom-[28px] right-[60px] z-10 flex flex-col items-end gap-0.5">
             {edges
               .filter((e) => e.dir === "down")
               .map((e, i) => (

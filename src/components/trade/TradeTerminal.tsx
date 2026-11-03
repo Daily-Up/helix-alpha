@@ -168,6 +168,9 @@ export function TradeTerminal({
     if (toastTimer.current) clearTimeout(toastTimer.current);
   }, []);
   const [bottomH, setBottomH] = useState(DEFAULT_BOTTOM);
+  // Until the user drags the divider, the panel height auto-fits the active
+  // tab's rows (min ~3 rows, max the usual cap); a dragged height then wins.
+  const [userDraggedBottom, setUserDraggedBottom] = useState(false);
   const [sideFill, setSideFill] = useState<{
     side: "buy" | "sell";
     seq: number;
@@ -480,6 +483,7 @@ export function TradeTerminal({
         const h = clampBottom(Number(s));
         setBottomH(h);
         bottomHRef.current = h;
+        setUserDraggedBottom(true); // a saved height is a user choice
       }
     } catch {
       /* ignore */
@@ -495,6 +499,7 @@ export function TradeTerminal({
     const onUp = () => {
       if (!draggingBottom.current) return;
       draggingBottom.current = false;
+      setUserDraggedBottom(true); // the dragged height now wins over auto-fit
       document.body.style.userSelect = "";
       try {
         window.localStorage.setItem(
@@ -517,6 +522,25 @@ export function TradeTerminal({
     draggingBottom.current = true;
     document.body.style.userSelect = "none";
   };
+
+  // Auto-fit height for the active tab: header + rows, min ~3 rows, max the cap.
+  // Positions/Open Orders fit their row count; the (long) history/funding tabs
+  // take the max. Applied only while the user hasn't dragged the divider.
+  const activeRowCount =
+    bottomTab === "Positions"
+      ? (account?.P ?? []).filter((p) => Number(p.sz) !== 0).length
+      : bottomTab === "Open Orders"
+        ? openOrders.length
+        : 999; // Trade/Order History, Closed Positions, Funding → long lists
+  const BOTTOM_HEADER_PX = 72;
+  const BOTTOM_ROW_PX = 34;
+  const fitBottomH = clampBottom(
+    BOTTOM_HEADER_PX + Math.max(3, activeRowCount) * BOTTOM_ROW_PX,
+  );
+  useEffect(() => {
+    if (userDraggedBottom) return;
+    setBottomH(fitBottomH);
+  }, [fitBottomH, userDraggedBottom]);
 
   // Mark = perp mark price, else last. Everything anchors to this.
   const mark = num(ticker?.markPrice) ?? num(ticker?.lastPx);
