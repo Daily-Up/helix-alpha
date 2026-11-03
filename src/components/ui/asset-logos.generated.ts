@@ -154,4 +154,13 @@ export const ASSET_LOGO_FILES: Record<string, string> = {
   "brentoil": "oildrop.svg",
   "copper": "copper.svg",
   "dram": "dram.svg",
+  "cxmt": "cxmt.svg",
+  "lite": "lite.svg",
+  "mrvl": "mrvl.svg",
+  "nbis": "nbis.svg",
+  "niulai": "niulai.svg",
+  "skhx": "skhx.svg",
+  "skhy": "skhy.svg",
+  "unitree": "unitree.svg",
+  "zhipu": "zhipu.svg",
 };
