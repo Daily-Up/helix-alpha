@@ -622,6 +622,21 @@ export async function placeOrderBatch(opts: {
     ? { id: builder.id, fee: builder.fee }
     : null;
 
+  // SoDEX's gateway expects decimal strings in MINIMAL form — trailing zeros
+  // (and a trailing dot) stripped — and its OWN web client normalizes every
+  // price/quantity/funds/stopPrice this way before signing (reverse-engineered
+  // from testnet.sodex.com's bundle: fn `nme`). A value already minimal
+  // ("85000", "0.009", "204.31") is returned unchanged, so the working
+  // MARKET/LIMIT payloads stay byte-identical; a padded "1200.00" → "1200" is
+  // the fix for the trigger the gateway rejected as "stopPrice is invalid".
+  const dec = (v: string): string => {
+    if (!v.includes(".")) return v;
+    let end = v.length;
+    while (end > 0 && v[end - 1] === "0") end--;
+    if (end > 0 && v[end - 1] === ".") end--;
+    return v.slice(0, end);
+  };
+
   // SPOT batches to /trade/orders/batch with the "batchNewOrder" action.
   // PERPS expose only /trade/orders and expect a SINGLE FLAT order
   // ("NewOrderParams") — a batch body fails with
@@ -650,10 +665,10 @@ export async function placeOrderBatch(opts: {
     order.side = first.side;
     order.type = first.type;
     order.timeInForce = first.timeInForce;
-    if (first.price != null) order.price = first.price;
-    if (first.quantity != null) order.quantity = first.quantity;
-    if (first.funds != null) order.funds = first.funds;
-    if (first.stopPrice != null) order.stopPrice = first.stopPrice;
+    if (first.price != null) order.price = dec(first.price);
+    if (first.quantity != null) order.quantity = dec(first.quantity);
+    if (first.funds != null) order.funds = dec(first.funds);
+    if (first.stopPrice != null) order.stopPrice = dec(first.stopPrice);
     if (first.stopType != null) order.stopType = first.stopType;
     if (first.triggerType != null) order.triggerType = first.triggerType;
     order.reduceOnly = first.reduceOnly ?? false;
