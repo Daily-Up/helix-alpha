@@ -70,7 +70,6 @@ export function ExecuteLiveButton({ signal }: Props) {
     `0x${string}` | null
   >(null);
   const [keyExpiry, setKeyExpiry] = useState<KeyExpiry | null>(null);
-  const [maxDaily, setMaxDaily] = useState(3);
   const [tradesToday, setTradesToday] = useState(0);
   // Editable order params — pre-filled from the signal, then user-adjustable
   // in the confirm panel. Strings so the inputs can be cleared/typed freely.
@@ -98,7 +97,6 @@ export function ExecuteLiveButton({ signal }: Props) {
         ? prev
         : String(signal.suggested_size_usd || limits.maxPositionUsd || 11),
     );
-    setMaxDaily(limits.maxDailyTrades);
     setTradesToday(readTradesToday(network));
   }, [network, connectedMaster, signal.suggested_size_usd]);
 
@@ -110,20 +108,11 @@ export function ExecuteLiveButton({ signal }: Props) {
   const [confirming, setConfirming] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
-  // Step 1 — validate limits, then reveal the confirm panel. No signing
-  // or network call happens here.
+  // Step 1 — reveal the confirm panel. No signing or network call happens here.
   const requestExecute = useCallback(() => {
-    const limits = readSafetyLimits(network);
-    const used = readTradesToday(network);
-    if (used >= limits.maxDailyTrades) {
-      setMsg(
-        `✗ Daily live-trade limit reached (${used}/${limits.maxDailyTrades}). Resets 00:00 UTC — or raise it on /settings/connect-sodex.`,
-      );
-      return;
-    }
     setMsg(null);
     setConfirming(true);
-  }, [network]);
+  }, []);
 
   // Step 2 — the real thing. Delegates to the extracted placeLiveOrder
   // (commit 3a). Args are read here when Confirm is clicked (same deps as
@@ -278,7 +267,7 @@ export function ExecuteLiveButton({ signal }: Props) {
       ) : null}
       {!confirming && tradesToday > 0 ? (
         <span className="text-[10px] text-fg-dim">
-          {tradesToday}/{maxDaily} live trades today
+          {tradesToday} live {tradesToday === 1 ? "trade" : "trades"} today
         </span>
       ) : null}
       {!confirming && keyExpiry?.state === "expiring" ? (

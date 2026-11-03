@@ -18,9 +18,7 @@ import {
 } from "./client";
 import {
   readLocalKey,
-  readSafetyLimits,
   writeLocalKey,
-  readTradesToday,
   recordTradeToday,
   SODEX_MIN_NOTIONAL_USD,
 } from "./local-keys";
@@ -92,7 +90,6 @@ export async function placeLiveOrder(args: PlaceLiveOrderArgs): Promise<void> {
       setConfirming(false);
       return;
     }
-    const limits = readSafetyLimits(network);
     // Size the user typed in the confirm panel (pre-filled from the signal).
     const sizeUsd = Number.parseFloat(sizeInput);
     if (!Number.isFinite(sizeUsd) || sizeUsd < SODEX_MIN_NOTIONAL_USD) {
@@ -107,11 +104,6 @@ export async function placeLiveOrder(args: PlaceLiveOrderArgs): Promise<void> {
       (!Number.isFinite(limitPrice as number) || (limitPrice as number) <= 0)
     ) {
       setMsg("✗ Enter a valid limit price.");
-      setConfirming(false);
-      return;
-    }
-    if (readTradesToday(network) >= limits.maxDailyTrades) {
-      setMsg(`✗ Daily live-trade limit reached (${limits.maxDailyTrades}).`);
       setConfirming(false);
       return;
     }
