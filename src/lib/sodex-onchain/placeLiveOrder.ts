@@ -92,7 +92,14 @@ export async function placeLiveOrder(args: PlaceLiveOrderArgs): Promise<void> {
     }
     // Size the user typed in the confirm panel (pre-filled from the signal).
     const sizeUsd = Number.parseFloat(sizeInput);
-    if (!Number.isFinite(sizeUsd) || sizeUsd < SODEX_MIN_NOTIONAL_USD) {
+    if (!Number.isFinite(sizeUsd) || sizeUsd <= 0) {
+      setMsg("✗ Enter a size.");
+      setConfirming(false);
+      return;
+    }
+    // Opening/adding must clear SoDEX's ~$min notional; a reduce-only close may
+    // be ANY size down to dust — you must always be able to close a position.
+    if (!reduceOnly && sizeUsd < SODEX_MIN_NOTIONAL_USD) {
       setMsg(
         `✗ Size must be at least SoDEX's ~$${SODEX_MIN_NOTIONAL_USD} minimum.`,
       );
