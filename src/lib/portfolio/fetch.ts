@@ -161,13 +161,20 @@ export interface EquityComposition {
 }
 
 /** Perps equity = `av`; spot equity = Σ holding × price; totals + uPnL. The
- *  one derivation both the snapshot route and the overview card rely on. */
+ *  one derivation both the snapshot route and the overview card rely on.
+ *
+ *  Errors propagate (not swallowed): a transient SoDEX failure must NOT be
+ *  recorded as a $0 snapshot — that would carve a false dip into the equity
+ *  curve. The caller (route) 502s and skips the insert; the client keeps its
+ *  last-good values. A genuinely empty account is different: a spot-only wallet
+ *  gets the perps aid:0 zero-state (av:"0") and a perps-only wallet gets empty
+ *  spot balances — both succeed, so both are recorded truthfully. */
 export async function computeEquityComposition(
   address: string,
 ): Promise<EquityComposition> {
   const [state, balances, prices] = await Promise.all([
-    fetchPerpsState(address).catch(() => null),
-    fetchSpotBalances(address).catch(() => [] as SpotBalance[]),
+    fetchPerpsState(address),
+    fetchSpotBalances(address),
     fetchPriceContext(),
   ]);
 
