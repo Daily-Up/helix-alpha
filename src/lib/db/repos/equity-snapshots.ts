@@ -33,7 +33,34 @@ export interface NewEquitySnapshot {
  *  one account's curve across two rows. */
 const norm = (a: string) => a.trim().toLowerCase();
 
+// The global schema bootstrap (client.ts) runs the whole schema.sql as one
+// script and is best-effort: on a Turso DB that already diverges from it, an
+// early statement can throw and abort the rest, so a table appended at the end
+// of schema.sql may never be created. This repo therefore self-heals its own
+// table with a targeted idempotent DDL before first use.
+let _ensured = false;
+async function ensureTable(): Promise<void> {
+  if (_ensured) return;
+  await run(
+    `CREATE TABLE IF NOT EXISTS equity_snapshots (
+       id            INTEGER PRIMARY KEY AUTOINCREMENT,
+       address       TEXT    NOT NULL,
+       ts            INTEGER NOT NULL,
+       perps_equity  REAL    NOT NULL,
+       spot_equity   REAL    NOT NULL,
+       total_equity  REAL    NOT NULL,
+       perps_upnl    REAL,
+       spot_upnl     REAL
+     )`,
+  );
+  await run(
+    `CREATE INDEX IF NOT EXISTS idx_equity_snap_addr_ts ON equity_snapshots(address, ts)`,
+  );
+  _ensured = true;
+}
+
 export async function insert(row: NewEquitySnapshot): Promise<void> {
+  await ensureTable();
   await run(
     `INSERT INTO equity_snapshots
        (address, ts, perps_equity, spot_equity, total_equity, perps_upnl, spot_upnl)
@@ -54,6 +81,7 @@ export async function insert(row: NewEquitySnapshot): Promise<void> {
 export async function latest(
   address: string,
 ): Promise<EquitySnapshotRow | undefined> {
+  await ensureTable();
   return get<EquitySnapshotRow>(
     `SELECT * FROM equity_snapshots WHERE address = ? ORDER BY ts DESC LIMIT 1`,
     [norm(address)],
@@ -64,6 +92,7 @@ export async function latest(
 export async function earliest(
   address: string,
 ): Promise<EquitySnapshotRow | undefined> {
+  await ensureTable();
   return get<EquitySnapshotRow>(
     `SELECT * FROM equity_snapshots WHERE address = ? ORDER BY ts ASC LIMIT 1`,
     [norm(address)],
@@ -75,6 +104,7 @@ export async function series(
   address: string,
   sinceMs: number,
 ): Promise<EquitySnapshotRow[]> {
+  await ensureTable();
   return all<EquitySnapshotRow>(
     `SELECT * FROM equity_snapshots
      WHERE address = ? AND ts >= ?
@@ -86,6 +116,7 @@ export async function series(
 /** Distinct addresses with any snapshot in the window — for the daily cron
  *  backstop to know which recently-active accounts to re-snapshot. */
 export async function activeAddresses(sinceMs: number): Promise<string[]> {
+  await ensureTable();
   const rows = await all<{ address: string }>(
     `SELECT DISTINCT address FROM equity_snapshots WHERE ts >= ?`,
     [sinceMs],
