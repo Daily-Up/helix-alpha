@@ -87,6 +87,7 @@ export function OrderPanel({
   account,
   sideFill,
   closeIntent,
+  onPlaced,
 }: {
   symbol: string;
   sodexSymbol: string;
@@ -104,6 +105,10 @@ export function OrderPanel({
     type: "market" | "limit";
     seq: number;
   } | null;
+  /** Fired after any order attempt resolves so the parent re-syncs positions
+   *  and open orders from SoDEX (an unconfirmed/partial fill must show truth,
+   *  not wait for the 5s poll). */
+  onPlaced?: () => void;
 }) {
   const tm = useTradeMode(NETWORK);
   const { address: connectedMaster } = useAccount();
@@ -312,29 +317,35 @@ export function OrderPanel({
   };
 
   const execute = useCallback(async () => {
-    await placeLiveOrder({
-      network: NETWORK,
-      signal: {
-        signal_id: `terminal-${sodexSymbol}-${Date.now().toString(36)}`,
-        symbol: sodexSymbol,
-        side,
-        price_usd: (type === "limit" ? roundedLimit : markPrice) ?? 0,
-      },
-      identityAddress: readLocalKey(NETWORK)?.address ?? null,
-      connectedMaster,
-      sizeInput: String(sizeUsd),
-      stopInput: type === "market" && tpsl ? stopInput : "",
-      targetInput: type === "market" && tpsl ? targetInput : "",
-      orderType: type === "limit" ? "LIMIT" : "MARKET",
-      limitPrice: type === "limit" ? roundedLimit : undefined,
-      timeInForce:
-        type === "limit" ? (postOnly ? "POST_ONLY" : "GTC") : undefined,
-      reduceOnly,
-      setMsg,
-      setBusy,
-      setConfirming,
-      setTradesToday,
-    });
+    try {
+      await placeLiveOrder({
+        network: NETWORK,
+        signal: {
+          signal_id: `terminal-${sodexSymbol}-${Date.now().toString(36)}`,
+          symbol: sodexSymbol,
+          side,
+          price_usd: (type === "limit" ? roundedLimit : markPrice) ?? 0,
+        },
+        identityAddress: readLocalKey(NETWORK)?.address ?? null,
+        connectedMaster,
+        sizeInput: String(sizeUsd),
+        stopInput: type === "market" && tpsl ? stopInput : "",
+        targetInput: type === "market" && tpsl ? targetInput : "",
+        orderType: type === "limit" ? "LIMIT" : "MARKET",
+        limitPrice: type === "limit" ? roundedLimit : undefined,
+        timeInForce:
+          type === "limit" ? (postOnly ? "POST_ONLY" : "GTC") : undefined,
+        reduceOnly,
+        setMsg,
+        setBusy,
+        setConfirming,
+        setTradesToday,
+      });
+    } finally {
+      // Always re-sync from SoDEX after an attempt — success, partial, rejected
+      // or unconfirmed — so positions and open orders reflect the exchange.
+      onPlaced?.();
+    }
   }, [
     sodexSymbol,
     side,
@@ -348,6 +359,7 @@ export function OrderPanel({
     stopInput,
     targetInput,
     postOnly,
+    onPlaced,
   ]);
 
   const sideColor = isLong ? LONG : SHORT;

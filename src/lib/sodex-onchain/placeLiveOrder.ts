@@ -10,6 +10,7 @@
 import { SODEX_NETWORKS, type SodexNetwork } from "./chains";
 import {
   placeOrderBatch,
+  classifyOrderResult,
   getAccountState,
   getPerpsAccountState,
   resolveSymbol,
@@ -267,6 +268,14 @@ export async function placeLiveOrder(args: PlaceLiveOrderArgs): Promise<void> {
         },
       });
 
+      // A rejected entry already threw. An UNCONFIRMED one (no clear success or
+      // error) is neither: never claim it filled OR failed — point the trader at
+      // their positions, which the UI reads straight from SoDEX.
+      if (classifyOrderResult(sodexResp).status === "unconfirmed") {
+        setMsg("⚠ Order status unconfirmed — check your positions on SoDEX.");
+        return;
+      }
+
       const sodexOrderId =
         (sodexResp as { orderID?: string })?.orderID ?? clOrdID;
 
@@ -303,7 +312,7 @@ export async function placeLiveOrder(args: PlaceLiveOrderArgs): Promise<void> {
           const clid = `helix-${tag}${Date.now().toString(36)}${Math.random()
             .toString(36)
             .slice(2, 4)}`.slice(0, 36);
-          await placeOrderBatch({
+          const resp = await placeOrderBatch({
             network,
             apiKeyName: key.name || undefined,
             privateKey: key.privateKey,
@@ -328,18 +337,28 @@ export async function placeLiveOrder(args: PlaceLiveOrderArgs): Promise<void> {
               ],
             },
           });
+          // A rejected leg already threw inside placeOrderBatch; here it is
+          // either accepted or genuinely unconfirmed.
+          return classifyOrderResult(resp).status;
         };
+        // The entry already filled, so a bracket leg that is rejected or
+        // unconfirmed is NOT a failed order — surfacing it as "failed" would
+        // tempt a retry that doubles the position. Placed legs render as
+        // "SL 5%"; a rejection as "✗ SL rejected: <SoDEX reason>"; an
+        // unconfirmed leg points the trader at their positions.
         const placed: string[] = [];
-        const failed: string[] = [];
+        const issues: string[] = [];
         if (Number.isFinite(stopPct) && stopPct > 0) {
           const trig = isBuy
             ? referencePrice * (1 - stopPct / 100)
             : referencePrice * (1 + stopPct / 100);
           try {
-            await placeStop("sl", trig, 1);
-            placed.push(`SL ${stopPct}%`);
+            const st = await placeStop("sl", trig, 1);
+            if (st === "unconfirmed")
+              issues.push("⚠ SL unconfirmed — check positions");
+            else placed.push(`SL ${stopPct}%`);
           } catch (e) {
-            failed.push(`SL: ${(e as Error).message}`);
+            issues.push(`✗ SL rejected: ${(e as Error).message}`);
           }
         }
         if (Number.isFinite(targetPct) && targetPct > 0) {
@@ -347,14 +366,16 @@ export async function placeLiveOrder(args: PlaceLiveOrderArgs): Promise<void> {
             ? referencePrice * (1 + targetPct / 100)
             : referencePrice * (1 - targetPct / 100);
           try {
-            await placeStop("tp", trig, 2);
-            placed.push(`TP ${targetPct}%`);
+            const st = await placeStop("tp", trig, 2);
+            if (st === "unconfirmed")
+              issues.push("⚠ TP unconfirmed — check positions");
+            else placed.push(`TP ${targetPct}%`);
           } catch (e) {
-            failed.push(`TP: ${(e as Error).message}`);
+            issues.push(`✗ TP rejected: ${(e as Error).message}`);
           }
         }
         if (placed.length) bracket += ` · ${placed.join(" · ")}`;
-        if (failed.length) bracket += ` · ⚠ ${failed.join("; ")}`;
+        if (issues.length) bracket += ` · ${issues.join(" · ")}`;
       }
 
       const verb = reduceOnly
@@ -426,7 +447,7 @@ export interface PlaceTriggerArgs {
 
 export async function placeTriggerForPosition(
   args: PlaceTriggerArgs,
-): Promise<unknown> {
+): Promise<{ clOrdID: string }> {
   const {
     network,
     apiKeyName,
@@ -442,7 +463,7 @@ export async function placeTriggerForPosition(
   const clOrdID = `helix-${tag}${Date.now().toString(36)}${Math.random()
     .toString(36)
     .slice(2, 4)}`.slice(0, 36);
-  return placeOrderBatch({
+  await placeOrderBatch({
     network,
     apiKeyName,
     privateKey,
@@ -467,4 +488,7 @@ export async function placeTriggerForPosition(
       ],
     },
   });
+  // Return the clOrdID so the caller can confirm the order actually rests on
+  // SoDEX (open-orders re-read) before treating the placement as succeeded.
+  return { clOrdID };
 }

@@ -94,10 +94,12 @@ const fmtUsd = (v: number | null) =>
           ? `$${(v / 1e3).toFixed(2)}K`
           : `$${v.toFixed(0)}`;
 
-// TP/SL placement is disabled until the SoDEX trigger-order payload is fixed
-// (P0: orders were accepted but didn't exist on SoDEX). Flip to true once the
-// signing-path fix is approved.
-const TPSL_PLACEMENT_ENABLED = false;
+// TP/SL placement. The earlier P0 (orders accepted by the POST but never
+// resting on SoDEX) is addressed: every order flow now classifies the per-order
+// result (classifyOrderResult), a rejected order throws with SoDEX's reason, and
+// a modify re-fetches the open-orders endpoint to confirm the NEW trigger rests
+// before cancelling the OLD one — so the position is never left unprotected.
+const TPSL_PLACEMENT_ENABLED = true;
 
 const MIN_BOTTOM = 120;
 const DEFAULT_BOTTOM = 220;
@@ -321,30 +323,28 @@ export function TradeTerminal({
 
   // Live perps account state (positions / balances / margin) for the ticket
   // and the bottom tabs. Read-only, polled; only when the browser is live.
-  useEffect(() => {
+  // Exposed as a callback so an order flow can re-sync positions immediately
+  // (an unconfirmed or partial fill must reflect SoDEX, not wait for the poll).
+  const refreshAccount = useCallback(async () => {
     if (!tm.ready || !tm.address) {
       setAccount(null);
       return;
     }
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const st = await getPerpsAccountState(
-          "mainnet",
-          tm.address as `0x${string}`,
-        );
-        if (!cancelled) setAccount(st);
-      } catch {
-        /* keep last good */
-      }
-    };
-    load();
-    const t = setInterval(load, 5000);
-    return () => {
-      cancelled = true;
-      clearInterval(t);
-    };
+    try {
+      const st = await getPerpsAccountState(
+        "mainnet",
+        tm.address as `0x${string}`,
+      );
+      setAccount(st);
+    } catch {
+      /* keep last good */
+    }
   }, [tm.ready, tm.address]);
+  useEffect(() => {
+    refreshAccount();
+    const t = setInterval(refreshAccount, 5000);
+    return () => clearInterval(t);
+  }, [refreshAccount]);
 
   // Open orders ACCOUNT-WIDE (every symbol), read-only, polled on the account
   // interval. The bottom panel + chart key these by symbol, so switching
@@ -654,8 +654,11 @@ export function TradeTerminal({
         oldId: number | null,
       ): Promise<string | null> => {
         if (trigger == null) return null; // this leg unchanged
+        const leg = stopType === 2 ? "take-profit" : "stop-loss";
+        const legShort = stopType === 2 ? "TP" : "SL";
+        let clOrdID: string;
         try {
-          await placeTriggerForPosition({
+          ({ clOrdID } = await placeTriggerForPosition({
             network: "mainnet",
             apiKeyName: key.name || undefined,
             privateKey: key.privateKey,
@@ -665,9 +668,31 @@ export function TradeTerminal({
             quantity: qty,
             stopPrice: roundTick(trigger),
             stopType,
-          });
+          }));
         } catch (e) {
-          return (e as Error).message; // keep the old order
+          return `${leg}: ${(e as Error).message}`; // rejected — keep the old order
+        }
+        // SoDEX's open-orders endpoint is the only source of truth: a POST can
+        // 200 while the order is rejected per-order. Confirm the new order
+        // actually rests BEFORE cancelling the old one (the P0: a false success
+        // used to cancel the old order and leave the position unprotected).
+        // Poll up to ~5s (every 1s); if the new order never shows, keep the old
+        // one untouched — never cancel the old without seeing the new.
+        let landed = false;
+        for (let i = 0; i < 5 && !landed; i++) {
+          await new Promise((r) => setTimeout(r, 1000));
+          try {
+            const open = await getOpenOrders(
+              "mainnet",
+              tm.address as `0x${string}`,
+            );
+            landed = open.some((o) => o.clOrdID === clOrdID);
+          } catch {
+            /* retry */
+          }
+        }
+        if (!landed) {
+          return `New ${legShort} not confirmed yet; old one kept`;
         }
         if (oldId != null) {
           try {
@@ -679,7 +704,7 @@ export function TradeTerminal({
               cancels: [{ symbolID: meta.symbolID, orderID: oldId }],
             });
           } catch {
-            /* new order is live; a stale old order is non-fatal */
+            /* new order is confirmed live; a stale old order is non-fatal */
           }
         }
         return null;
@@ -698,7 +723,7 @@ export function TradeTerminal({
         setTpslBusy(false);
       }
     },
-    [account?.aid, symbolMeta, refreshOpenOrders],
+    [account?.aid, tm.address, symbolMeta, refreshOpenOrders],
   );
 
   // Cancel one resting trigger order (the per-row "Remove" link). Cancellation
@@ -1083,6 +1108,10 @@ export function TradeTerminal({
               account={account}
               sideFill={sideFill}
               closeIntent={closeIntent}
+              onPlaced={() => {
+                refreshAccount();
+                refreshOpenOrders();
+              }}
             />
           ) : null}
           <AccountPanel account={account} ready={tm.ready} />

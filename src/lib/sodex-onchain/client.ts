@@ -265,6 +265,50 @@ async function handle<T>(res: Response): Promise<T> {
   return json.data;
 }
 
+export type OrderStatus = "ok" | "rejected" | "unconfirmed";
+export interface OrderOutcome {
+  status: OrderStatus;
+  orderID?: number | string | null;
+  reason?: string;
+}
+
+/**
+ * Classify a single order's PER-ORDER result from a gateway 200 (top-level
+ * `code:0`). handle() only checks the top-level code, so a rejected order used
+ * to look like success — the P0 where a TP/SL "placed" from our UI never rested
+ * on SoDEX. Three outcomes, reported per order so callers can show partial
+ * success (entry ok + bracket rejected) instead of a blanket failure:
+ *   - rejected:    an explicit non-zero per-order code, or an error message
+ *                  with no orderID → show SoDEX's reason, never "placed".
+ *   - ok:          code 0 / an orderID present.
+ *   - unconfirmed: neither clear success nor clear error → "check positions",
+ *                  never success OR failure; callers re-read the GET endpoints.
+ */
+export function classifyOrderResult(data: unknown): OrderOutcome {
+  const row = Array.isArray(data)
+    ? data[0]
+    : data && typeof data === "object" && Array.isArray((data as { orders?: unknown[] }).orders)
+      ? (data as { orders: unknown[] }).orders[0]
+      : data;
+  if (!row || typeof row !== "object") return { status: "unconfirmed" };
+  const o = row as Record<string, unknown>;
+  const code = o.code ?? o.errCode ?? o.errorCode;
+  if (typeof code === "number" && code !== 0) {
+    return {
+      status: "rejected",
+      reason: String(o.msg ?? o.error ?? o.reason ?? `code ${code}`),
+    };
+  }
+  const orderID = (o.orderID ?? o.orderId ?? null) as number | string | null;
+  const hasId = orderID != null && orderID !== 0 && orderID !== "0";
+  if (hasId || code === 0) return { status: "ok", orderID };
+  const msg = o.msg ?? o.error ?? o.reason;
+  if (typeof msg === "string" && msg && !/success|ok|accept/i.test(msg)) {
+    return { status: "rejected", reason: msg };
+  }
+  return { status: "unconfirmed" };
+}
+
 /** GET /spot/accounts/{address}/state — returns account ID + balances. */
 export async function getAccountState(
   network: SodexNetwork,
@@ -681,7 +725,13 @@ export async function placeOrderBatch(opts: {
     headers,
     body: JSON.stringify(body),
   });
-  return handle<unknown>(res);
+  const data = await handle<unknown>(res);
+  // A per-order REJECTION throws (with SoDEX's reason); "ok"/"unconfirmed" are
+  // returned so the caller can distinguish them (see classifyOrderResult).
+  if (classifyOrderResult(data).status === "rejected") {
+    throw new Error(classifyOrderResult(data).reason ?? "order rejected by SoDEX");
+  }
+  return data;
 }
 
 /**
@@ -754,7 +804,11 @@ export async function cancelOrders(opts: {
     headers,
     body: JSON.stringify(params),
   });
-  return handle<unknown>(res);
+  const data = await handle<unknown>(res);
+  if (classifyOrderResult(data).status === "rejected") {
+    throw new Error(classifyOrderResult(data).reason ?? "cancel rejected by SoDEX");
+  }
+  return data;
 }
 
 /**
