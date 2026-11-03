@@ -148,4 +148,10 @@ export const ASSET_LOGO_FILES: Record<string, string> = {
   "cl": "cl.svg",
   "natgas": "natgas.svg",
   "silver": "silver.svg",
+  "us500": "us-flag.svg",
+  "ustech100": "us-flag.svg",
+  "ewy": "kr-flag.svg",
+  "brentoil": "oildrop.svg",
+  "copper": "copper.svg",
+  "dram": "dram.svg",
 };
