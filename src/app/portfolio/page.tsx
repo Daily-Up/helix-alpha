@@ -8,8 +8,8 @@ export default function PortfolioPage() {
         <header>
           <h1 className="dash-title">Portfolio</h1>
           <p className="mt-2 dash-description">
-            Your live SoDEX orders on mainnet — real funds, scoped to the
-            connected account.
+            Your live SoDEX portfolio on mainnet — equity, balances, positions
+            and Helix-routed activity, scoped to the connected account.
           </p>
         </header>
 
