@@ -172,10 +172,15 @@ export function TpSlModal({
     return p != null && margin && margin > 0 ? (p / margin) * 100 : null;
   };
 
-  // A leg marked for cancellation is greyed out, so its typed value is ignored
-  // for validation, fees and the action.
-  const tpPlace = !cancelTp && ok(tpVal);
-  const slPlace = !cancelSl && ok(slVal);
+  // A leg is a "place" only when it's a valid value that DIFFERS from the one
+  // already resting — the modal pre-fills the existing trigger, so leaving it
+  // untouched must not re-submit an identical order (and, when the other leg is
+  // being cancelled, keeps this one a true no-op so Confirm reads "Cancel …").
+  // A leg marked for cancellation is greyed out and never a place.
+  const tpChanged = tp.price !== (existing.tp != null ? fmtIn(existing.tp) : "");
+  const slChanged = sl.price !== (existing.sl != null ? fmtIn(existing.sl) : "");
+  const tpPlace = !cancelTp && ok(tpVal) && tpChanged;
+  const slPlace = !cancelSl && ok(slVal) && slChanged;
 
   // Validation (skip a leg being cancelled).
   const problems: string[] = [];
@@ -217,8 +222,8 @@ export function TpSlModal({
     const res = await onSet(
       position,
       {
-        tp: cancelTp ? "cancel" : ok(tpVal) ? tpVal : null,
-        sl: cancelSl ? "cancel" : ok(slVal) ? slVal : null,
+        tp: cancelTp ? "cancel" : tpPlace ? tpVal : null,
+        sl: cancelSl ? "cancel" : slPlace ? slVal : null,
       },
       { tpOrderId: existing.tpOrderId, slOrderId: existing.slOrderId },
     );
