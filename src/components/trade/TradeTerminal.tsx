@@ -556,6 +556,14 @@ export function TradeTerminal({
     return m;
   }, [allMarks, sodexSymbol, mark]);
 
+  // Tick size per symbol (keyed like symbolMeta) so every table/history row
+  // prices to ITS OWN symbol's tick, not the selected market's.
+  const tickBySymbol = useMemo<Record<string, number>>(() => {
+    const m: Record<string, number> = {};
+    for (const [sym, meta] of Object.entries(symbolMeta)) m[sym] = meta.tickSize;
+    return m;
+  }, [symbolMeta]);
+
   // Close ALL positions — a market reduce-only close for each, through the same
   // live path as a single close (no signing changes). The local API key signs;
   // connectedMaster resolves the account. Batch-level busy flag; the account +
@@ -1042,6 +1050,7 @@ export function TradeTerminal({
               onCloseAll={onCloseAll}
               closeAllBusy={closeAllBusy}
               markBySymbol={markBySymbol}
+              tickBySymbol={tickBySymbol}
               fundingBySymbol={fundingBySymbol}
               fundingInterval={fundingInterval}
               accountFundings={accountFundings}

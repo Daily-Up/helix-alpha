@@ -28,8 +28,19 @@ export type TpSlMeta = {
 const perpName = (s: string) => s.replace(/-USDC?$/i, "-PERP");
 const baseOf = (s: string) => s.split("-")[0] || s;
 const signStr = (v: number) => (v < 0 ? "−" : "+");
-const money = (v: number) =>
-  `${signStr(v)}$${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+// Signed $, 2 decimals; a non-zero magnitude under a cent collapses to "±<$0.01".
+const money = (v: number) => {
+  const a = Math.abs(v);
+  if (a > 0 && a < 0.01) return `${signStr(v)}<$0.01`;
+  return `${signStr(v)}$${a.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+const decimalsFromTick = (tick?: number) => {
+  if (!tick || !Number.isFinite(tick) || tick <= 0) return 2;
+  if (tick >= 1) return 0;
+  return Math.min(8, Math.ceil(-Math.log10(tick)));
+};
+const trimZeros = (s: string) =>
+  s.includes(".") ? s.replace(/0+$/, "").replace(/\.$/, "") : s;
 
 export function TpSlModal({
   position,
@@ -67,13 +78,17 @@ export function TpSlModal({
   const lev = position.l ?? null;
   const liq = position.lp && Number(position.lp) > 0 ? Number(position.lp) : null;
   const margin = lev && lev > 0 ? (absSize * entry) / lev : null;
-  const pxDp = meta ? meta.pricePrecision : mark != null && mark < 10 ? 4 : 2;
+  // Price precision from THIS symbol's tick size (not the selected market's).
+  const pxDp = meta ? decimalsFromTick(meta.tickSize) : mark != null && mark < 10 ? 4 : 2;
   const qDp = meta ? meta.quantityPrecision : 4;
   const takerFee = meta ? meta.takerFee : 0.0004;
+  // Display: tick precision, trailing zeros trimmed (71,000.0000 → 71,000).
   const fmtPx = (v: number) =>
-    v.toLocaleString(undefined, { minimumFractionDigits: pxDp, maximumFractionDigits: pxDp });
+    trimZeros(
+      v.toLocaleString(undefined, { minimumFractionDigits: pxDp, maximumFractionDigits: pxDp }),
+    );
   // Input value strings carry NO thousands separators, so Number() parses them.
-  const fmtIn = (v: number) => v.toFixed(pxDp);
+  const fmtIn = (v: number) => trimZeros(v.toFixed(pxDp));
   const num = (s: string) => Number(s.replace(/,/g, ""));
 
   // Size for PnL/fees — full position unless "Configure size" trims it.

@@ -39,11 +39,31 @@ export const BOTTOM_TABS = [
 ] as const;
 export type BottomTab = (typeof BOTTOM_TABS)[number];
 
-// Plain positive $ (notional, margin, prices) — no sign.
-const money = (v: number | null | undefined, d = 2) =>
-  v == null || !Number.isFinite(v)
-    ? "—"
-    : `$${v.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d })}`;
+// Plain positive $ (notional, margin, value, fees) — no sign, 2 decimals by
+// default; a non-zero magnitude under a cent collapses to "<$0.01". Pass d=4
+// for sub-cent fee ESTIMATES (order ticket / confirm) that want more precision.
+const money = (v: number | null | undefined, d = 2) => {
+  if (v == null || !Number.isFinite(v)) return "—";
+  if (d <= 2 && v > 0 && v < 0.01) return "<$0.01";
+  return `$${v.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d })}`;
+};
+// Decimals a symbol's tick size implies (0.0001 → 4, 0.1 → 1, 1 → 0).
+const decimalsFromTick = (tick?: number) => {
+  if (!tick || !Number.isFinite(tick) || tick <= 0) return 2;
+  if (tick >= 1) return 0;
+  return Math.min(8, Math.ceil(-Math.log10(tick)));
+};
+// A price at its symbol's tick precision, with trailing zeros (and a dangling
+// decimal point) trimmed: 71,000.0000 → 71,000; 1,080.6200 → 1,080.62.
+const fmtPrice = (value: number | null | undefined, tick?: number) => {
+  if (value == null || !Number.isFinite(value)) return "—";
+  let s = value.toLocaleString(undefined, {
+    minimumFractionDigits: decimalsFromTick(tick),
+    maximumFractionDigits: decimalsFromTick(tick),
+  });
+  if (s.includes(".")) s = s.replace(/0+$/, "").replace(/\.$/, "");
+  return s;
+};
 // Signed $ with the sign BEFORE the currency symbol (−$0.05, +$0.10); a
 // non-zero magnitude under a cent collapses to "<$0.01" keeping its sign.
 const signedMoney = (v: number | null | undefined) => {
@@ -73,16 +93,8 @@ const fmtCountdown = (ms: number) => {
 // rate is negative. notional = |size| × mark; rate = raw fraction per interval.
 const fundingEst = (notional: number, isLong: boolean, rate: number) =>
   (isLong ? -1 : 1) * notional * rate;
-// Signed $ whose precision scales to the (usually tiny) funding amount.
-const fundingFmt = (v: number) => {
-  if (!Number.isFinite(v)) return "—";
-  const a = Math.abs(v);
-  const dp = a >= 1 ? 2 : a >= 0.01 ? 3 : 4;
-  return `${v < 0 ? "−" : "+"}$${a.toLocaleString(undefined, {
-    minimumFractionDigits: dp,
-    maximumFractionDigits: dp,
-  })}`;
-};
+// Funding is a signed dollar amount: 2 decimals, sub-cent → "±<$0.01".
+const fundingFmt = (v: number) => signedMoney(v);
 // next funding time may arrive in seconds or ms; normalise to ms.
 const nextFundingMs = (next: number) =>
   next > 0 ? (next < 1e12 ? next * 1000 : next) : 0;
@@ -188,6 +200,7 @@ export function BottomPanel({
   onCloseAll,
   closeAllBusy,
   markBySymbol,
+  tickBySymbol,
   fundingBySymbol,
   fundingInterval,
   accountFundings,
@@ -214,6 +227,8 @@ export function BottomPanel({
   closeAllBusy: boolean;
   /** Live mark price keyed by sodex symbol (all open-position symbols). */
   markBySymbol: Record<string, number>;
+  /** Price tick size keyed by sodex symbol — each row prices to its OWN tick. */
+  tickBySymbol: Record<string, number>;
   /** Per-symbol funding: raw rate (fraction/interval) + next funding time (ms). */
   fundingBySymbol: Record<string, FundingInfo>;
   /** Funding interval in seconds, for the annualized rate. */
@@ -310,8 +325,8 @@ export function BottomPanel({
             <PositionsView
               positions={positions}
               orders={openOrders}
-              digits={digits}
               markBySymbol={markBySymbol}
+              tickBySymbol={tickBySymbol}
               fundingBySymbol={fundingBySymbol}
               now={now}
               selectedSymbol={selectedSymbol}
@@ -328,7 +343,7 @@ export function BottomPanel({
               orders={orders}
               onCancel={onCancel}
               busy={cancelBusy}
-              digits={digits}
+              tickBySymbol={tickBySymbol}
               currentOnly={currentOnly}
               selectedSymbol={selectedSymbol}
             />
@@ -339,7 +354,7 @@ export function BottomPanel({
             currentOnly={currentOnly}
             selectedSymbol={selectedSymbol}
             refreshKey={historyRefreshKey}
-            digits={digits}
+            tickBySymbol={tickBySymbol}
           />
         ) : tab === "Order History" ? (
           <OrderHistoryView
@@ -347,7 +362,7 @@ export function BottomPanel({
             currentOnly={currentOnly}
             selectedSymbol={selectedSymbol}
             refreshKey={historyRefreshKey}
-            digits={digits}
+            tickBySymbol={tickBySymbol}
           />
         ) : tab === "Closed Positions" ? (
           <ClosedPositionsView
@@ -355,7 +370,7 @@ export function BottomPanel({
             currentOnly={currentOnly}
             selectedSymbol={selectedSymbol}
             refreshKey={historyRefreshKey}
-            digits={digits}
+            tickBySymbol={tickBySymbol}
           />
         ) : (
           <FundingView
@@ -451,8 +466,8 @@ function tpslFor(pos: Position, orders: SodexOpenOrder[]) {
 function PositionsView({
   positions,
   orders,
-  digits,
   markBySymbol,
+  tickBySymbol,
   fundingBySymbol,
   now,
   selectedSymbol,
@@ -462,8 +477,8 @@ function PositionsView({
 }: {
   positions: Position[];
   orders: SodexOpenOrder[];
-  digits: number;
   markBySymbol: Record<string, number>;
+  tickBySymbol: Record<string, number>;
   fundingBySymbol: Record<string, FundingInfo>;
   now: number;
   selectedSymbol: string | null;
@@ -475,8 +490,6 @@ function PositionsView({
   const [menuRow, setMenuRow] = useState<string | null>(null);
   const [modal, setModal] = useState<{ pos: Position; focus: "tp" | "sl" } | null>(null);
   const openModal = (pos: Position, focus: "tp" | "sl") => setModal({ pos, focus });
-  const px = (v: number) =>
-    v.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
   const HEAD = [
     "Market",
     "Amount",
@@ -522,6 +535,9 @@ function PositionsView({
 
         // Resting TP / SL triggers for this position.
         const { tp, sl } = tpslFor(p, orders);
+        // Prices use THIS row's symbol tick (not the selected market's).
+        const tick = tickBySymbol[p.s.toUpperCase()];
+        const pxRow = (v: number) => fmtPrice(v, tick);
 
         // Funding: total ACCRUED on this open position so far (p.ff), plus the
         // current rate / est. next / countdown for the cell's hover.
@@ -579,9 +595,9 @@ function PositionsView({
             {/* Value (notional) */}
             <span className="text-right text-fg">{value != null ? money(value) : "—"}</span>
             {/* Avg Open */}
-            <span className="text-right text-fg-muted">{px(entry)}</span>
+            <span className="text-right text-fg-muted">{pxRow(entry)}</span>
             {/* Mark */}
-            <span className="text-right">{mark != null ? px(mark) : "—"}</span>
+            <span className="text-right">{mark != null ? pxRow(mark) : "—"}</span>
             {/* uPnL */}
             <span
               className={cn(
@@ -604,7 +620,7 @@ function PositionsView({
                     : undefined
               }
             >
-              {liq != null ? px(liq) : "—"}
+              {liq != null ? pxRow(liq) : "—"}
             </span>
             {/* Margin */}
             <span className="text-right text-fg-muted">
@@ -620,9 +636,9 @@ function PositionsView({
               cd={fundingCd}
             />
             {/* SL */}
-            <TriggerCell value={sl} tone="neg" px={px} onEdit={() => openModal(p, "sl")} />
+            <TriggerCell value={sl} tone="neg" px={pxRow} onEdit={() => openModal(p, "sl")} />
             {/* TP */}
-            <TriggerCell value={tp} tone="pos" px={px} onEdit={() => openModal(p, "tp")} />
+            <TriggerCell value={tp} tone="pos" px={pxRow} onEdit={() => openModal(p, "tp")} />
             {/* Close (×) + ⋯ menu (Set TP/SL · Limit close) */}
             <span className="relative flex items-center justify-end gap-1">
               <button
@@ -1032,25 +1048,22 @@ function CloseAllConfirm({
  *  scoped exactly to what the list is showing (current market, or all). */
 function CancelAllConfirm({
   orders,
-  digits,
+  tickBySymbol,
   busy,
   scopeLabel,
   onConfirm,
   onClose,
 }: {
   orders: SodexOpenOrder[];
-  digits: number;
+  tickBySymbol: Record<string, number>;
   busy: boolean;
   scopeLabel: string;
   onConfirm: () => void;
   onClose: () => void;
 }) {
-  const px = (v?: string) =>
+  const px = (v: string | number | undefined, sym: string) =>
     v != null && Number.isFinite(Number(v))
-      ? Number(v).toLocaleString(undefined, {
-          minimumFractionDigits: digits,
-          maximumFractionDigits: digits,
-        })
+      ? fmtPrice(Number(v), tickBySymbol[(sym ?? "").toUpperCase()])
       : "—";
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1093,9 +1106,9 @@ function CancelAllConfirm({
                 <span className="text-fg-muted">
                   {o.origQty ? qtyFmt(Number(o.origQty)) : "—"}
                   {trig != null
-                    ? ` @ ${px(String(trig))} trig`
+                    ? ` @ ${px(trig, o.symbol)} trig`
                     : Number(o.price) > 0
-                      ? ` @ ${px(o.price)}`
+                      ? ` @ ${px(o.price, o.symbol)}`
                       : ""}
                 </span>
               </div>
@@ -1134,26 +1147,19 @@ function OpenOrders({
   orders,
   onCancel,
   busy,
-  digits,
+  tickBySymbol,
   currentOnly,
   selectedSymbol,
 }: {
   orders: SodexOpenOrder[];
   onCancel: (orders: SodexOpenOrder[]) => void;
   busy: boolean;
-  digits: number;
+  tickBySymbol: Record<string, number>;
   /** Whether the panel's "Current market only" filter is on. */
   currentOnly: boolean;
   selectedSymbol: string | null;
 }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const px = (v?: string) =>
-    v != null && Number.isFinite(Number(v))
-      ? Number(v).toLocaleString(undefined, {
-          minimumFractionDigits: digits,
-          maximumFractionDigits: digits,
-        })
-      : "—";
   // Header + cancel-all scope must agree: "N open · BTC-PERP" when the current-
   // market filter is on or all orders share one market, else "N open · all
   // markets".
@@ -1180,7 +1186,7 @@ function OpenOrders({
       {confirmOpen ? (
         <CancelAllConfirm
           orders={orders}
-          digits={digits}
+          tickBySymbol={tickBySymbol}
           busy={busy}
           scopeLabel={scope}
           onConfirm={() => {
@@ -1207,6 +1213,7 @@ function OpenOrders({
       {orders.map((o) => {
         const buy = sideIsBuy(o.side);
         const { label: typeLabel, isStop } = orderTypeInfo(o);
+        const tick = tickBySymbol[o.symbol.toUpperCase()];
         return (
           <div
             key={o.orderID}
@@ -1233,11 +1240,11 @@ function OpenOrders({
             </span>
             {/* Price: limit → limit price; market / stop-market → "Market". */}
             <span className="text-right text-fg-muted">
-              {Number(o.price) > 0 ? px(o.price) : "Market"}
+              {Number(o.price) > 0 ? fmtPrice(Number(o.price), tick) : "Market"}
             </span>
             {/* Trigger: stop orders show the trigger price, never a bare "—". */}
             <span className={cn("text-right", isStop ? "text-[#e0a53f]" : "text-fg-dim")}>
-              {isStop && Number(o.stopPrice) > 0 ? px(o.stopPrice) : "—"}
+              {isStop && Number(o.stopPrice) > 0 ? fmtPrice(Number(o.stopPrice), tick) : "—"}
             </span>
             <span className="text-right">{o.origQty ? qtyFmt(Number(o.origQty)) : "—"}</span>
             <span className="text-right text-fg-muted">
@@ -1262,12 +1269,6 @@ function OpenOrders({
 // ─────────────────────────── History tabs ───────────────────────────
 // Prices in history span markets, so size the precision to the value (the
 // selected market's `digits` is only a hint).
-const fmtPx = (v: number, digits = 2) =>
-  Number.isFinite(v)
-    ? v.toLocaleString(undefined, {
-        maximumFractionDigits: v >= 1000 ? 2 : v >= 1 ? Math.max(2, digits) : 6,
-      })
-    : "—";
 type FetchState = "loading" | "error" | "ready";
 
 /** Loading / error states for a history list (empty is the caller's to render,
@@ -1333,7 +1334,7 @@ type HistoryViewProps = {
   currentOnly: boolean;
   selectedSymbol: string | null;
   refreshKey: number;
-  digits: number;
+  tickBySymbol: Record<string, number>;
 };
 
 const TH_COLS =
@@ -1345,7 +1346,7 @@ function TradeHistoryView({
   currentOnly,
   selectedSymbol,
   refreshKey,
-  digits,
+  tickBySymbol,
 }: HistoryViewProps) {
   const PAGE = 100;
   const [rows, setRows] = useState<SodexTrade[]>([]);
@@ -1429,7 +1430,7 @@ function TradeHistoryView({
           {shown.length} fill{shown.length === 1 ? "" : "s"} loaded
         </span>
         <span className="font-[var(--font-jetbrains-mono)] tabular-nums">
-          Fees {money(totalFee, 4)} · Builder {money(totalBuilder, 4)}
+          Fees {money(totalFee)} · Builder {money(totalBuilder)}
         </span>
       </div>
       <div
@@ -1464,12 +1465,14 @@ function TradeHistoryView({
             <span className={buy ? "text-positive" : "text-negative"}>
               {buy ? "Buy" : "Sell"}
             </span>
-            <span className="text-right">{fmtPx(price, digits)}</span>
+            <span className="text-right">
+              {fmtPrice(price, tickBySymbol[t.symbol.toUpperCase()])}
+            </span>
             <span className="text-right">{qtyFmt(qty)}</span>
             <span className="text-right text-fg">{money(price * qty)}</span>
-            <span className="text-right text-fg-muted">{money(Number(t.fee), 4)}</span>
+            <span className="text-right text-fg-muted">{money(Number(t.fee))}</span>
             <span className="text-right text-fg-muted">
-              {t.builderFee ? money(Number(t.builderFee), 4) : "—"}
+              {t.builderFee ? money(Number(t.builderFee)) : "—"}
             </span>
             <span className="text-right text-fg-dim">{t.isMaker ? "Maker" : "Taker"}</span>
           </div>
@@ -1492,7 +1495,7 @@ function OrderHistoryView({
   currentOnly,
   selectedSymbol,
   refreshKey,
-  digits,
+  tickBySymbol,
 }: HistoryViewProps) {
   const load = useCallback(
     (addr: `0x${string}`) => getOrderHistory("mainnet", addr, { limit: 200 }),
@@ -1553,10 +1556,14 @@ function OrderHistoryView({
               {buy ? "Buy" : "Sell"}
             </span>
             <span className="text-right text-fg-muted">
-              {Number(o.price) > 0 ? fmtPx(Number(o.price), digits) : "Market"}
+              {Number(o.price) > 0
+                ? fmtPrice(Number(o.price), tickBySymbol[o.symbol.toUpperCase()])
+                : "Market"}
             </span>
             <span className={cn("text-right", isStop ? "text-[#e0a53f]" : "text-fg-dim")}>
-              {isStop && Number(o.stopPrice) > 0 ? fmtPx(Number(o.stopPrice), digits) : "—"}
+              {isStop && Number(o.stopPrice) > 0
+                ? fmtPrice(Number(o.stopPrice), tickBySymbol[o.symbol.toUpperCase()])
+                : "—"}
             </span>
             <span className="text-right">{o.origQty ? qtyFmt(Number(o.origQty)) : "—"}</span>
             <span className="text-right text-fg-muted">
@@ -1584,7 +1591,7 @@ function ClosedPositionsView({
   currentOnly,
   selectedSymbol,
   refreshKey,
-  digits,
+  tickBySymbol,
 }: HistoryViewProps) {
   const load = useCallback(
     (addr: `0x${string}`) => getPositionsHistory("mainnet", addr, { limit: 100 }),
@@ -1636,10 +1643,12 @@ function ClosedPositionsView({
               {sizeStr ? qtyFmt(Number(sizeStr)) : "—"}
             </span>
             <span className="text-right text-fg-muted">
-              {fmtPx(Number(p.avgEntryPrice), digits)}
+              {fmtPrice(Number(p.avgEntryPrice), tickBySymbol[p.symbol.toUpperCase()])}
             </span>
             <span className="text-right text-fg-muted">
-              {Number(p.avgClosePrice) > 0 ? fmtPx(Number(p.avgClosePrice), digits) : "—"}
+              {Number(p.avgClosePrice) > 0
+                ? fmtPrice(Number(p.avgClosePrice), tickBySymbol[p.symbol.toUpperCase()])
+                : "—"}
             </span>
             <span
               className={cn(
