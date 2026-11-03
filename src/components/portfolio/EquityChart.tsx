@@ -44,6 +44,23 @@ const rgba = (hex: string, a: number) => {
   return `rgba(${r},${g},${b},${a})`;
 };
 
+const two = (x: number) => String(x).padStart(2, "0");
+
+/** Axis tick label sized to the range: 1D → "14:05", 1W → "Mon 3", else "3 Nov". */
+function axisLabel(timeSec: number, range: Range): string {
+  const d = new Date(timeSec * 1000);
+  if (range === "1D") return `${two(d.getHours())}:${two(d.getMinutes())}`;
+  if (range === "1W")
+    return `${d.toLocaleDateString(undefined, { weekday: "short" })} ${d.getDate()}`;
+  return `${d.getDate()} ${d.toLocaleDateString(undefined, { month: "short" })}`;
+}
+
+/** Crosshair label — always date + time for precision on hover. */
+function crosshairLabel(timeSec: number): string {
+  const d = new Date(timeSec * 1000);
+  return `${d.getDate()} ${d.toLocaleDateString(undefined, { month: "short" })} ${two(d.getHours())}:${two(d.getMinutes())}`;
+}
+
 export function EquityChart({
   address,
   live,
@@ -142,6 +159,10 @@ export function EquityChart({
         ? 0
         : liveEquity;
   const sparse = equityPts.length < 2;
+  // With a handful of snapshots the line reads as sparse, so dot each point and
+  // show an honest count; a dense series needs neither.
+  const snapCount = equityPts.length;
+  const fewPoints = snapCount >= 2 && snapCount <= 30;
 
   // ── chart ──
   const containerRef = useRef<HTMLDivElement>(null);
@@ -152,6 +173,9 @@ export function EquityChart({
   const [ready, setReady] = useState(false);
   const pointsRef = useRef(points);
   pointsRef.current = points;
+  // The tick formatter is installed once but must track the live range.
+  const rangeRef = useRef(range);
+  rangeRef.current = range;
 
   useEffect(() => {
     let disposed = false;
@@ -167,6 +191,8 @@ export function EquityChart({
             Math.abs(p).toLocaleString(undefined, {
               maximumFractionDigits: Math.abs(p) >= 1000 ? 0 : 2,
             }),
+          timeFormatter: (t: unknown) =>
+            typeof t === "number" ? crosshairLabel(t) : "",
         },
         layout: {
           background: { type: LWC.ColorType.Solid, color: "transparent" },
@@ -187,6 +213,8 @@ export function EquityChart({
           borderColor: "rgba(255,255,255,0.06)",
           timeVisible: true,
           secondsVisible: false,
+          tickMarkFormatter: (t: unknown) =>
+            typeof t === "number" ? axisLabel(t, rangeRef.current) : "",
         },
         crosshair: {
           mode: LWC.CrosshairMode.Normal,
@@ -236,10 +264,13 @@ export function EquityChart({
   // Push data + recolour on sign change.
   useEffect(() => {
     if (!ready || !seriesRef.current) return;
+    const few = points.length >= 2 && points.length <= 30;
     seriesRef.current.applyOptions({
       lineColor: color,
       topColor: rgba(color, 0.28),
       bottomColor: rgba(color, 0.02),
+      pointMarkersVisible: few,
+      pointMarkersRadius: 3,
     });
     seriesRef.current.setData(points);
     chartRef.current?.timeScale().fitContent();
@@ -288,6 +319,9 @@ export function EquityChart({
                 {changePct != null ? ` (${signedPct(changePct)})` : ""}
               </span>
               <span className="text-fg-dim">· {RANGE_LABEL[range]}</span>
+              {fewPoints ? (
+                <span className="text-fg-dim">· {snapCount} snapshots</span>
+              ) : null}
             </div>
           </div>
         </div>

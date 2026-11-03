@@ -8,7 +8,8 @@
  * swap concept); Transfers is an honest empty state (the trading REST API
  * exposes no transfer-history read).
  *
- * Avg price / uPnL are "—": SoDEX spot is plain holdings with no cost basis.
+ * The Price column is the current market price; there is no uPnL column —
+ * SoDEX spot is plain holdings with no cost basis.
  */
 
 import { useEffect, useState } from "react";
@@ -22,7 +23,7 @@ import {
 } from "@/lib/portfolio/fetch";
 import { StatCard } from "./StatCard";
 import { SegmentedTabs } from "./SegmentedTabs";
-import { money, signedMoney, compactUsd, fmtPrice } from "./fmt";
+import { money, compactUsd, fmtPrice } from "./fmt";
 
 const SODEX_WALLET = "https://sodex.com/wallet";
 const SUB_TABS = ["Balances", "Swap History", "Transfers"] as const;
@@ -95,9 +96,9 @@ export function SpotTab({
   );
 }
 
-// Asset | Total | Settled / Unsettled | Avg Price | Value | uPnL
+// Asset | Total | Settled / Unsettled | Price | Value
 const SPOT_COLS =
-  "minmax(120px,1.4fr) minmax(0,1fr) minmax(0,1.2fr) minmax(0,0.9fr) minmax(0,1fr) minmax(0,0.9fr)";
+  "minmax(120px,1.4fr) minmax(0,1fr) minmax(0,1.2fr) minmax(0,0.9fr) minmax(0,1fr)";
 
 function BalancesTable({ address }: { address: string | null }) {
   const [holdings, setHoldings] = useState<SpotHolding[] | null>(null);
@@ -164,7 +165,7 @@ function BalancesTable({ address }: { address: string | null }) {
         <Empty>No spot balances.</Empty>
       ) : (
         <div className="overflow-x-auto">
-          <div className="min-w-[640px]">
+          <div className="min-w-[560px]">
             <div
               className="grid gap-2 border-b border-line px-2 py-1.5 text-[9px] uppercase tracking-wider text-fg-dim"
               style={{ gridTemplateColumns: SPOT_COLS }}
@@ -172,7 +173,9 @@ function BalancesTable({ address }: { address: string | null }) {
               <span>Asset</span>
               <span className="text-right">Total</span>
               <span className="text-right">Settled / Unsettled</span>
-              <span className="text-right">Avg Price</span>
+              <span className="text-right" title="Current market price — SoDEX spot has no cost basis">
+                Price
+              </span>
               <button
                 onClick={() => setSortDesc((s) => !s)}
                 className="flex items-center justify-end gap-1 text-right uppercase tracking-wider transition-colors hover:text-fg-muted"
@@ -180,7 +183,6 @@ function BalancesTable({ address }: { address: string | null }) {
               >
                 Value <span aria-hidden>{sortDesc ? "▼" : "▲"}</span>
               </button>
-              <span className="text-right">uPnL</span>
             </div>
             {shown.map((h) => (
               <div
@@ -188,7 +190,10 @@ function BalancesTable({ address }: { address: string | null }) {
                 className="grid items-center gap-2 px-2 py-2 font-[var(--font-jetbrains-mono)] tabular-nums transition-colors hover:bg-surface-2/40"
                 style={{ gridTemplateColumns: SPOT_COLS }}
               >
-                <span className="flex min-w-0 items-center gap-2">
+                <span
+                  className="flex min-w-0 items-center gap-2"
+                  title={h.coin !== h.display ? `Wrapped as ${h.coin} on SoDEX` : undefined}
+                >
                   <AssetLogo symbol={h.coin} size={18} />
                   <span className="truncate font-medium text-fg">{h.display}</span>
                 </span>
@@ -203,7 +208,6 @@ function BalancesTable({ address }: { address: string | null }) {
                 <span className="text-right text-fg">
                   {h.value != null ? money(h.value) : "—"}
                 </span>
-                <span className="text-right text-fg-dim">—</span>
               </div>
             ))}
           </div>

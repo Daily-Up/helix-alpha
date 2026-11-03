@@ -34,6 +34,7 @@ const HUES = [14, 28, 40, 96, 150, 172, 194, 214, 258, 292, 330, 352];
 
 function clean(sym: string): string {
   return sym
+    .replace(/^[vw](?=[A-Z])/, "") // SoDEX wrapped spot: vBTC→BTC, wSOSO→SOSO
     .replace(/\/(usdc|usdt|usd|perp)$/i, "")
     .replace(/[-_].*$/, "") // stk-coin / tok-eth → base
     .replace(/\.ssi$/i, "")

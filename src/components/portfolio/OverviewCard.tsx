@@ -4,11 +4,13 @@
  * OverviewCard — the right rail of the portfolio top row. A margin-usage ring
  * (green→amber→red on the terminal's thresholds), a plain-language positions
  * line, Deposit / Perps ⇄ Spot / Withdraw buttons that open SoDEX in a new tab
- * (Helix never moves funds), a colour-dotted stat list (free collateral, perp
- * positions value, spot holdings value), and a fee-tier card (tier + maker/
- * taker + 30d volume + a link to SoDEX's fee schedule).
+ * (Helix never moves funds), a colour-dotted composition (perps equity with
+ * free collateral as a sub-detail, + spot holdings — the two equities summing
+ * to the headline total), and a fee-tier card (tier + maker/taker + 30d volume
+ * + a link to SoDEX's fee schedule).
  */
 
+import { useEffect } from "react";
 import { cn } from "@/components/ui/cn";
 import { RingGauge } from "./RingGauge";
 import { money, compactUsd } from "./fmt";
@@ -43,6 +45,18 @@ export function OverviewCard({
   const marginRatio =
     equity != null && equity > 0 && used != null ? (used / equity) * 100 : null;
   const openCount = (account?.P ?? []).filter((p) => Number(p.sz) !== 0).length;
+
+  // Dev guard: the two summed rows must reconcile to the headline total.
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production" || !composition) return;
+    const sum = composition.perps_equity + composition.spot_equity;
+    if (Math.abs(sum - composition.total_equity) > 0.01) {
+      console.warn(
+        `[portfolio] Overview composition mismatch: perps_equity (${composition.perps_equity}) + ` +
+          `spot_equity (${composition.spot_equity}) = ${sum}, but total_equity = ${composition.total_equity}`,
+      );
+    }
+  }, [composition]);
 
   return (
     <div className="trade-terminal flex h-full flex-col gap-4 rounded-lg border border-line bg-surface p-4">
@@ -82,22 +96,25 @@ export function OverviewCard({
         <FundButton href={SODEX_WALLET} label="Withdraw" />
       </div>
 
-      {/* Colour-dotted composition */}
+      {/* Composition — Perps Equity + Spot Holdings sum to the headline total;
+          free collateral is a sub-detail of perps (already inside its equity). */}
       <div className="flex flex-col gap-2 border-t border-line pt-3">
         <StatRow
-          dot="#3b82f6"
-          label="Free Collateral"
-          value={money(composition?.free_collateral)}
-        />
-        <StatRow
           dot="#0ecb81"
-          label="Perp Positions"
-          value={money(composition?.perps_positions_value)}
+          label="Perps Equity"
+          value={money(composition?.perps_equity)}
+          hint="Perps account value, including unrealized PnL"
+        />
+        <SubRow
+          label="Free collateral"
+          value={money(composition?.free_collateral)}
+          hint="Margin not currently backing a position — already counted inside Perps Equity, not added to the total"
         />
         <StatRow
           dot="#a78bfa"
           label="Spot Holdings"
           value={money(composition?.spot_equity)}
+          hint="Spot balances valued at market"
         />
       </div>
 
@@ -154,13 +171,15 @@ function StatRow({
   dot,
   label,
   value,
+  hint,
 }: {
   dot: string;
   label: string;
   value: string;
+  hint?: string;
 }) {
   return (
-    <div className="flex items-center justify-between text-[12px]">
+    <div className="flex items-center justify-between text-[12px]" title={hint}>
       <span className="flex items-center gap-2 text-fg-muted">
         <span
           className="inline-block h-2 w-2 shrink-0 rounded-full"
@@ -173,6 +192,34 @@ function StatRow({
           "font-[var(--font-jetbrains-mono)] tabular-nums text-fg",
         )}
       >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+/** A muted, indented sub-detail of the row above — not part of the sum. */
+function SubRow({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+}) {
+  return (
+    <div
+      className="-mt-0.5 flex items-center justify-between pl-4 text-[11px]"
+      title={hint}
+    >
+      <span className="flex items-center gap-1.5 text-fg-dim">
+        <span aria-hidden className="text-fg-dim/60">
+          └
+        </span>
+        {label}
+      </span>
+      <span className="font-[var(--font-jetbrains-mono)] tabular-nums text-fg-muted">
         {value}
       </span>
     </div>

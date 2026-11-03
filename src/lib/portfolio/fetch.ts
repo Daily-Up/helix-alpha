@@ -104,14 +104,17 @@ export async function fetchFeeRate(
 
 // ── pricing ──────────────────────────────────────────────────────────────────
 
-/** Strip SoDEX's internal `v` prefix (vBTC → BTC); pass-through for clean names. */
-export function stripV(coin: string): string {
-  return coin.length > 1 && /^v[A-Za-z0-9]/.test(coin) ? coin.slice(1) : coin;
+/** Strip SoDEX's wrapped-spot prefix (vBTC → BTC, wSOSO → SOSO). The convention
+ *  is a lowercase `v`/`w` wrapper directly before the real UPPERCASE ticker, so
+ *  the next char must be uppercase — that leaves clean names (BTC) and
+ *  lowercase-run tokens (wstETH) untouched. */
+export function stripWrapper(coin: string): string {
+  return /^[vw][A-Z]/.test(coin) ? coin.slice(1) : coin;
 }
 
-/** A spot/perps price lookup for valuing holdings. Spot coins price off the
- *  `v{COIN}_vUSDC` spot pair's last; a coin with only a perp prices off its
- *  `{BASE}-USD` mark; the quote stablecoin is $1. */
+/** A spot/perps price lookup for valuing holdings. Spot coins price off their
+ *  `{wrapped}_vUSDC` pair's last (vBTC_vUSDC, WSOSO_vUSDC); a coin with only a
+ *  perp prices off its `{BASE}-USD` mark; the quote stablecoin is $1. */
 export interface PriceContext {
   spot: Map<string, number>;
   perps: Map<string, number>;
@@ -136,9 +139,17 @@ export async function fetchPriceContext(): Promise<PriceContext> {
     if (px > 0) perps.set(t.symbol.toUpperCase(), px);
   }
   const priceOf = (coin: string): number | null => {
-    const base = stripV(coin).toUpperCase();
+    const raw = coin.toUpperCase();
+    const base = stripWrapper(coin).toUpperCase();
     if (base === "USDC" || base === "USD" || base === "USDT") return 1;
-    const spotPx = spot.get(`V${base}_VUSDC`) ?? spot.get(`${base}_USDC`);
+    // SoDEX spot pairs are "{wrappedCoin}_vUSDC" — match the wrapped coin
+    // directly first (handles both v* and w* wrappers, e.g. WSOSO_vUSDC), then
+    // fall back to base-derived forms before trying the perp mark.
+    const spotPx =
+      spot.get(`${raw}_VUSDC`) ??
+      spot.get(`V${base}_VUSDC`) ??
+      spot.get(`W${base}_VUSDC`) ??
+      spot.get(`${base}_USDC`);
     if (spotPx != null) return spotPx;
     const perpPx = perps.get(`${base}-USD`) ?? perps.get(`${base}-USDC`);
     if (perpPx != null) return perpPx;
@@ -257,7 +268,7 @@ export async function fetchSpotHoldings(
     if (value != null) totalValue += value;
     holdings.push({
       coin: b.coin,
-      display: stripV(b.coin).toUpperCase(),
+      display: stripWrapper(b.coin).toUpperCase(),
       total,
       settled: Math.max(0, total - locked),
       unsettled: locked,
