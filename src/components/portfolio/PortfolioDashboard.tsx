@@ -14,6 +14,7 @@ import Link from "next/link";
 import { useTradeMode } from "@/lib/sodex-onchain/useTradeMode";
 import { getPerpsAccountState } from "@/lib/sodex-onchain/client";
 import type { SodexPerpsAccountState } from "@/lib/sodex-onchain/types";
+import type { SymbolMeta } from "@/lib/sodex-onchain/useSodexTradeActions";
 import {
   fetchFeeRate,
   fetchTradeStats,
@@ -25,11 +26,17 @@ import { EquityChart } from "./EquityChart";
 import { OverviewCard } from "./OverviewCard";
 import { SegmentedTabs } from "./SegmentedTabs";
 import { SpotTab } from "./SpotTab";
+import { PerpsTab } from "./PerpsTab";
 import { HelixStrip } from "./HelixStrip";
 
 type TopTab = "Spot" | "Perpetuals";
 
-export function PortfolioDashboard() {
+export function PortfolioDashboard({
+  symbolMeta = {},
+}: {
+  /** Per-symbol metadata for the Perps tab (same source as /trade). */
+  symbolMeta?: Record<string, SymbolMeta>;
+}) {
   const tm = useTradeMode("mainnet");
   const address = tm.address;
 
@@ -149,24 +156,20 @@ export function PortfolioDashboard() {
               volume30dSpot={tradeStats?.volume30d.spot ?? null}
             />
           ) : (
-            <TabPlaceholder>
-              Perpetuals positions &amp; orders — reusing the terminal&apos;s
-              bottom panel, arriving after the trade-actions hook extraction.
-            </TabPlaceholder>
+            <PerpsTab
+              tm={tm}
+              account={account}
+              refreshAccount={refreshAccount}
+              symbolMeta={symbolMeta}
+              composition={composition}
+              tradeStats={tradeStats}
+            />
           )}
         </div>
       </div>
 
       {/* Traded via Helix strip */}
       <HelixStrip helix={tradeStats?.helix ?? null} />
-    </div>
-  );
-}
-
-function TabPlaceholder({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-center rounded-md border border-dashed border-line bg-surface-2/20 px-4 py-10 text-center text-[12px] text-fg-dim">
-      <span className="max-w-md">{children}</span>
     </div>
   );
 }
