@@ -4,9 +4,9 @@
  * TpSlModal — centered Take-Profit / Stop-Loss editor for an open position,
  * usable for ANY position (symbol metadata is passed in, so no market switch).
  * Price ⇄ Gain/Loss are kept in sync; Gain/Loss toggles between % (price move
- * from entry, not ROE) and $. Supports Limit execution, partial size, per-row
- * Remove, validation, and a fee line. Placement goes through the fixed signing
- * path; Confirm is disabled with a note until that fix is approved.
+ * from entry, not ROE) and $. Supports Limit execution, partial size, and a fee
+ * line. A resting leg can be marked "✕ Cancel TP/SL" (greys out, Undo); the
+ * cancel runs on Confirm alongside any other change, through the signing path.
  */
 
 import { useEffect, useState } from "react";
@@ -52,7 +52,6 @@ export function TpSlModal({
   placementEnabled,
   busy,
   onSet,
-  onRemove,
   onClose,
 }: {
   position: Position;
@@ -65,10 +64,9 @@ export function TpSlModal({
   busy: boolean;
   onSet: (
     pos: Position,
-    next: { tp: number | null; sl: number | null },
+    next: { tp: number | "cancel" | null; sl: number | "cancel" | null },
     ex: { tpOrderId: number | null; slOrderId: number | null },
   ) => Promise<{ ok: boolean; error?: string }>;
-  onRemove: (pos: Position, orderID: number) => Promise<{ ok: boolean; error?: string }>;
   onClose: () => void;
 }) {
   const entry = Number(position.ep);
@@ -123,6 +121,9 @@ export function TpSlModal({
     unit: "pct" as "pct" | "usd",
   });
   const [error, setError] = useState<string | null>(null);
+  // Mark-for-cancellation (deferred to Confirm, batched with any other change).
+  const [cancelTp, setCancelTp] = useState(false);
+  const [cancelSl, setCancelSl] = useState(false);
 
   // Esc closes.
   useEffect(() => {
@@ -171,36 +172,58 @@ export function TpSlModal({
     return p != null && margin && margin > 0 ? (p / margin) * 100 : null;
   };
 
-  // Validation.
+  // A leg marked for cancellation is greyed out, so its typed value is ignored
+  // for validation, fees and the action.
+  const tpPlace = !cancelTp && ok(tpVal);
+  const slPlace = !cancelSl && ok(slVal);
+
+  // Validation (skip a leg being cancelled).
   const problems: string[] = [];
-  if (ok(tpVal) && mark != null && (isLong ? (tpVal as number) <= mark : (tpVal as number) >= mark))
+  if (tpPlace && mark != null && (isLong ? (tpVal as number) <= mark : (tpVal as number) >= mark))
     problems.push(`Take profit must be ${isLong ? "above" : "below"} mark (${fmtPx(mark)}).`);
-  if (ok(slVal) && mark != null && (isLong ? (slVal as number) >= mark : (slVal as number) <= mark))
+  if (slPlace && mark != null && (isLong ? (slVal as number) >= mark : (slVal as number) <= mark))
     problems.push(`Stop loss must be ${isLong ? "below" : "above"} mark (${fmtPx(mark)}).`);
   let liqWarn: string | null = null;
-  if (ok(slVal) && liq != null && (isLong ? (slVal as number) <= liq : (slVal as number) >= liq))
+  if (slPlace && liq != null && (isLong ? (slVal as number) <= liq : (slVal as number) >= liq))
     liqWarn = `Stop is past liquidation (${fmtPx(liq)}) — it may never trigger.`;
 
   const notionalAt = (v: number | null) => (ok(v) ? size * (v as number) : 0);
-  const feeTotal = (notionalAt(tpVal) + notionalAt(slVal)) * (takerFee + builderRate);
+  const feeTotal =
+    ((tpPlace ? notionalAt(tpVal) : 0) + (slPlace ? notionalAt(slVal) : 0)) *
+    (takerFee + builderRate);
 
-  const anyValid = (ok(tpVal) || ok(slVal)) && problems.length === 0;
-  const canConfirm = placementEnabled && anyValid && !busy;
+  const anyPlace = tpPlace || slPlace;
+  const anyCancel = cancelTp || cancelSl;
+  const canConfirm =
+    placementEnabled && (anyPlace || anyCancel) && problems.length === 0 && !busy;
+
+  // Button intent: a single leg (place or cancel) wears that leg's side colour;
+  // a mixed action (both legs, or place one + cancel the other) is neutral.
+  const tpActing = tpPlace || cancelTp;
+  const slActing = slPlace || cancelSl;
+  const singleLeg: "tp" | "sl" | null =
+    tpActing && !slActing ? "tp" : slActing && !tpActing ? "sl" : null;
+  const confirmLabel =
+    anyCancel && !anyPlace
+      ? cancelTp && cancelSl
+        ? "Cancel TP & SL"
+        : cancelTp
+          ? "Cancel TP"
+          : "Cancel SL"
+      : "Confirm";
 
   const submit = async () => {
     setError(null);
     const res = await onSet(
       position,
-      { tp: ok(tpVal) ? tpVal : null, sl: ok(slVal) ? slVal : null },
+      {
+        tp: cancelTp ? "cancel" : ok(tpVal) ? tpVal : null,
+        sl: cancelSl ? "cancel" : ok(slVal) ? slVal : null,
+      },
       { tpOrderId: existing.tpOrderId, slOrderId: existing.slOrderId },
     );
     if (res.ok) onClose();
-    else setError(res.error ?? "Placement failed.");
-  };
-  const remove = async (orderId: number) => {
-    setError(null);
-    const res = await onRemove(position, orderId);
-    if (!res.ok) setError(res.error ?? "Remove failed.");
+    else setError(res.error ?? "Action failed.");
   };
 
   const sym = perpName(position.s);
@@ -253,8 +276,10 @@ export function TpSlModal({
             pnl={pnlAt(tpVal)}
             roe={roeAt(tpVal)}
             autoFocus={focus === "tp"}
-            existingOrderId={existing.tp != null ? existing.tpOrderId : null}
-            onRemove={remove}
+            hasExisting={existing.tpOrderId != null}
+            cancelled={cancelTp}
+            onCancelClick={() => setCancelTp(true)}
+            onUndo={() => setCancelTp(false)}
             money={money}
           />
           <Section
@@ -268,8 +293,10 @@ export function TpSlModal({
             pnl={pnlAt(slVal)}
             roe={roeAt(slVal)}
             autoFocus={focus === "sl"}
-            existingOrderId={existing.sl != null ? existing.slOrderId : null}
-            onRemove={remove}
+            hasExisting={existing.slOrderId != null}
+            cancelled={cancelSl}
+            onCancelClick={() => setCancelSl(true)}
+            onUndo={() => setCancelSl(false)}
             money={money}
           />
 
@@ -314,7 +341,7 @@ export function TpSlModal({
           <div className="mb-2 flex items-center justify-between text-[11px] text-fg-dim">
             <span>Est. fee (exchange + builder)</span>
             <span className="font-[var(--font-jetbrains-mono)] tabular-nums text-fg-muted">
-              {anyValid ? `$${feeTotal.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}` : "—"}
+              {anyPlace ? `$${feeTotal.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}` : "—"}
             </span>
           </div>
           {!placementEnabled ? (
@@ -322,17 +349,26 @@ export function TpSlModal({
               TP/SL placement being fixed — temporarily disabled.
             </p>
           ) : null}
+          {/* Trade action: neutral primary, or the leg's side colour for a
+              single TP/SL. No Helix accent on an order action. */}
           <button
             onClick={submit}
             disabled={!canConfirm}
             className={cn(
               "w-full rounded-lg py-2.5 text-[14px] font-semibold transition-colors",
-              canConfirm
-                ? "bg-accent text-[#0b0e11] hover:opacity-90"
-                : "cursor-not-allowed bg-surface-2 text-fg-dim",
+              canConfirm ? "hover:opacity-90" : "cursor-not-allowed bg-surface-2 text-fg-dim",
             )}
+            style={
+              canConfirm
+                ? singleLeg === "tp"
+                  ? { backgroundColor: "#0ecb81", color: "#0b0e11" }
+                  : singleLeg === "sl"
+                    ? { backgroundColor: "#f6465d", color: "#0b0e11" }
+                    : { backgroundColor: "#2a3340", color: "#ffffff" }
+                : undefined
+            }
           >
-            {busy ? "Placing…" : "Confirm"}
+            {busy ? "Working…" : confirmLabel}
           </button>
         </div>
       </div>
@@ -367,8 +403,10 @@ function Section({
   pnl,
   roe,
   autoFocus,
-  existingOrderId,
-  onRemove,
+  hasExisting,
+  cancelled,
+  onCancelClick,
+  onUndo,
   money,
 }: {
   kind: "tp" | "sl";
@@ -381,30 +419,51 @@ function Section({
   pnl: number | null;
   roe: number | null;
   autoFocus?: boolean;
-  existingOrderId: number | null;
-  onRemove: (orderID: number) => void;
+  /** A trigger for this leg is resting on SoDEX (so it can be cancelled). */
+  hasExisting: boolean;
+  /** This leg is marked for cancellation on Confirm. */
+  cancelled: boolean;
+  onCancelClick: () => void;
+  onUndo: () => void;
   money: (v: number) => string;
 }) {
   const accent = kind === "tp" ? "text-positive" : "text-negative";
+  const legShort = kind === "tp" ? "TP" : "SL";
   return (
     <div className="mb-3">
       <div className="mb-1 flex items-center justify-between">
         <span className={cn("text-[12px] font-medium", accent)}>{title}</span>
-        {existingOrderId != null ? (
+        {cancelled ? (
+          <span className="flex items-center gap-2 text-[10px]">
+            <span className="text-[#e0a53f]">Will be cancelled</span>
+            <button
+              onClick={onUndo}
+              className="text-fg-muted underline-offset-2 hover:text-fg hover:underline"
+            >
+              Undo
+            </button>
+          </span>
+        ) : hasExisting ? (
           <button
-            onClick={() => onRemove(existingOrderId)}
-            className="text-[10px] text-fg-dim underline-offset-2 hover:text-negative hover:underline"
+            onClick={onCancelClick}
+            className="rounded border border-transparent px-1.5 py-0.5 text-[10px] font-medium text-negative transition-colors hover:border-negative/50 hover:bg-negative/5"
           >
-            Remove
+            ✕ Cancel {legShort}
           </button>
         ) : null}
       </div>
-      <div className="grid grid-cols-2 gap-2">
+      <div
+        className={cn(
+          "grid grid-cols-2 gap-2",
+          cancelled && "pointer-events-none opacity-40",
+        )}
+      >
         {/* Price */}
         <div className="flex items-center rounded-md border border-line bg-surface-2 px-2.5 focus-within:border-[#3a4452]">
           <span className="shrink-0 text-[10px] uppercase tracking-wide text-fg-dim">Price</span>
           <input
             autoFocus={autoFocus}
+            disabled={cancelled}
             inputMode="decimal"
             value={state.price}
             onChange={(e) => onPrice(e.target.value)}
@@ -416,6 +475,7 @@ function Section({
         <div className="flex items-center rounded-md border border-line bg-surface-2 px-2.5 focus-within:border-[#3a4452]">
           <span className="shrink-0 text-[10px] uppercase tracking-wide text-fg-dim">{gainLabel}</span>
           <input
+            disabled={cancelled}
             inputMode="decimal"
             value={state.gain}
             onChange={(e) => onGain(e.target.value)}
@@ -431,7 +491,7 @@ function Section({
           </button>
         </div>
       </div>
-      {pnl != null ? (
+      {!cancelled && pnl != null ? (
         <div className="mt-1 flex items-center justify-between text-[10px]">
           <span className={cn("tabular-nums", pnl >= 0 ? "text-positive" : "text-negative")}>
             Est. PnL {money(pnl)}

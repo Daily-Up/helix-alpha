@@ -178,13 +178,14 @@ export type TpSlCtx = {
   busy: boolean;
   /** Placement is disabled until the SoDEX trigger payload fix is approved. */
   placementEnabled: boolean;
-  /** Place/modify TP & SL (place new, then cancel old). */
+  /** Place/modify/cancel TP & SL per leg (number places, "cancel" cancels the
+   *  resting trigger, null leaves it). Place-new-then-cancel-old on a modify. */
   onSet: (
     pos: Position,
-    next: { tp: number | null; sl: number | null },
+    next: { tp: number | "cancel" | null; sl: number | "cancel" | null },
     existing: { tpOrderId: number | null; slOrderId: number | null },
   ) => Promise<{ ok: boolean; error?: string }>;
-  /** Cancel one resting trigger order (per-row "Remove"). */
+  /** Cancel one resting trigger directly (positions table ×); verifies + toasts. */
   onRemove: (pos: Position, orderID: number) => Promise<{ ok: boolean; error?: string }>;
 };
 
@@ -534,7 +535,7 @@ function PositionsView({
           liq != null && mark != null && mark > 0 && Math.abs(mark - liq) / mark <= 0.1;
 
         // Resting TP / SL triggers for this position.
-        const { tp, sl } = tpslFor(p, orders);
+        const { tp, sl, tpOrderId, slOrderId } = tpslFor(p, orders);
         // Prices use THIS row's symbol tick (not the selected market's).
         const tick = tickBySymbol[p.s.toUpperCase()];
         const pxRow = (v: number) => fmtPrice(v, tick);
@@ -636,9 +637,25 @@ function PositionsView({
               cd={fundingCd}
             />
             {/* SL */}
-            <TriggerCell value={sl} tone="neg" px={pxRow} onEdit={() => openModal(p, "sl")} />
+            <TriggerCell
+              value={sl}
+              tone="neg"
+              label="SL"
+              px={pxRow}
+              orderId={slOrderId}
+              onEdit={() => openModal(p, "sl")}
+              onCancel={(id) => tpsl.onRemove(p, id)}
+            />
             {/* TP */}
-            <TriggerCell value={tp} tone="pos" px={pxRow} onEdit={() => openModal(p, "tp")} />
+            <TriggerCell
+              value={tp}
+              tone="pos"
+              label="TP"
+              px={pxRow}
+              orderId={tpOrderId}
+              onEdit={() => openModal(p, "tp")}
+              onCancel={(id) => tpsl.onRemove(p, id)}
+            />
             {/* Close (×) + ⋯ menu (Set TP/SL · Limit close) */}
             <span className="relative flex items-center justify-end gap-1">
               <button
@@ -695,7 +712,6 @@ function PositionsView({
           placementEnabled={tpsl.placementEnabled}
           busy={tpsl.busy}
           onSet={tpsl.onSet}
-          onRemove={tpsl.onRemove}
           onClose={() => setModal(null)}
         />
       ) : null}
@@ -703,23 +719,41 @@ function PositionsView({
   );
 }
 
-/** One SL or TP cell: the trigger price (or "-") + a pencil that opens the modal. */
+/** One SL or TP cell: the trigger price (or "-"), a × that cancels it directly
+ *  (one-line Yes/No popover, verified), and a pencil that opens the modal. */
 function TriggerCell({
   value,
   tone,
+  label,
   px,
+  orderId,
   onEdit,
+  onCancel,
 }: {
   value: number | null;
   tone: "pos" | "neg";
+  label: "SL" | "TP";
   px: (v: number) => string;
+  orderId: number | null;
   onEdit: () => void;
+  onCancel: (orderID: number) => void;
 }) {
+  const [confirm, setConfirm] = useState(false);
+  const canCancel = value != null && orderId != null;
   return (
-    <span className="flex items-center justify-end gap-1 text-right">
+    <span className="relative flex items-center justify-end gap-1 text-right">
       <span className={cn("tabular-nums", tone === "pos" ? "text-positive" : "text-negative")}>
         {value != null ? px(value) : "-"}
       </span>
+      {canCancel ? (
+        <button
+          onClick={() => setConfirm(true)}
+          title={`Cancel ${label}`}
+          className="rounded border border-transparent px-0.5 text-[12px] leading-4 text-negative transition-colors hover:border-negative/50"
+        >
+          ×
+        </button>
+      ) : null}
       <button
         onClick={onEdit}
         title="Set TP / SL"
@@ -727,6 +761,31 @@ function TriggerCell({
       >
         ✎
       </button>
+      {confirm && canCancel ? (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setConfirm(false)} />
+          <div className="absolute right-0 top-full z-40 mt-1 flex items-center gap-2 whitespace-nowrap rounded-md border border-line bg-surface px-2.5 py-1.5 text-[11px] shadow-xl">
+            <span className="text-fg-muted">
+              Cancel {label} {px(value as number)}?
+            </span>
+            <button
+              onClick={() => {
+                setConfirm(false);
+                onCancel(orderId as number);
+              }}
+              className="rounded bg-negative/15 px-1.5 py-0.5 font-medium text-negative transition-colors hover:bg-negative/25"
+            >
+              Yes
+            </button>
+            <button
+              onClick={() => setConfirm(false)}
+              className="rounded px-1.5 py-0.5 text-fg-dim transition-colors hover:text-fg"
+            >
+              No
+            </button>
+          </div>
+        </>
+      ) : null}
     </span>
   );
 }

@@ -615,13 +615,39 @@ export function TradeTerminal({
     return b ? b.fee / 100_000 : 0;
   }, []);
 
-  // Set / modify TP & SL for an open position (selected market only — its rules
-  // carry the symbolID + tick/step). Place the NEW trigger first, then cancel
-  // the OLD one on success; a failed placement keeps the old order untouched.
+  // Confirm an order is no longer resting on SoDEX — the only proof a cancel
+  // took (a 200 is not). Poll open orders up to ~5s (every 1s). Shared by the
+  // modal's per-leg cancel and the positions table's per-row ×.
+  const verifyOrderGone = useCallback(
+    async (orderID: number): Promise<boolean> => {
+      for (let i = 0; i < 5; i++) {
+        try {
+          const open = await getOpenOrders(
+            "mainnet",
+            tm.address as `0x${string}`,
+          );
+          if (!open.some((o) => o.orderID === orderID)) return true;
+        } catch {
+          /* retry */
+        }
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      return false;
+    },
+    [tm.address],
+  );
+
+  // Set / modify / cancel TP & SL for an open position (selected market only —
+  // its rules carry the symbolID + tick/step). Per leg: a number places the NEW
+  // trigger first then cancels the OLD on success; "cancel" cancels the resting
+  // trigger (verified gone); null leaves the leg untouched.
   const onSetTpSl = useCallback(
     async (
       pos: SodexPerpsAccountState["P"][number],
-      next: { tp: number | null; sl: number | null },
+      next: {
+        tp: number | "cancel" | null;
+        sl: number | "cancel" | null;
+      },
       existing: { tpOrderId: number | null; slOrderId: number | null },
     ): Promise<{ ok: boolean; error?: string }> => {
       if (!TPSL_PLACEMENT_ENABLED) {
@@ -649,13 +675,33 @@ export function TradeTerminal({
         tick > 0 ? (Math.round(p / tick) * tick).toFixed(pxDp) : p.toFixed(pxDp);
       // Place NEW, then cancel OLD on success — never cancel first.
       const replace = async (
-        trigger: number | null,
+        intent: number | "cancel" | null,
         stopType: number,
         oldId: number | null,
       ): Promise<string | null> => {
-        if (trigger == null) return null; // this leg unchanged
+        if (intent == null) return null; // this leg unchanged
         const leg = stopType === 2 ? "take-profit" : "stop-loss";
         const legShort = stopType === 2 ? "TP" : "SL";
+        // Cancel this leg's resting trigger, then confirm it actually left the
+        // book (a 200 is not proof). On timeout, surface it — don't claim done.
+        if (intent === "cancel") {
+          if (oldId == null) return null; // nothing resting to cancel
+          try {
+            await cancelOrders({
+              network: "mainnet",
+              apiKeyName: key.name || undefined,
+              privateKey: key.privateKey,
+              accountID: aid,
+              cancels: [{ symbolID: meta.symbolID, orderID: oldId }],
+            });
+          } catch (e) {
+            return `${legShort} cancel: ${(e as Error).message}`;
+          }
+          if (!(await verifyOrderGone(oldId))) {
+            return `${legShort} still resting — cancel not confirmed`;
+          }
+          return null;
+        }
         let clOrdID: string;
         try {
           ({ clOrdID } = await placeTriggerForPosition({
@@ -666,7 +712,7 @@ export function TradeTerminal({
             symbolID: meta.symbolID,
             positionIsLong: isLong,
             quantity: qty,
-            stopPrice: roundTick(trigger),
+            stopPrice: roundTick(intent),
             stopType,
           }));
         } catch (e) {
@@ -723,11 +769,12 @@ export function TradeTerminal({
         setTpslBusy(false);
       }
     },
-    [account?.aid, tm.address, symbolMeta, refreshOpenOrders],
+    [account?.aid, tm.address, symbolMeta, refreshOpenOrders, verifyOrderGone],
   );
 
-  // Cancel one resting trigger order (the per-row "Remove" link). Cancellation
-  // is a separate, working path — not gated by the placement flag.
+  // Cancel one resting trigger order directly (the positions table's per-row ×).
+  // Verifies the order actually left the book and toasts on failure — the table
+  // has no inline error line of its own. Not gated by the placement flag.
   const onRemoveTrigger = useCallback(
     async (
       pos: SodexPerpsAccountState["P"][number],
@@ -737,7 +784,9 @@ export function TradeTerminal({
       const aid = account?.aid;
       const meta = symbolMeta[(pos.s ?? "").toUpperCase()];
       if (!key || aid == null || !meta) {
-        return { ok: false, error: "Connect a SoDEX key first." };
+        const error = "Connect a SoDEX key first.";
+        showToast(error);
+        return { ok: false, error };
       }
       setTpslBusy(true);
       try {
@@ -748,15 +797,23 @@ export function TradeTerminal({
           accountID: aid,
           cancels: [{ symbolID: meta.symbolID, orderID }],
         });
+        const gone = await verifyOrderGone(orderID);
         await refreshOpenOrders();
+        if (!gone) {
+          const error = "Cancel not confirmed — the order still shows on SoDEX.";
+          showToast(error);
+          return { ok: false, error };
+        }
         return { ok: true };
       } catch (e) {
-        return { ok: false, error: (e as Error).message };
+        const error = (e as Error).message;
+        showToast(`Cancel failed: ${error}`);
+        return { ok: false, error };
       } finally {
         setTpslBusy(false);
       }
     },
-    [account?.aid, symbolMeta, refreshOpenOrders],
+    [account?.aid, symbolMeta, refreshOpenOrders, verifyOrderGone, showToast],
   );
 
   const tpslCtx = useMemo(
