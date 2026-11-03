@@ -25,6 +25,7 @@ import { EquityChart } from "./EquityChart";
 import { OverviewCard } from "./OverviewCard";
 import { SegmentedTabs } from "./SegmentedTabs";
 import { SpotTab } from "./SpotTab";
+import { HelixStrip } from "./HelixStrip";
 
 type TopTab = "Spot" | "Perpetuals";
 
@@ -156,10 +157,8 @@ export function PortfolioDashboard() {
         </div>
       </div>
 
-      {/* Traded via Helix strip — placeholder until commit (d). */}
-      <div className="rounded-lg border border-line bg-surface-2/30 px-4 py-3 text-[11px] text-fg-dim">
-        Traded via Helix — volume, fills &amp; builder fees, arriving next.
-      </div>
+      {/* Traded via Helix strip */}
+      <HelixStrip helix={tradeStats?.helix ?? null} />
     </div>
   );
 }
