@@ -35,6 +35,10 @@
     {
       "path": "/api/cron/refresh-klines-daily",
       "schedule": "30 2 * * *"
+    },
+    {
+      "path": "/api/cron/equity-snapshots",
+      "schedule": "0 3 * * *"
     }
   ]
 }

@@ -970,3 +970,22 @@ CREATE TABLE IF NOT EXISTS schema_version (
   applied_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
 );
 INSERT OR IGNORE INTO schema_version (version) VALUES (1);
+
+-- ── 26. Portfolio equity snapshots ────────────────────────────────────────
+--
+-- SoDEX exposes no equity/PnL-history endpoint, so the portfolio equity curve
+-- is built from snapshots we record ourselves: current equity per connected
+-- address, written on page visit (throttled to one row / 15 min / address) and
+-- optionally by a daily cron backstop. Perps equity is the `av` field on the
+-- perps account state; spot equity is holdings valued at spot/perps mark.
+CREATE TABLE IF NOT EXISTS equity_snapshots (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  address       TEXT    NOT NULL,            -- lowercase 0x master/account address
+  ts            INTEGER NOT NULL,            -- unix ms
+  perps_equity  REAL    NOT NULL,            -- USD
+  spot_equity   REAL    NOT NULL,            -- USD
+  total_equity  REAL    NOT NULL,            -- USD
+  perps_upnl    REAL,                        -- USD, nullable
+  spot_upnl     REAL                         -- USD, nullable (if reconstructed)
+);
+CREATE INDEX IF NOT EXISTS idx_equity_snap_addr_ts ON equity_snapshots(address, ts);

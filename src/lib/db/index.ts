@@ -50,6 +50,11 @@ export type {
   ExecutedTradeRow,
   TradeStatus as ExecutedTradeStatus,
 } from "./repos/executed-trades";
+export * as EquitySnapshots from "./repos/equity-snapshots";
+export type {
+  EquitySnapshotRow,
+  NewEquitySnapshot,
+} from "./repos/equity-snapshots";
 
 // Re-export commonly-needed enum values + types so call sites don't need a
 // second import.
