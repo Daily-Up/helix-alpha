@@ -169,3 +169,54 @@ Perpetuals tab: 4 stat cards: Perps Equity, 30d Perps Volume, 30d Realized PnL, 
 - No changes to signing/order code.
 - Never click Confirm/Close/Cancel in testing.
 - tsc + build green, screenshots at 1920 and 1440, push to portfolio-v2 and give me the preview URL.
+
+---
+
+## Addendum (2026-11-04): unified balances rebuild + SoDEX data-source map
+
+The Spot/Perpetuals split was replaced with a **unified Balances table** modelled on
+SoDEX's own portfolio, plus a collateral breakdown in the Overview and a
+"count every asset once" total. SoDEX's portfolio is **not one endpoint** — it
+composes several public, address-keyed sources (discovered by inspecting the
+logged-in sodex.com/portfolio network traffic):
+
+| Data | Endpoint | Key fields |
+|---|---|---|
+| Spot balances | `GET {gw}/spot/accounts/{addr}/state` | `B[]`: `i` id, `a` symbol (vBTC, WSOSO, vUSDC…), `t` total, `l` locked |
+| Margin/Futures + equity | `GET {gw}/perps/accounts/{addr}/state` | `av` equity, `am` free collateral, `mm`/`mmr`; `B[]`: `wb` balance, `mr` collateral ratio, `px` index price, **`wm = wb×px×mr`** (collateral value), `aw` available; `P[]` positions (`ur` uPnL) |
+| Collateral ratio + eligibility | `GET {gw}/perps/markets/coins` | per coin `{id,name,precision,marginRatio,price}`. **`marginRatio` = collateral ratio; `0` = not eligible.** The live source — no hardcoded docs table. |
+| Vault funds (NAV, type) | `GET wealth.sodex.dev/api/v1/wealth/funds` | `{fundId,name,fundType,nav,aum,share{coin,address,decimals}}`. `fundType`: `escrow_vault` (true vault, aXXX share), `bridged_vault` (Morpho-Earn → `vsoUSDC` = soUSDC, counted in perps), `clob` (tokenised stock, share = the vXXX token, counted in spot/perps). |
+| Vault holdings | `GET wealth.sodex.dev/.../users/{addr}/fund-details` | `totals[]`: `{fundId,share{coin},shares}` + `unavailableTotalsFundIds` |
+
+`{gw}` = `https://mainnet-gw.sodex.dev/api/v1`. All reads are public (no auth).
+Accounting verified live: USDC (Margin & Futures) total = perps `wb` + futures
+uPnL; available = `wb`; USD value = balance × `px`; collateral value = `wb×px×mr`.
+Dedup: vault counts **only `escrow_vault` funds whose share coin isn't already a
+spot/perps asset** — so soUSDC (bridged) and vXXX (clob) are never double-counted.
+Implemented in `fetchPortfolioBalances()` in `src/lib/portfolio/fetch.ts`.
+
+### Follow-up: on-chain tier (NOT YET BUILT)
+
+The current totals **exclude on-chain wallet tokens and staked balances** — e.g.
+un-deposited **SOSO** (~165 in the reference account) and staked **sSOSO** (~30) —
+and the **earn APY** (USDC "Earn 6.10% APY"). These are a separate tier the
+gateway doesn't expose; the UI notes the exclusion. To add them:
+
+1. **On-chain wallet balances** — SoDEX reads them via JSON-RPC multicall to
+   `https://mainnet.valuechain.xyz/` (the portfolio page fires these on load).
+   Pick up: enumerate the relevant token contracts (SOSO, sSOSO, and any other
+   wallet-held SoDEX tokens — the funds list gives share-token addresses, e.g.
+   `aUNITREE` 0x6753…, soUSDC 0x…), `balanceOf(addr)` each via a multicall, scale
+   by decimals, price via the same `priceFor()` (index/ticker) or NAV. Add a
+   `fetchOnchainWalletBalances(addr)` source and a `"Wallet"` venue.
+2. **Staking (sSOSO)** — `sSOSO` is staked SOSO (liquid-staking token); its
+   balance is on-chain (same multicall). The "Stake to Earn" / "Unstake" actions
+   link to `sodex.com/staking`. Price sSOSO at the SOSO index price × the staking
+   exchange rate (find the staking contract's rate, likely on `alpha-biz.sodex.dev`
+   or on-chain).
+3. **Earn APY** — the USDC "Earn X% APY" badge needs a rate endpoint (likely
+   `wealth.sodex.dev` or `alpha-biz.sodex.dev`; not yet mapped). Surface as an
+   "Earn X% APY" badge on the USDC row.
+
+Once added, drop the "Excludes on-chain wallet & staked balances" note and extend
+the Task-4 reconciliation assert to include the Wallet + staking contributions.

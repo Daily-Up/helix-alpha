@@ -14,11 +14,15 @@ import { useEffect } from "react";
 import { cn } from "@/components/ui/cn";
 import { RingGauge } from "./RingGauge";
 import { money, compactUsd } from "./fmt";
-import type { EquityComposition, FeeRate } from "@/lib/portfolio/fetch";
+import type {
+  EquityComposition,
+  FeeRate,
+  CollateralBreakdown,
+} from "@/lib/portfolio/fetch";
 import type { SodexPerpsAccountState } from "@/lib/sodex-onchain/types";
 
 /** SoDEX's own pages — we link out rather than signing transfers here. */
-const SODEX_WALLET = "https://sodex.com/wallet";
+const SODEX_WALLET = "https://sodex.com/portfolio";
 const SODEX_FEES = "https://sodex.com";
 
 export function OverviewCard({
@@ -27,6 +31,9 @@ export function OverviewCard({
   feeRate,
   volume30d,
   ready,
+  collateral,
+  vaultEquity,
+  totalUsd,
 }: {
   composition: EquityComposition | null;
   account: SodexPerpsAccountState | null;
@@ -34,6 +41,12 @@ export function OverviewCard({
   /** Combined 30d volume (perps + spot), USD. */
   volume30d: number | null;
   ready: boolean;
+  /** Collateral breakdown (active-as-margin assets × ratio) + free collateral. */
+  collateral: CollateralBreakdown | null;
+  /** Vault (escrow) equity, counted once alongside perps + spot. */
+  vaultEquity: number | null;
+  /** On-exchange + vault total (excludes on-chain wallet & staked balances). */
+  totalUsd: number | null;
 }) {
   // Margin usage from the perps account (same derivation as AccountPanel).
   const equity = account ? Number(account.av) : null;
@@ -96,7 +109,7 @@ export function OverviewCard({
         <FundButton href={SODEX_WALLET} label="Withdraw" />
       </div>
 
-      {/* Composition — Perps Equity + Spot Holdings sum to the headline total;
+      {/* Composition — Perps Equity + Spot Holdings (+ Vault) sum to the total;
           free collateral is a sub-detail of perps (already inside its equity). */}
       <div className="flex flex-col gap-2 border-t border-line pt-3">
         <StatRow
@@ -116,7 +129,77 @@ export function OverviewCard({
           value={money(composition?.spot_equity)}
           hint="Spot balances valued at market"
         />
+        {vaultEquity != null && vaultEquity > 0 ? (
+          <StatRow
+            dot="#e0a53f"
+            label="Vault Holdings"
+            value={money(vaultEquity)}
+            hint="Escrow-vault fund shares, valued at NAV"
+          />
+        ) : null}
+        {totalUsd != null ? (
+          <div className="mt-1 flex items-center justify-between border-t border-line/60 pt-2 text-[12px]">
+            <span className="font-medium text-fg-muted">Total</span>
+            <span className="font-[var(--font-jetbrains-mono)] font-semibold tabular-nums text-fg">
+              {money(totalUsd)}
+            </span>
+          </div>
+        ) : null}
+        <p className="text-[10px] leading-relaxed text-fg-dim">
+          Excludes on-chain wallet &amp; staked balances (SOSO, sSOSO).
+        </p>
       </div>
+
+      {/* Collateral backing margin — active-as-margin assets × index price ×
+          ratio; plus free collateral and a nudge for eligible-but-idle assets. */}
+      {collateral && collateral.assets.length > 0 ? (
+        <div className="flex flex-col gap-1.5 border-t border-line pt-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-medium uppercase tracking-wider text-fg-dim">
+              Collateral backing margin
+            </span>
+            <span className="font-[var(--font-jetbrains-mono)] text-[12px] tabular-nums text-fg">
+              {money(collateral.total)}
+            </span>
+          </div>
+          {collateral.assets.slice(0, 5).map((a) => (
+            <div
+              key={a.symbol}
+              className="flex items-center justify-between text-[11px]"
+              title={`${a.balance.toLocaleString(undefined, { maximumFractionDigits: 6 })} × ${money(a.price)} × ${(a.ratio * 100).toFixed(0)}% = ${money(a.value)}`}
+            >
+              <span className="text-fg-muted">
+                {a.symbol}{" "}
+                <span className="text-fg-dim">
+                  · {(a.ratio * 100).toFixed(0)}%
+                </span>
+              </span>
+              <span className="font-[var(--font-jetbrains-mono)] tabular-nums text-fg-muted">
+                {money(a.value)}
+              </span>
+            </div>
+          ))}
+          <div className="flex items-center justify-between border-t border-line/50 pt-1.5 text-[11px]">
+            <span className="text-fg-dim">Free collateral</span>
+            <span className="font-[var(--font-jetbrains-mono)] tabular-nums text-fg-muted">
+              {money(collateral.freeCollateral)}
+            </span>
+          </div>
+          {collateral.eligibleNotActive.length > 0 ? (
+            <p className="mt-0.5 text-[10px] leading-relaxed text-fg-dim">
+              {collateral.eligibleNotActive
+                .slice(0, 3)
+                .map((e) => e.symbol)
+                .join(", ")}{" "}
+              in Spot{" "}
+              {collateral.eligibleNotActive.length === 1 ? "is" : "are"} eligible
+              — transfer to Margin &amp; Futures to use{" "}
+              {collateral.eligibleNotActive.length === 1 ? "it" : "them"} as
+              collateral.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       {/* Fee tier card */}
       <div className="mt-auto rounded-md border border-line bg-surface-2/40 p-3">

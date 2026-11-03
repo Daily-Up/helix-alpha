@@ -217,6 +217,7 @@ export function BottomPanel({
   digits,
   address,
   historyRefreshKey,
+  hideTabBar,
 }: {
   tab: BottomTab;
   setTab: (t: BottomTab) => void;
@@ -256,6 +257,9 @@ export function BottomPanel({
   address: string | null;
   /** Bumps after any order action so open history tabs refetch. */
   historyRefreshKey: number;
+  /** Hide the internal tab bar — a parent drives `tab` from its own tab bar.
+   *  The Positions-only "Close All" control is still shown. */
+  hideTabBar?: boolean;
 }) {
   const [currentOnly, setCurrentOnly] = useState(false);
   const [closeAllOpen, setCloseAllOpen] = useState(false);
@@ -278,7 +282,9 @@ export function BottomPanel({
 
   return (
     <div className="flex h-full flex-col">
+      {!hideTabBar || tab === "Positions" ? (
       <div className="flex shrink-0 items-center gap-4 border-b border-line px-4 py-2 text-[12px]">
+        {!hideTabBar ? (
         <div className="flex items-center gap-4 overflow-x-auto">
           {BOTTOM_TABS.map((t) => (
             <button
@@ -306,9 +312,11 @@ export function BottomPanel({
             </button>
           ))}
         </div>
+        ) : null}
 
         {/* Toolbar — right side of the tab bar */}
         <div className="ml-auto flex shrink-0 items-center gap-3">
+          {!hideTabBar ? (
           <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-fg-muted">
             <input
               type="checkbox"
@@ -318,6 +326,7 @@ export function BottomPanel({
             />
             Current market only
           </label>
+          ) : null}
           {/* Close All belongs to Positions only; Open Orders has its own
               "Cancel all" inside the list. */}
           {tab === "Positions" ? (
@@ -331,6 +340,7 @@ export function BottomPanel({
           ) : null}
         </div>
       </div>
+      ) : null}
 
       <div className="min-h-0 flex-1 overflow-auto">
         {!ready ? (

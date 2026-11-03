@@ -428,3 +428,438 @@ export function rangeSince(range: EquityRange, now = Date.now()): number {
       return 0;
   }
 }
+
+// ── unified balances (SoDEX-style portfolio table) ────────────────────────────
+//
+// SoDEX's own portfolio composes several public, address-keyed sources — there
+// is no single "balances" endpoint. The on-exchange tier we cover here:
+//   • GET /spot/accounts/{addr}/balances         → Spot venue
+//   • GET /perps/accounts/{addr}/state           → Margin & Futures venue
+//                                                   (B[].wb/mr/px/wm, P[].ur)
+//   • GET /perps/markets/coins                   → collateral ratio + eligibility
+//   • GET wealth.sodex.dev/.../funds             → vault NAVs + fund types
+//   • GET wealth.sodex.dev/.../users/{addr}/fund-details → vault holdings
+//
+// NOT covered (on-chain wallet tokens like un-deposited SOSO, staked sSOSO, and
+// the earn APY) — those need the valuechain RPC + staking/earn services; see the
+// "on-chain tier" follow-up in docs/PORTFOLIO_PLAN.md. Totals here exclude them.
+
+const WEALTH_BASE = "https://wealth.sodex.dev/api/v1/wealth";
+
+/** Per-coin collateral config from /perps/markets/coins. marginRatio > 0 ⇒
+ *  usable as Multi-Asset-Margin collateral (and IS the collateral ratio); "0" ⇒
+ *  not eligible. The live source of truth — no hardcoded docs ratio table. */
+export interface CoinConfig {
+  marginRatio: number;
+  price: number | null;
+}
+
+/** GET /perps/markets/coins → map keyed by UPPERCASE coin name (VBTC, VQQQ…). */
+export async function fetchCoinsConfig(): Promise<Map<string, CoinConfig>> {
+  const rows = await spotGet<
+    Array<{ id: number; name: string; marginRatio?: string; price?: string }>
+  >("/markets/coins", { baseOverride: baseFor("perp") }).catch(() => []);
+  const m = new Map<string, CoinConfig>();
+  for (const r of rows ?? []) {
+    if (!r?.name) continue;
+    m.set(r.name.toUpperCase(), {
+      marginRatio: n(r.marginRatio),
+      price: r.price != null ? n(r.price) : null,
+    });
+  }
+  return m;
+}
+
+/** One SoDEX Wealth fund. fundType: "escrow_vault" (true vault, distinct aXXX
+ *  share token), "bridged_vault" (e.g. Morpho-Earn → vsoUSDC, already counted in
+ *  perps margin) or "clob" (tokenised stock, share coin = the vXXX token itself,
+ *  already counted in spot/perps). nav is USD per share (absent for clob). */
+export interface WealthFund {
+  fundId: string;
+  name: string;
+  fundType: string;
+  nav: number | null;
+  shareCoin: string;
+}
+
+/** GET wealth/funds → map keyed by fundId. */
+export async function fetchWealthFunds(): Promise<Map<string, WealthFund>> {
+  const rows = await spotGet<Array<Record<string, unknown>>>("/funds", {
+    baseOverride: WEALTH_BASE,
+  }).catch(() => []);
+  const m = new Map<string, WealthFund>();
+  for (const r of rows ?? []) {
+    const fundId = String(r.fundId ?? "");
+    if (!fundId) continue;
+    const share = (r.share ?? {}) as { coin?: string };
+    m.set(fundId, {
+      fundId,
+      name: String(r.name ?? fundId),
+      fundType: String(r.fundType ?? ""),
+      nav: r.nav != null ? n(r.nav) : null,
+      shareCoin: String(share.coin ?? ""),
+    });
+  }
+  return m;
+}
+
+export interface WealthHolding {
+  fundId: string;
+  shareCoin: string;
+  shares: number;
+}
+
+/** GET wealth/users/{addr}/fund-details → the user's share balance per fund,
+ *  plus the fundIds SoDEX itself marks as unavailable (counted elsewhere). */
+export async function fetchWealthHoldings(address: string): Promise<{
+  holdings: WealthHolding[];
+  unavailableFundIds: string[];
+}> {
+  const d = await spotGet<{
+    totals?: Array<Record<string, unknown>>;
+    unavailableTotalsFundIds?: string[];
+  }>(`/users/${address}/fund-details`, { baseOverride: WEALTH_BASE }).catch(
+    () => ({ totals: [], unavailableTotalsFundIds: [] }),
+  );
+  const holdings: WealthHolding[] = [];
+  for (const t of d?.totals ?? []) {
+    const share = (t.share ?? {}) as { coin?: string };
+    holdings.push({
+      fundId: String(t.fundId ?? ""),
+      shareCoin: String(share.coin ?? ""),
+      shares: n(t.shares),
+    });
+  }
+  return { holdings, unavailableFundIds: d?.unavailableTotalsFundIds ?? [] };
+}
+
+/** The account a balance lives in — drives the "(Spot)" / "(Margin & Futures)" /
+ *  "(Vault)" row label and the available action set. */
+export type BalanceVenue = "Spot" | "Margin & Futures" | "Vault";
+export type BalanceAction =
+  | "Transfer"
+  | "Deposit"
+  | "Withdraw"
+  | "Subscribe"
+  | "Redeem";
+
+export interface VenueBalance {
+  venue: BalanceVenue;
+  /** Raw on-exchange asset symbol for this venue (vBTC, WSOSO, vsoUSDC, aUNITREE). */
+  asset: string;
+  /** Display total. For the Margin & Futures quote (USDC) this folds in futures
+   *  uPnL so the venue subtotal reconciles to the account's equity (`av`). */
+  total: number;
+  available: number;
+  price: number | null;
+  usd: number | null;
+  /** Collateral value this balance contributes to margin (= wb × px × mr);
+   *  Margin & Futures venue only. */
+  collateralValue?: number;
+  /** Collateral ratio (haircut) for this venue's asset; Margin & Futures only. */
+  ratio?: number;
+}
+
+export interface UnifiedHolding {
+  /** Display ticker, wrapper stripped (USDC, BTC, SOSO, soUSDC, QQQ, UNITREE). */
+  symbol: string;
+  /** Symbol to resolve a logo from. */
+  logo: string;
+  total: number;
+  available: number;
+  usd: number | null;
+  venues: VenueBalance[];
+  /** Eligible as multi-asset-margin collateral (coins.marginRatio > 0). */
+  multiAssetMargin: boolean;
+  /** Currently counting toward margin (held in the perps account with wm > 0). */
+  activeAsMargin: boolean;
+  /** Collateral ratio to show on the badge, when eligible. */
+  marginRatio: number | null;
+  /** Fund-like (Subscribe/Redeem) vs plain token (Deposit/Withdraw). */
+  actions: BalanceAction[];
+}
+
+export interface CollateralAsset {
+  symbol: string;
+  balance: number;
+  price: number;
+  ratio: number;
+  /** balance × price × ratio. */
+  value: number;
+}
+
+export interface CollateralBreakdown {
+  assets: CollateralAsset[];
+  /** Σ value — collateral currently backing margin. */
+  total: number;
+  /** Free collateral (`am`). */
+  freeCollateral: number;
+  /** Held in Spot, collateral-eligible, but not yet posted as margin. */
+  eligibleNotActive: Array<{ symbol: string; ratio: number }>;
+}
+
+export interface PortfolioBalances {
+  holdings: UnifiedHolding[];
+  /** Σ holdings.usd — the on-exchange + vault total (excludes on-chain/staked). */
+  totalUsd: number;
+  perpsEquity: number;
+  spotEquity: number;
+  vaultEquity: number;
+  collateral: CollateralBreakdown;
+}
+
+/** Strip SoDEX's wrapped-asset prefix for display: vBTC→BTC, WSOSO→SOSO,
+ *  vsoUSDC→soUSDC, aUNITREE→UNITREE. */
+export function displaySymbol(asset: string): string {
+  if (/^v[a-z]/.test(asset)) return asset.slice(1); // vsoUSDC → soUSDC
+  if (/^[vw][A-Z0-9]/.test(asset)) return asset.slice(1); // vBTC→BTC, WSOSO→SOSO
+  if (/^a[A-Z]/.test(asset)) return asset.slice(1); // aUNITREE→UNITREE
+  return asset;
+}
+
+/** One sweep of the on-exchange + vault sources → the unified balances model
+ *  behind the portfolio's Balances tab, the Overview collateral breakdown, and
+ *  the "count every asset once" total. Read-only; errors on any one source are
+ *  swallowed so a single outage can't blank the whole table. */
+export async function fetchPortfolioBalances(
+  address: string,
+): Promise<PortfolioBalances> {
+  const [spotBalances, perps, coins, funds, wealth, ctx] = await Promise.all([
+    fetchSpotBalances(address).catch(() => [] as SpotBalance[]),
+    fetchPerpsState(address).catch(() => null),
+    fetchCoinsConfig().catch(() => new Map<string, CoinConfig>()),
+    fetchWealthFunds().catch(() => new Map<string, WealthFund>()),
+    fetchWealthHoldings(address).catch(() => ({
+      holdings: [] as WealthHolding[],
+      unavailableFundIds: [] as string[],
+    })),
+    fetchPriceContext().catch(
+      () =>
+        ({
+          spot: new Map(),
+          perps: new Map(),
+          priceOf: () => null,
+        }) as PriceContext,
+    ),
+  ]);
+
+  // Price for an asset: coins-config index price, then the live perps mark, then
+  // the spot/perps ticker fallback; stablecoins are $1.
+  const priceFor = (asset: string): number | null => {
+    const base = stripWrapper(asset).toUpperCase();
+    if (base === "USDC" || base === "USD" || base === "USDT") return 1;
+    const cfg = coins.get(asset.toUpperCase());
+    if (cfg?.price != null) return cfg.price;
+    return ctx.priceOf(asset);
+  };
+
+  // Share coins of every Wealth fund — a balance whose symbol is one of these is
+  // "fund-like" (Subscribe/Redeem instead of Deposit/Withdraw).
+  const fundShareCoins = new Set<string>();
+  for (const f of funds.values()) {
+    if (f.shareCoin) fundShareCoins.add(f.shareCoin.toUpperCase());
+  }
+
+  const bySymbol = new Map<string, UnifiedHolding>();
+  const ensure = (asset: string): UnifiedHolding => {
+    const symbol = displaySymbol(asset);
+    let h = bySymbol.get(symbol);
+    if (!h) {
+      h = {
+        symbol,
+        logo: symbol,
+        total: 0,
+        available: 0,
+        usd: null,
+        venues: [],
+        multiAssetMargin: false,
+        activeAsMargin: false,
+        marginRatio: null,
+        actions: ["Transfer", "Deposit", "Withdraw"],
+      };
+      bySymbol.set(symbol, h);
+    }
+    return h;
+  };
+
+  // ── Spot venue ──
+  let spotEquity = 0;
+  for (const b of spotBalances) {
+    const total = n(b.total);
+    const locked = n(b.locked);
+    if (total === 0 && locked === 0) continue;
+    const price = priceFor(b.coin);
+    const usd = price != null ? total * price : null;
+    if (usd != null) spotEquity += usd;
+    const h = ensure(b.coin);
+    h.venues.push({
+      venue: "Spot",
+      asset: b.coin,
+      total,
+      available: Math.max(0, total - locked),
+      price,
+      usd,
+    });
+  }
+
+  // ── Margin & Futures venue ──
+  const marginAssets = new Set<string>(); // assets with collateral posted
+  const marginRowsRef: VenueBalance[] = [];
+  let marginGross = 0;
+  for (const b of perps?.B ?? []) {
+    const wb = n(b.wb);
+    if (wb === 0) continue;
+    const px = n(b.px) || priceFor(b.a) || 0;
+    const mr = n(b.mr);
+    const available = b.aw != null ? n(b.aw) : wb;
+    const usd = px > 0 ? wb * px : null;
+    const collateralValue = b.wm != null ? n(b.wm) : wb * px * mr;
+    if (usd != null) marginGross += usd;
+    if (collateralValue > 0) marginAssets.add(b.a.toUpperCase());
+    const row: VenueBalance = {
+      venue: "Margin & Futures",
+      asset: b.a,
+      total: wb,
+      available,
+      price: px > 0 ? px : null,
+      usd,
+      collateralValue,
+      ratio: mr,
+    };
+    marginRowsRef.push(row);
+    ensure(b.a).venues.push(row);
+  }
+  // Fold futures uPnL + any valuation residual into the quote (USDC) margin row,
+  // so the Margin & Futures subtotal reconciles to account equity `av` exactly —
+  // mirroring how SoDEX attributes uPnL to the USDC line.
+  const av = perps ? n(perps.av) : 0;
+  let perpsEquity = marginGross;
+  if (marginRowsRef.length > 0 && perps) {
+    const quote = marginRowsRef.find(
+      (r) => stripWrapper(r.asset).toUpperCase() === "USDC",
+    );
+    if (quote) {
+      const residual = av - marginGross; // uPnL + valuation/rounding diff
+      quote.total += residual; // USDC is $1, so units == USD
+      quote.usd = (quote.usd ?? 0) + residual;
+      perpsEquity = av;
+    }
+  }
+
+  // ── Vault venue (escrow_vault only; dedup against spot/perps) ──
+  const spotPerpsAssets = new Set<string>([
+    ...spotBalances.map((b) => b.coin.toUpperCase()),
+    ...(perps?.B ?? []).map((b) => b.a.toUpperCase()),
+  ]);
+  let vaultEquity = 0;
+  for (const wh of wealth.holdings) {
+    if (wh.shares <= 0) continue;
+    const fund = funds.get(wh.fundId);
+    if (!fund || fund.fundType !== "escrow_vault") continue; // bridged/clob counted elsewhere
+    if (wealth.unavailableFundIds.includes(wh.fundId)) continue;
+    if (spotPerpsAssets.has(wh.shareCoin.toUpperCase())) continue; // never double-count
+    const price = fund.nav;
+    const usd = price != null ? wh.shares * price : null;
+    if (usd != null) vaultEquity += usd;
+    const h = ensure(wh.shareCoin);
+    h.venues.push({
+      venue: "Vault",
+      asset: wh.shareCoin,
+      total: wh.shares,
+      available: wh.shares,
+      price,
+      usd,
+    });
+  }
+
+  // ── Badges, actions, totals per holding ──
+  for (const h of bySymbol.values()) {
+    let eligibleRatio = 0; // coins-config marginRatio → "Multi-Asset Margin"
+    let activeRatio = 0; // perps mr → "Active as margin" (e.g. soUSDC)
+    let fundLike = false;
+    for (const v of h.venues) {
+      const up = v.asset.toUpperCase();
+      const cfgR = n(coins.get(up)?.marginRatio);
+      if (cfgR > 0) eligibleRatio = Math.max(eligibleRatio, cfgR);
+      if (v.venue === "Margin & Futures" && (v.collateralValue ?? 0) > 0) {
+        h.activeAsMargin = true;
+        if (v.ratio) activeRatio = Math.max(activeRatio, v.ratio);
+      }
+      if (fundShareCoins.has(up)) fundLike = true;
+    }
+    h.multiAssetMargin = eligibleRatio > 0;
+    h.marginRatio = eligibleRatio > 0 ? eligibleRatio : activeRatio > 0 ? activeRatio : null;
+    h.actions = fundLike
+      ? ["Transfer", "Subscribe", "Redeem"]
+      : ["Transfer", "Deposit", "Withdraw"];
+    h.total = h.venues.reduce((s, v) => s + v.total, 0);
+    h.available = h.venues.reduce((s, v) => s + v.available, 0);
+    const usdVals = h.venues.filter((v) => v.usd != null);
+    h.usd = usdVals.length ? usdVals.reduce((s, v) => s + (v.usd as number), 0) : null;
+    // Vault / Margin sub-rows keep their natural order; Spot first for familiarity.
+    h.venues.sort((a, b) => venueRank(a.venue) - venueRank(b.venue));
+  }
+
+  const holdings = [...bySymbol.values()].sort(
+    (a, b) => (b.usd ?? 0) - (a.usd ?? 0),
+  );
+  const totalUsd = holdings.reduce((s, h) => s + (h.usd ?? 0), 0);
+
+  // ── Collateral breakdown (Overview) ──
+  const collateralAssets: CollateralAsset[] = [];
+  for (const b of perps?.B ?? []) {
+    const wb = n(b.wb);
+    const px = n(b.px);
+    const mr = n(b.mr);
+    const value = b.wm != null ? n(b.wm) : wb * px * mr;
+    if (value <= 0) continue;
+    collateralAssets.push({
+      symbol: displaySymbol(b.a),
+      balance: wb,
+      price: px,
+      ratio: mr,
+      value,
+    });
+  }
+  collateralAssets.sort((a, b) => b.value - a.value);
+  const eligibleNotActive: Array<{ symbol: string; ratio: number }> = [];
+  for (const b of spotBalances) {
+    if (n(b.total) <= 0) continue;
+    const up = b.coin.toUpperCase();
+    const ratio = n(coins.get(up)?.marginRatio);
+    if (ratio > 0 && !marginAssets.has(up))
+      eligibleNotActive.push({ symbol: displaySymbol(b.coin), ratio });
+  }
+
+  // Dev guard (Task 4): every asset counted exactly once — the row total must
+  // reconcile to the sum of the disjoint sources. A soUSDC/vQQQ double-count
+  // (vault fund-details on top of perps/spot) would blow this up.
+  if (process.env.NODE_ENV !== "production") {
+    const parts = spotEquity + perpsEquity + vaultEquity;
+    if (Math.abs(totalUsd - parts) > 0.01) {
+      console.warn(
+        `[portfolio] balances total mismatch: Σrows=${totalUsd} vs ` +
+          `spot(${spotEquity})+perps(${perpsEquity})+vault(${vaultEquity})=${parts} — ` +
+          "an asset may be double-counted or missed",
+      );
+    }
+  }
+
+  return {
+    holdings,
+    totalUsd,
+    perpsEquity,
+    spotEquity,
+    vaultEquity,
+    collateral: {
+      assets: collateralAssets,
+      total: collateralAssets.reduce((s, a) => s + a.value, 0),
+      freeCollateral: perps ? n(perps.am) : 0,
+      eligibleNotActive,
+    },
+  };
+}
+
+function venueRank(v: BalanceVenue): number {
+  return v === "Spot" ? 0 : v === "Margin & Futures" ? 1 : 2;
+}

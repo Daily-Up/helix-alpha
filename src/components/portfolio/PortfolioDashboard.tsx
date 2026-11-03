@@ -18,18 +18,16 @@ import type { SymbolMeta } from "@/lib/sodex-onchain/useSodexTradeActions";
 import {
   fetchFeeRate,
   fetchTradeStats,
+  fetchPortfolioBalances,
   type EquityComposition,
   type FeeRate,
   type TradeStats,
+  type PortfolioBalances,
 } from "@/lib/portfolio/fetch";
 import { EquityChart } from "./EquityChart";
 import { OverviewCard } from "./OverviewCard";
-import { SegmentedTabs } from "./SegmentedTabs";
-import { SpotTab } from "./SpotTab";
-import { PerpsTab } from "./PerpsTab";
+import { PortfolioActivity } from "./PortfolioActivity";
 import { HelixStrip } from "./HelixStrip";
-
-type TopTab = "Spot" | "Perpetuals";
 
 export function PortfolioDashboard({
   symbolMeta = {},
@@ -40,11 +38,12 @@ export function PortfolioDashboard({
   const tm = useTradeMode("mainnet");
   const address = tm.address;
 
-  const [tab, setTab] = useState<TopTab>("Spot");
   const [account, setAccount] = useState<SodexPerpsAccountState | null>(null);
   const [composition, setComposition] = useState<EquityComposition | null>(null);
   const [feeRate, setFeeRate] = useState<FeeRate | null>(null);
   const [tradeStats, setTradeStats] = useState<TradeStats | null>(null);
+  const [balances, setBalances] = useState<PortfolioBalances | null>(null);
+  const [balancesRefreshing, setBalancesRefreshing] = useState(false);
 
   // Live perps account state — margin ring + (later) the Perps tab. Read-only.
   const refreshAccount = useCallback(async () => {
@@ -88,6 +87,29 @@ export function PortfolioDashboard({
     const t = setInterval(refreshComposition, 60_000);
     return () => clearInterval(t);
   }, [refreshComposition]);
+
+  // Unified balances (Spot + Margin & Futures + Vault) + collateral breakdown.
+  // One sweep of the public gateway + wealth endpoints; refreshed on a slow
+  // cadence and on the Balances tab's manual refresh.
+  const refreshBalances = useCallback(async () => {
+    if (!tm.ready || !address) {
+      setBalances(null);
+      return;
+    }
+    setBalancesRefreshing(true);
+    try {
+      setBalances(await fetchPortfolioBalances(address));
+    } catch {
+      /* keep last good */
+    } finally {
+      setBalancesRefreshing(false);
+    }
+  }, [tm.ready, address]);
+  useEffect(() => {
+    refreshBalances();
+    const t = setInterval(refreshBalances, 30_000);
+    return () => clearInterval(t);
+  }, [refreshBalances]);
 
   // Fee tier + trade-derived stats (30d volume, Helix strip). One sweep on
   // connect; these move slowly, so they aren't polled.
@@ -135,38 +157,25 @@ export function PortfolioDashboard({
           feeRate={feeRate}
           volume30d={tradeStats?.volume30d.total ?? null}
           ready={tm.ready}
+          collateral={balances?.collateral ?? null}
+          vaultEquity={balances?.vaultEquity ?? null}
+          totalUsd={balances?.totalUsd ?? null}
         />
       </div>
 
-      {/* Spot | Perpetuals */}
-      <div className="rounded-lg border border-line bg-surface">
-        <div className="border-b border-line px-4 py-3">
-          <SegmentedTabs
-            tabs={["Spot", "Perpetuals"] as const}
-            value={tab}
-            onChange={setTab}
-            variant="pill"
-          />
-        </div>
-        <div className="p-4">
-          {tab === "Spot" ? (
-            <SpotTab
-              address={address}
-              spotEquity={composition?.spot_equity ?? null}
-              volume30dSpot={tradeStats?.volume30d.spot ?? null}
-            />
-          ) : (
-            <PerpsTab
-              tm={tm}
-              account={account}
-              refreshAccount={refreshAccount}
-              symbolMeta={symbolMeta}
-              composition={composition}
-              tradeStats={tradeStats}
-            />
-          )}
-        </div>
-      </div>
+      {/* Unified balances + trading activity (Balances · Positions · Open
+          Orders · Trade/Funding/Order/Position History · Deposits). */}
+      <PortfolioActivity
+        tm={tm}
+        account={account}
+        refreshAccount={refreshAccount}
+        symbolMeta={symbolMeta}
+        holdings={balances?.holdings ?? null}
+        totalUsd={balances?.totalUsd ?? 0}
+        balancesLoading={balances == null}
+        onRefreshBalances={refreshBalances}
+        balancesRefreshing={balancesRefreshing}
+      />
 
       {/* Traded via Helix strip */}
       <HelixStrip helix={tradeStats?.helix ?? null} />

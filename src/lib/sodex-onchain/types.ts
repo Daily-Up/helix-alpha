@@ -84,8 +84,22 @@ export interface SodexPerpsAccountState {
   /**
    * Balances. NOTE: perps entries use `wb` (wallet balance) + `aw`
    * (available), NOT the spot `t`/`l` shape — reading `t` here yields 0.
+   * Margin-collateral fields (seen live on /perps/accounts/{addr}/state):
+   * `co` collateral counting toward margin, `mr` collateral ratio (haircut,
+   * e.g. "0.8"; matches /markets/coins marginRatio), `px` index price, and
+   * `wm` the weighted collateral value (= wb × px × mr).
    */
-  B: Array<{ i: number; a: string; wb: string; aw?: string; am?: string }>;
+  B: Array<{
+    i: number;
+    a: string;
+    wb: string;
+    aw?: string;
+    am?: string;
+    co?: string;
+    mr?: string;
+    px?: string;
+    wm?: string;
+  }>;
   /** Open positions. sz is signed (positive long / negative short / 0 closed). */
   P: Array<{
     i: number;
