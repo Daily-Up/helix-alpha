@@ -14,7 +14,7 @@
 import { NextResponse } from "next/server";
 import { assertCronAuth, cronAuthErrorResponse } from "@/lib/cron-auth";
 import { EquitySnapshots } from "@/lib/db";
-import { computeEquityComposition } from "@/lib/portfolio/fetch";
+import { computeSnapshotEquity } from "@/lib/portfolio/fetch";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,7 +41,9 @@ async function handle(req: Request): Promise<NextResponse> {
     const errors: string[] = [];
     for (const address of addresses) {
       try {
-        const c = await computeEquityComposition(address);
+        // Strict: any failing source throws → this address is skipped (not
+        // recorded as a partial), rather than carving a dip into its curve.
+        const c = await computeSnapshotEquity(address);
         await EquitySnapshots.insert({
           address,
           ts: now,

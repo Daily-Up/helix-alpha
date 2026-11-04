@@ -225,6 +225,114 @@ export function perpsUnrealizedPnl(
   return state.P.reduce((s, p) => s + (p.ur != null ? n(p.ur) : 0), 0);
 }
 
+/** Base URL for SoDEX's Wealth (vault / earn) service. */
+const WEALTH_BASE = "https://wealth.sodex.dev/api/v1/wealth";
+
+/** STRICT equity computation for RECORDING a snapshot: every source — perps
+ *  state, spot state, wealth, and the price feed — must succeed, or this throws
+ *  so the caller skips the write. A partial fetch (one source failing while the
+ *  others succeed) is exactly what carves a false one-point dip into the curve.
+ *  Mirrors the unified-balances totals (perps av + spot + escrow vault) without
+ *  the per-source error swallowing the client UI relies on. */
+export async function computeSnapshotEquity(address: string): Promise<{
+  perps_equity: number;
+  spot_equity: number;
+  vault_equity: number;
+  total_equity: number;
+  perps_upnl: number;
+  free_collateral: number;
+}> {
+  const [state, balances, fundsRows, wealth, spotT, perpT] = await Promise.all([
+    fetchPerpsState(address),
+    fetchSpotBalances(address),
+    spotGet<Array<Record<string, unknown>>>("/funds", {
+      baseOverride: WEALTH_BASE,
+    }),
+    spotGet<{
+      totals?: Array<Record<string, unknown>>;
+      unavailableTotalsFundIds?: string[];
+    }>(`/users/${address}/fund-details`, { baseOverride: WEALTH_BASE }),
+    Market.getTickers("spot"),
+    Market.getTickers("perp"),
+  ]);
+
+  const spot = new Map<string, number>();
+  for (const t of spotT ?? []) {
+    const px = n(t.lastPx);
+    if (px > 0) spot.set(t.symbol.toUpperCase(), px);
+  }
+  const perps = new Map<string, number>();
+  for (const t of perpT ?? []) {
+    const row = t as SodexTicker & { markPrice?: string };
+    const px = n(row.markPrice ?? t.lastPx);
+    if (px > 0) perps.set(t.symbol.toUpperCase(), px);
+  }
+  // An empty feed means we can't value spot/vault — refuse rather than record a
+  // zeroed total that reads as a crash in the curve.
+  if (spot.size === 0 && perps.size === 0)
+    throw new Error("price feed empty — skipping snapshot");
+
+  const priceOf = (coin: string): number | null => {
+    const raw = coin.toUpperCase();
+    const base = stripWrapper(coin).toUpperCase();
+    if (base === "USDC" || base === "USD" || base === "USDT") return 1;
+    const px =
+      spot.get(`${raw}_VUSDC`) ??
+      spot.get(`V${base}_VUSDC`) ??
+      spot.get(`W${base}_VUSDC`) ??
+      spot.get(`${base}_USDC`);
+    if (px != null) return px;
+    return perps.get(`${base}-USD`) ?? perps.get(`${base}-USDC`) ?? null;
+  };
+
+  const perps_equity = state ? n(state.av) : 0;
+  const free_collateral = state ? n(state.am) : 0;
+  const perps_upnl = perpsUnrealizedPnl(state);
+
+  let spot_equity = 0;
+  for (const b of balances) {
+    const total = n(b.total);
+    if (total === 0) continue;
+    const px = priceOf(b.coin);
+    if (px != null) spot_equity += total * px;
+  }
+
+  // Vault: escrow funds only, deduped against spot/perps, valued at NAV.
+  const navByFund = new Map<string, number | null>();
+  const typeByFund = new Map<string, string>();
+  for (const f of fundsRows ?? []) {
+    const id = String(f.fundId ?? "");
+    if (!id) continue;
+    navByFund.set(id, f.nav != null ? n(f.nav) : null);
+    typeByFund.set(id, String(f.fundType ?? ""));
+  }
+  const held = new Set<string>([
+    ...balances.map((b) => b.coin.toUpperCase()),
+    ...(state?.B ?? []).map((b) => b.a.toUpperCase()),
+  ]);
+  const unavailable = wealth?.unavailableTotalsFundIds ?? [];
+  let vault_equity = 0;
+  for (const t of wealth?.totals ?? []) {
+    const id = String(t.fundId ?? "");
+    const shares = n(t.shares);
+    if (shares <= 0 || typeByFund.get(id) !== "escrow_vault") continue;
+    if (unavailable.includes(id)) continue;
+    const share = (t.share ?? {}) as { coin?: string };
+    if (held.has(String(share.coin ?? "").toUpperCase())) continue;
+    const nav = navByFund.get(id);
+    if (nav != null) vault_equity += shares * nav;
+  }
+
+  return {
+    perps_equity,
+    spot_equity,
+    vault_equity,
+    total_equity: perps_equity + spot_equity + vault_equity,
+    perps_upnl,
+    free_collateral,
+  };
+}
+
 // ── spot holdings table ───────────────────────────────────────────────────────
 
 export interface SpotHolding {
@@ -443,8 +551,6 @@ export function rangeSince(range: EquityRange, now = Date.now()): number {
 // NOT covered (on-chain wallet tokens like un-deposited SOSO, staked sSOSO, and
 // the earn APY) — those need the valuechain RPC + staking/earn services; see the
 // "on-chain tier" follow-up in docs/PORTFOLIO_PLAN.md. Totals here exclude them.
-
-const WEALTH_BASE = "https://wealth.sodex.dev/api/v1/wealth";
 
 /** Per-coin collateral config from /perps/markets/coins. marginRatio > 0 ⇒
  *  usable as Multi-Asset-Margin collateral (and IS the collateral ratio); "0" ⇒

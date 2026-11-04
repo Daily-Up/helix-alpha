@@ -26,6 +26,8 @@ import {
 } from "@/lib/portfolio/fetch";
 import { EquityChart } from "./EquityChart";
 import { OverviewCard } from "./OverviewCard";
+import { CollateralCard } from "./CollateralCard";
+import { FeeTierCard } from "./FeeTierCard";
 import { PortfolioActivity } from "./PortfolioActivity";
 import { HelixStrip } from "./HelixStrip";
 
@@ -146,11 +148,9 @@ export function PortfolioDashboard({
 
   return (
     <div className="trade-terminal flex flex-col gap-4">
-      {/* Top row: equity curve (≈70%) + Overview (≈30%). The chart stretches to
-          the Overview's height (grid stretch + min-h) so neither column leaves a
-          gap; on mobile each falls back to its own height. */}
-      <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="min-h-[380px]">
+      {/* Top row: equity curve (≈70%, fixed height) + Overview (≈30%). */}
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="h-[350px]">
           <EquityChart
             address={address}
             liveTotals={
@@ -167,13 +167,21 @@ export function PortfolioDashboard({
         <OverviewCard
           composition={composition}
           account={account}
-          feeRate={feeRate}
-          volume30d={tradeStats?.volume30d.total ?? null}
           ready={tm.ready}
-          collateral={balances?.collateral ?? null}
           vaultEquity={balances?.vaultEquity ?? null}
           totalUsd={balances?.totalUsd ?? null}
         />
+      </div>
+
+      {/* Collateral · Fee tier · Traded via Helix — equal-height cards, three
+          across at 1920, two at 1440, one on mobile. */}
+      <div className="grid grid-cols-1 items-stretch gap-4 sm:grid-cols-2 2xl:grid-cols-3">
+        <CollateralCard collateral={balances?.collateral ?? null} />
+        <FeeTierCard
+          feeRate={feeRate}
+          volume30d={tradeStats?.volume30d.total ?? null}
+        />
+        <HelixStrip helix={tradeStats?.helix ?? null} />
       </div>
 
       {/* Unified balances + trading activity (Balances · Positions · Open
@@ -189,9 +197,6 @@ export function PortfolioDashboard({
         onRefreshBalances={refreshBalances}
         balancesRefreshing={balancesRefreshing}
       />
-
-      {/* Traded via Helix strip */}
-      <HelixStrip helix={tradeStats?.helix ?? null} />
     </div>
   );
 }

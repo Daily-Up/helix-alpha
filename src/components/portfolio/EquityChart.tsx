@@ -62,6 +62,34 @@ function crosshairLabel(timeSec: number): string {
   return `${d.getDate()} ${d.toLocaleDateString(undefined, { month: "short" })} ${two(d.getHours())}:${two(d.getMinutes())}`;
 }
 
+/** Insert interpolated points inside long gaps so the time scale reads
+ *  proportionally (a gap of N steps becomes a straight line N steps wide).
+ *  Normal segments (≈ one step) get no fill; interpolation is linear, so a gap
+ *  is a straight line between its two real endpoints. */
+function gapFill(
+  pts: { time: number; equity: number }[],
+  stepSec: number,
+): { time: number; equity: number }[] {
+  if (pts.length < 2) return pts;
+  const out: { time: number; equity: number }[] = [];
+  for (let i = 0; i < pts.length; i++) {
+    out.push(pts[i]);
+    if (i === pts.length - 1) break;
+    const a = pts[i];
+    const b = pts[i + 1];
+    const dt = b.time - a.time;
+    const inner = Math.min(2000, Math.floor(dt / stepSec) - 1);
+    for (let k = 1; k <= inner; k++) {
+      const t = a.time + k * stepSec;
+      out.push({
+        time: t,
+        equity: a.equity + ((b.equity - a.equity) * (t - a.time)) / dt,
+      });
+    }
+  }
+  return out;
+}
+
 export function EquityChart({
   address,
   liveTotals,
@@ -131,29 +159,40 @@ export function EquityChart({
       .map(([time, equity]) => ({ time, equity }));
   }, [rows, pickEquity]);
 
-  // Append the live value as the final point, so the line ends at the current
-  // number and the headline matches the Overview total exactly (Task: one total).
-  const equityPts = useMemo(() => {
+  // Real data points: snapshots + the live value appended, so the line ends at
+  // the current number and the headline matches the Overview total exactly.
+  const realPts = useMemo(() => {
     if (liveEquity == null) return snapPts;
     const lastSec = snapPts.length ? snapPts[snapPts.length - 1].time : 0;
     const liveSec = Math.max(Math.floor(Date.now() / 1000), lastSec + 60);
     return [...snapPts, { time: liveSec, equity: liveEquity }];
   }, [snapPts, liveEquity]);
 
-  const baseEq = equityPts[0]?.equity ?? 0;
-  // Metric transform: PnL is 0-anchored at the range start.
+  // Step for time-proportional spacing: the median gap between real points, so
+  // normal segments stay one step wide and only long gaps get interpolated.
+  const stepSec = useMemo(() => {
+    if (realPts.length < 2) return 900;
+    const gaps: number[] = [];
+    for (let i = 1; i < realPts.length; i++)
+      gaps.push(realPts[i].time - realPts[i - 1].time);
+    gaps.sort((a, b) => a - b);
+    return Math.max(60, gaps[Math.floor(gaps.length / 2)] || 900);
+  }, [realPts]);
+
+  const baseEq = realPts[0]?.equity ?? 0;
+  // Plotted series: gap-fill long gaps (straight interpolated line, time-
+  // proportional x-axis), then apply the metric (PnL is 0-anchored at the start).
   const points = useMemo(
     () =>
-      equityPts.map((p) => ({
+      gapFill(realPts, stepSec).map((p) => ({
         time: p.time,
         value: metric === "PnL" ? p.equity - baseEq : p.equity,
       })),
-    [equityPts, metric, baseEq],
+    [realPts, stepSec, metric, baseEq],
   );
 
-  const firstEq = equityPts[0]?.equity ?? liveEquity ?? null;
-  const lastEq =
-    equityPts[equityPts.length - 1]?.equity ?? liveEquity ?? null;
+  const firstEq = realPts[0]?.equity ?? liveEquity ?? null;
+  const lastEq = realPts[realPts.length - 1]?.equity ?? liveEquity ?? null;
   const changeAbs =
     lastEq != null && firstEq != null ? lastEq - firstEq : null;
   const changePct =
@@ -170,16 +209,17 @@ export function EquityChart({
       : metric === "PnL"
         ? 0
         : liveEquity;
-  const sparse = equityPts.length < 2;
-  // Count ACTUAL snapshots (not the appended live point) for the note; with a
-  // handful the line reads sparse, so dot each point and show the count.
+  const sparse = realPts.length < 2;
+  // Count ACTUAL snapshots (not the appended live point) for the note.
   const snapCount = snapPts.length;
   const fewPoints = snapCount >= 2 && snapCount <= 30;
+  // Dots are drawn on the real snapshots only (markers), when there are few.
+  const showDots = realPts.length >= 2 && realPts.length < 30;
   // Axis label format follows the REAL plotted span (see axisLabel).
   const spanDays = useMemo(() => {
-    if (equityPts.length < 2) return 0;
-    return (equityPts[equityPts.length - 1].time - equityPts[0].time) / 86400;
-  }, [equityPts]);
+    if (realPts.length < 2) return 0;
+    return (realPts[realPts.length - 1].time - realPts[0].time) / 86400;
+  }, [realPts]);
 
   // ── chart ──
   const containerRef = useRef<HTMLDivElement>(null);
@@ -224,7 +264,7 @@ export function EquityChart({
         },
         rightPriceScale: {
           borderColor: "rgba(255,255,255,0.06)",
-          scaleMargins: { top: 0.12, bottom: 0.08 },
+          scaleMargins: { top: 0.06, bottom: 0.06 },
         },
         timeScale: {
           borderColor: "rgba(255,255,255,0.06)",
@@ -248,12 +288,29 @@ export function EquityChart({
       });
       const series = chart.addAreaSeries({
         lineColor: UP,
-        topColor: rgba(UP, 0.28),
-        bottomColor: rgba(UP, 0.02),
+        topColor: rgba(UP, 0.15),
+        bottomColor: rgba(UP, 0.0),
         lineWidth: 2,
         priceLineVisible: false,
         lastValueVisible: true,
         crosshairMarkerVisible: true,
+        // Pad 10% above/below the visible min/max (never anchored at 0), so
+        // small moves stay readable without being exaggerated.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        autoscaleInfoProvider: (baseImpl: any) => {
+          const res = baseImpl();
+          if (res?.priceRange) {
+            const { minValue, maxValue } = res.priceRange;
+            const pad =
+              (maxValue - minValue) * 0.1 ||
+              Math.max(1, Math.abs(maxValue) * 0.01);
+            return {
+              ...res,
+              priceRange: { minValue: minValue - pad, maxValue: maxValue + pad },
+            };
+          }
+          return res;
+        },
       });
       chartRef.current = chart;
       seriesRef.current = series;
@@ -278,27 +335,35 @@ export function EquityChart({
     };
   }, []);
 
-  // Push data + recolour on sign change.
+  // Push data + recolour on sign change; dots on the real snapshots only.
   useEffect(() => {
     if (!ready || !seriesRef.current) return;
-    const few = points.length >= 2 && points.length <= 30;
     seriesRef.current.applyOptions({
       lineColor: color,
-      topColor: rgba(color, 0.28),
-      bottomColor: rgba(color, 0.02),
-      pointMarkersVisible: few,
-      pointMarkersRadius: 3,
+      topColor: rgba(color, 0.15),
+      bottomColor: rgba(color, 0.0),
     });
     seriesRef.current.setData(points);
+    seriesRef.current.setMarkers(
+      showDots
+        ? realPts.map((p) => ({
+            time: p.time,
+            position: "inBar",
+            color,
+            shape: "circle",
+            size: 1,
+          }))
+        : [],
+    );
     chartRef.current?.timeScale().fitContent();
-  }, [points, color, ready]);
+  }, [points, color, ready, realPts, showDots]);
 
   const shownValue = hover ? hover.value : headline;
 
   return (
     <div className="trade-terminal flex h-full flex-col rounded-lg border border-line bg-surface">
       {/* Controls + headline */}
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line px-4 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line px-4 py-2.5">
         <div className="flex min-w-0 flex-col gap-2">
           <div className="flex items-center gap-2">
             <Dropdown
@@ -313,7 +378,7 @@ export function EquityChart({
             />
           </div>
           <div className="flex flex-col">
-            <span className="font-[var(--font-jetbrains-mono)] text-[30px] font-semibold leading-none tabular-nums text-fg">
+            <span className="font-[var(--font-jetbrains-mono)] text-[26px] font-semibold leading-none tabular-nums text-fg">
               {metric === "PnL" && (shownValue ?? 0) !== 0
                 ? signedMoney(shownValue)
                 : money(shownValue)}
