@@ -407,22 +407,31 @@ export function SodexAuthProvider({ children }: { children: React.ReactNode }) {
 
   const disconnect = useCallback(
     async (alsoRevoke: boolean) => {
-      const stored = readLocalKey(NETWORK);
-      if (alsoRevoke && stored?.name && address && provider && accountID) {
-        try {
-          await sodexRevokeApiKey({
-            network: NETWORK,
-            provider,
-            account: address,
-            accountID,
-            name: stored.name,
-          });
-        } catch {
-          /* non-fatal — the local key is cleared regardless */
+      // Plain "Disconnect" only ends the wallet session — it KEEPS the local
+      // trading key, so reconnecting the same wallet restores the ready state
+      // without minting a new key (and without orphaning a still-active key on
+      // SoDEX, which would burn one of the 5 key slots). Only "Disconnect &
+      // revoke" clears the local key, after revoking it on SoDEX. A reconnect
+      // with a DIFFERENT wallet still drops the stored key via the
+      // master-address check in refresh().
+      if (alsoRevoke) {
+        const stored = readLocalKey(NETWORK);
+        if (stored?.name && address && provider && accountID) {
+          try {
+            await sodexRevokeApiKey({
+              network: NETWORK,
+              provider,
+              account: address,
+              accountID,
+              name: stored.name,
+            });
+          } catch {
+            /* non-fatal — the local key is cleared regardless */
+          }
         }
+        clearLocalKey(NETWORK);
+        setKey(null);
       }
-      clearLocalKey(NETWORK);
-      setKey(null);
       setMenuOpen(false);
       try {
         await disconnectAsync();
