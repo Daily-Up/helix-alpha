@@ -42,7 +42,7 @@ export function WealthInvestPanel({
 }: {
   fund: WealthFundView;
   holding: WealthPosition | null;
-  onFilled?: () => void;
+  onFilled?: () => void | Promise<void>;
   /** Controlled Buy/Sell tab (so a "Sell" shortcut elsewhere can open it). */
   tab: "buy" | "sell";
   onTab: (t: "buy" | "sell") => void;
@@ -58,6 +58,9 @@ export function WealthInvestPanel({
   const [fee, setFee] = useState<FeeRate | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<WealthOrderResult | null>(null);
+  // Flips true once the post-fill holdings/balance refresh has completed, so
+  // the success toast stops showing "updating…".
+  const [settled, setSettled] = useState(false);
 
   const unitsHeld = holding?.shares ?? 0;
 
@@ -66,6 +69,7 @@ export function WealthInvestPanel({
     setUnit(tab === "buy" ? "usdc" : "units");
     setAmount("");
     setResult(null);
+    setSettled(false);
   }, [tab]);
 
   // Sizing rules (once).
@@ -77,13 +81,18 @@ export function WealthInvestPanel({
     };
   }, [fund]);
 
-  // Spot balance + fee tier (per address).
-  const refreshBalance = useCallback(() => {
-    if (!address) return;
-    spotUsdcBalance(address).then((b) => setBalance(b.usdc)).catch(() => setBalance(null));
-    fetchFeeRate(address, "spot").then(setFee).catch(() => {});
+  // Spot balance + fee tier (per address). Returns a promise so a post-fill
+  // refresh can await it before marking the order settled.
+  const refreshBalance = useCallback((): Promise<void> => {
+    if (!address) return Promise.resolve();
+    return Promise.allSettled([
+      spotUsdcBalance(address).then((b) => setBalance(b.usdc)).catch(() => setBalance(null)),
+      fetchFeeRate(address, "spot").then(setFee).catch(() => {}),
+    ]).then(() => undefined);
   }, [address]);
-  useEffect(() => refreshBalance(), [refreshBalance]);
+  useEffect(() => {
+    void refreshBalance();
+  }, [refreshBalance]);
 
   const minNotional = meta?.minNotional ? Number(meta.minNotional) : 10;
   const minQuantity = meta?.minQuantity ? Number(meta.minQuantity) : 0;
@@ -132,6 +141,7 @@ export function WealthInvestPanel({
     if (!canPlace) return;
     setBusy(true);
     setResult(null);
+    setSettled(false);
     try {
       const r = await placeWealthSpotOrder({
         fund,
@@ -142,11 +152,19 @@ export function WealthInvestPanel({
       setResult(r);
       if (r.kind === "ok" || r.kind === "unconfirmed") {
         setAmount("");
-        // Re-read holdings + balance after a fill (gateway settles quickly).
-        setTimeout(() => {
-          refreshBalance();
-          onFilled?.();
+        // Gateway settles async — re-read holdings + balance, then mark the
+        // order settled so the toast stops showing "updating…".
+        window.setTimeout(() => {
+          Promise.allSettled([
+            refreshBalance(),
+            Promise.resolve(onFilled?.()),
+          ]).finally(() => setSettled(true));
         }, 1200);
+        // A second quiet refresh catches late gateway settlement.
+        window.setTimeout(() => {
+          void refreshBalance();
+          void onFilled?.();
+        }, 4000);
       }
     } catch (e) {
       setResult({ kind: "rejected", reason: (e as Error).message });
@@ -307,9 +325,12 @@ export function WealthInvestPanel({
                   : "border-[#e0a53f]/40 bg-[#e0a53f]/10 text-[#e0a53f]",
           )}
         >
-          {result.kind === "ok" && `Order placed${result.orderID ? ` · #${result.orderID}` : ""}. Holdings updating…`}
+          {result.kind === "ok" &&
+            (settled
+              ? `Order filled${result.orderID ? ` · #${result.orderID}` : ""}. Holdings updated.`
+              : `Order placed${result.orderID ? ` · #${result.orderID}` : ""}. Updating holdings…`)}
           {result.kind === "rejected" && `Rejected: ${result.reason}`}
-          {result.kind === "unconfirmed" && "Submitted — couldn't confirm the fill. Check your holdings."}
+          {result.kind === "unconfirmed" && "Submitted — couldn't confirm the fill. Check your holdings below."}
           {result.kind === "dry_run" && (
             <>
               <div className="font-medium text-fg">DRY RUN — payload (not submitted):</div>

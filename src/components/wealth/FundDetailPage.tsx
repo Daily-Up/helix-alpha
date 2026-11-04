@@ -78,11 +78,14 @@ export function FundDetailPage({ fundId }: { fundId: string }) {
   }, [fundId, address]);
 
   // Quiet refetch after a fill — updates holding/price without a loading flash.
-  const refetch = useCallback(() => {
+  // Returns the promise so the invest panel can await it before confirming.
+  const refetch = useCallback((): Promise<void> => {
     const q = address ? `?address=${address}` : "";
-    fetch(`/api/wealth/fund/${encodeURIComponent(fundId)}${q}`)
+    return fetch(`/api/wealth/fund/${encodeURIComponent(fundId)}${q}`)
       .then((r) => r.json())
-      .then((j: FundResp) => j.ok && setData(j))
+      .then((j: FundResp) => {
+        if (j.ok) setData(j);
+      })
       .catch(() => {});
   }, [fundId, address]);
 
