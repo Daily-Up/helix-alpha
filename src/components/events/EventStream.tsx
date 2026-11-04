@@ -19,6 +19,7 @@ import {
   usePerpMarkets,
   useStreamEvents,
   useKlines,
+  useHeroImages,
   pctSince,
   type StreamEvent,
 } from "@/lib/events/use-stream";
@@ -116,6 +117,7 @@ export function EventStream() {
     [priced, tab],
   );
   const heroIds = useMemo(() => new Set(heroes.map((h) => h.id)), [heroes]);
+  const heroImages = useHeroImages(heroes);
 
   // The single pool everything downstream reads: the selected tab, heroes
   // removed, relevance toggle applied — but NOT the topic filter. Topic-chip
@@ -209,7 +211,12 @@ export function EventStream() {
           <StatsRow events={priced} lastIngestMs={lastIngestMs} />
 
           {heroes.length > 0 ? (
-            <HeroCarousel heroes={heroes} klines={klines} onOpen={setSelected} />
+            <HeroCarousel
+              heroes={heroes}
+              klines={klines}
+              images={heroImages}
+              onOpen={setSelected}
+            />
           ) : null}
 
           <TopicTabs counts={topicCounts} value={topic} onChange={setTopic} />

@@ -989,3 +989,22 @@ CREATE TABLE IF NOT EXISTS equity_snapshots (
   spot_upnl     REAL                         -- USD, nullable (if reconstructed)
 );
 CREATE INDEX IF NOT EXISTS idx_equity_snap_addr_ts ON equity_snapshots(address, ts);
+
+-- ── 27. Event hero images (Event Stream — Unsplash cache) ─────────────────
+--
+-- One row per event whose hero card we've picked a photo for. We hotlink the
+-- chosen Unsplash image (never the news source's own article image), and cache
+-- the URL + attribution so the picture is stable across refreshes and we stay
+-- within Unsplash's rate limit (one search per event, ever). A row with a NULL
+-- image_url is a NEGATIVE cache: the search ran and returned nothing, so we
+-- don't keep re-querying. The download-trigger (Unsplash guideline) fires once,
+-- server-side, when the row is first written.
+CREATE TABLE IF NOT EXISTS event_images (
+  event_id          TEXT PRIMARY KEY REFERENCES news_events(id) ON DELETE CASCADE,
+  unsplash_id       TEXT,                     -- Unsplash photo id (NULL = none found)
+  image_url         TEXT,                     -- hotlink URL (urls.regular); NULL = no image
+  photographer      TEXT,                     -- user.name, for the credit
+  photographer_url  TEXT,                     -- user.links.html (+ utm) for the credit link
+  query             TEXT,                     -- the search query used (forensics)
+  created_at        INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+);

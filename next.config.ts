@@ -37,7 +37,10 @@ const csp = [
   `default-src 'self'`,
   `script-src 'self' 'unsafe-inline'`,
   `style-src 'self' 'unsafe-inline'`,
-  `img-src 'self' data: blob:`,
+  // Unsplash hero photos are hotlinked from images.unsplash.com per their
+  // API guidelines (we never rehost). The Unsplash API itself is called
+  // server-side, so it needs no connect-src entry.
+  `img-src 'self' data: blob: https://images.unsplash.com`,
   `font-src 'self'`,
   [
     // Injected wallets only (desktop) — no WalletConnect/Reown origins.

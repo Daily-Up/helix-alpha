@@ -24,10 +24,11 @@ import {
   ChevronRight,
   type LucideIcon,
 } from "lucide-react";
+import { cn } from "@/components/ui/cn";
 import type { SodexCandle } from "@/lib/sodex/types";
 import { AssetPill } from "./AssetPill";
 import { Sparkline } from "./Sparkline";
-import type { StreamEvent } from "@/lib/events/use-stream";
+import type { StreamEvent, HeroImage } from "@/lib/events/use-stream";
 
 const GLYPH: Record<string, LucideIcon> = {
   earnings: BarChart3,
@@ -43,10 +44,13 @@ const GLYPH: Record<string, LucideIcon> = {
 export function HeroCarousel({
   heroes,
   klines,
+  images,
   onOpen,
 }: {
   heroes: StreamEvent[];
   klines: Map<string, SodexCandle[]>;
+  /** eventId → Unsplash hero photo (or null to fall back to the chart). */
+  images: Map<string, HeroImage | null>;
   onOpen: (ev: StreamEvent) => void;
 }) {
   const [i, setI] = useState(0);
@@ -71,6 +75,7 @@ export function HeroCarousel({
   const candles = main?.sodexSymbol ? klines.get(main.sodexSymbol) : undefined;
   const Glyph = (ev.event_type && GLYPH[ev.event_type]) || Newspaper;
   const up = ev.sentiment !== "negative";
+  const img = images.get(ev.id) ?? null;
 
   return (
     <div
@@ -79,31 +84,78 @@ export function HeroCarousel({
       onMouseLeave={() => setPaused(false)}
     >
       <div className="relative h-[250px]">
-        {/* Price chart background — lower 65%, faded. */}
-        {candles && candles.length > 1 ? (
-          <div className="absolute inset-x-0 bottom-0 h-[65%] opacity-70">
-            <Sparkline
-              candles={candles}
-              eventMs={ev.release_time}
-              up={up}
-              faded
-              className="h-full w-full"
+        {img ? (
+          <>
+            {/* Photo — right ~46% of the card (hotlinked from Unsplash). */}
+            <div
+              aria-hidden
+              className="absolute inset-y-0 right-0 w-[46%] bg-cover bg-center"
+              style={{ backgroundImage: `url("${img.url}")` }}
             />
-          </div>
-        ) : null}
-        {/* Legibility gradient. */}
-        <div
-          aria-hidden
-          className="absolute inset-0"
-          style={{
-            background:
-              "linear-gradient(180deg, rgba(11,14,17,0.72) 0%, rgba(11,14,17,0.35) 45%, rgba(11,14,17,0.82) 100%)",
-          }}
-        />
+            {/* Fade the photo into the dark left side (no hard seam). */}
+            <div
+              aria-hidden
+              className="absolute inset-0"
+              style={{
+                background:
+                  "linear-gradient(90deg, #0b0e11 0%, #0b0e11 46%, rgba(11,14,17,0.55) 66%, rgba(11,14,17,0) 90%)",
+              }}
+            />
+            {/* Faded price chart kept as a subtle layer at the bottom. */}
+            {candles && candles.length > 1 ? (
+              <div className="absolute inset-x-0 bottom-0 h-[42%] opacity-25">
+                <Sparkline
+                  candles={candles}
+                  eventMs={ev.release_time}
+                  up={up}
+                  faded
+                  className="h-full w-full"
+                />
+              </div>
+            ) : null}
+            {/* Top/bottom legibility over the whole card. */}
+            <div
+              aria-hidden
+              className="absolute inset-0"
+              style={{
+                background:
+                  "linear-gradient(180deg, rgba(11,14,17,0.5) 0%, rgba(11,14,17,0.08) 42%, rgba(11,14,17,0.72) 100%)",
+              }}
+            />
+          </>
+        ) : (
+          <>
+            {/* Chart-only fallback — price chart lower 65%, faded. */}
+            {candles && candles.length > 1 ? (
+              <div className="absolute inset-x-0 bottom-0 h-[65%] opacity-70">
+                <Sparkline
+                  candles={candles}
+                  eventMs={ev.release_time}
+                  up={up}
+                  faded
+                  className="h-full w-full"
+                />
+              </div>
+            ) : null}
+            <div
+              aria-hidden
+              className="absolute inset-0"
+              style={{
+                background:
+                  "linear-gradient(180deg, rgba(11,14,17,0.72) 0%, rgba(11,14,17,0.35) 45%, rgba(11,14,17,0.82) 100%)",
+              }}
+            />
+          </>
+        )}
 
         {/* Content insets left/right so the edge arrows never sit under it. */}
         <div className="relative flex h-full flex-col px-12 py-5">
-          <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider">
+          <div
+            className={cn(
+              "flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider",
+              img && "max-w-[55%]",
+            )}
+          >
             <span className="grid h-6 w-6 place-items-center rounded-md bg-surface-2/70 text-[color:var(--accent-trade)]">
               <Glyph size={13} />
             </span>
@@ -131,7 +183,12 @@ export function HeroCarousel({
                 {ev.takeaway}
               </p>
             ) : null}
-            <div className="flex flex-wrap items-center gap-2">
+            <div
+              className={cn(
+                "flex flex-wrap items-center gap-2",
+                img && "max-w-[55%]",
+              )}
+            >
               {ev.tradable.slice(0, 3).map((a) => (
                 <AssetPill key={a.id} asset={a} sentiment={ev.sentiment} />
               ))}
@@ -163,6 +220,30 @@ export function HeroCarousel({
               <ChevronRight size={16} />
             </button>
           </>
+        ) : null}
+
+        {/* Unsplash attribution (required) — small, bottom-right over the photo. */}
+        {img ? (
+          <div className="absolute bottom-1 right-2.5 z-20 text-[9px] leading-none text-white/55">
+            Photo by{" "}
+            <a
+              href={img.photographer_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline decoration-white/30 underline-offset-2 hover:text-white/85"
+            >
+              {img.photographer}
+            </a>{" "}
+            on{" "}
+            <a
+              href="https://unsplash.com/?utm_source=helix&utm_medium=referral"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline decoration-white/30 underline-offset-2 hover:text-white/85"
+            >
+              Unsplash
+            </a>
+          </div>
         ) : null}
       </div>
 

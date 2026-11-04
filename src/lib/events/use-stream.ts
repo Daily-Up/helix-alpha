@@ -24,6 +24,7 @@ import {
   type AssetRef,
   type MarketCategory,
 } from "./market-map";
+import { buildImageQuery } from "./image-query";
 
 /** One classified event as returned by /api/data/events. */
 export interface EventCardData {
@@ -366,4 +367,86 @@ export function pctSince(
   if (base == null) base = Number(candles[0].close); // event predates window
   if (!Number.isFinite(base) || base === 0) return null;
   return ((last - base) / base) * 100;
+}
+
+// ── hero images (Unsplash, cached per event) ─────────────────────────────────
+
+export interface HeroImage {
+  url: string;
+  photographer: string;
+  photographer_url: string;
+}
+
+// Module-level so images survive re-renders and tab switches for the session.
+const heroImageCache = new Map<string, HeroImage | null>();
+
+/**
+ * Fetch (and cache) an Unsplash hero photo per event via /api/events/hero-image.
+ * The server owns the key, the search and the DB cache; this just asks for the
+ * current heroes and returns eventId → image (or null when none / not loaded
+ * yet). The hero falls back to its chart-only layout for a null.
+ */
+export function useHeroImages(
+  heroes: StreamEvent[],
+): Map<string, HeroImage | null> {
+  const [map, setMap] = useState<Map<string, HeroImage | null>>(new Map());
+  const inFlight = useRef<Set<string>>(new Set());
+  const ids = heroes.map((h) => h.id).join(",");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    // Seed synchronously from the session cache.
+    setMap((prev) => {
+      const m = new Map(prev);
+      let changed = false;
+      for (const h of heroes) {
+        if (heroImageCache.has(h.id) && !m.has(h.id)) {
+          m.set(h.id, heroImageCache.get(h.id) ?? null);
+          changed = true;
+        }
+      }
+      return changed ? m : prev;
+    });
+
+    const toFetch = heroes.filter(
+      (h) => !heroImageCache.has(h.id) && !inFlight.current.has(h.id),
+    );
+    if (toFetch.length === 0) return;
+    toFetch.forEach((h) => inFlight.current.add(h.id));
+
+    (async () => {
+      await Promise.all(
+        toFetch.map(async (h) => {
+          try {
+            const res = await fetch("/api/events/hero-image", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ eventId: h.id, query: buildImageQuery(h) }),
+            });
+            const j = (await res.json()) as { image?: HeroImage | null };
+            heroImageCache.set(h.id, j.image ?? null);
+          } catch {
+            /* transient — leave uncached so a later mount retries */
+          } finally {
+            inFlight.current.delete(h.id);
+          }
+        }),
+      );
+      if (cancelled) return;
+      setMap((prev) => {
+        const m = new Map(prev);
+        for (const h of toFetch)
+          if (heroImageCache.has(h.id)) m.set(h.id, heroImageCache.get(h.id) ?? null);
+        return m;
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ids]);
+
+  return map;
 }
