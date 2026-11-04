@@ -89,13 +89,25 @@ const clampBottom = (h: number) => {
 export function TradeTerminal({
   assets,
   symbolMeta = {},
+  initialAssetId,
+  initialSide,
 }: {
   assets: TerminalAsset[];
   symbolMeta?: Record<string, SymbolMeta>;
+  /** Pre-select this asset (e.g. from an Event Stream trade link). */
+  initialAssetId?: string;
+  /** Preset the ticket side (no auto-size, no auto-submit). */
+  initialSide?: "buy" | "sell";
 }) {
   const tm = useTradeMode("mainnet");
   const [assetId, setAssetId] = useState<string>(
-    () => assets.find((a) => a.id === "tok-btc")?.id ?? assets[0]?.id ?? "",
+    () =>
+      (initialAssetId && assets.some((a) => a.id === initialAssetId)
+        ? initialAssetId
+        : null) ??
+      assets.find((a) => a.id === "tok-btc")?.id ??
+      assets[0]?.id ??
+      "",
   );
   const selected = assets.find((a) => a.id === assetId) ?? null;
   const sodexSymbol = selected?.sodex_symbol ?? null;
@@ -137,7 +149,7 @@ export function TradeTerminal({
   const [sideFill, setSideFill] = useState<{
     side: "buy" | "sell";
     seq: number;
-  } | null>(null);
+  } | null>(() => (initialSide ? { side: initialSide, seq: 1 } : null));
   const onMobileSide = (side: "buy" | "sell") => {
     setSideFill((p) => ({ side, seq: (p?.seq ?? 0) + 1 }));
     document

@@ -51,6 +51,7 @@ export async function GET() {
       sentimentBreakdown,
       eventTypeBreakdown,
       lastRun,
+      lastIngestMs,
     ] = await Promise.all([
       guard(countQuery("SELECT COUNT(*) AS n FROM news_events"), 0),
       guard(countQuery("SELECT COUNT(*) AS n FROM classifications"), 0),
@@ -114,6 +115,12 @@ export async function GET() {
         ),
         undefined,
       ),
+      // The TRUE "last ingest" — when we last stored any event. The cron_runs
+      // record above tracks the NAMED GitHub Actions cron, which can sit stale
+      // for hours while the live pipeline (/api/public/run-tick, triggered on
+      // page visits) keeps ingesting — so cron_runs said "21h ago" while the
+      // newest event was minutes old. MAX(ingested_at) reflects reality.
+      guard(countQuery("SELECT MAX(ingested_at) AS n FROM news_events"), 0),
     ]);
 
     // Pending = last-24h classification backlog: events in the window that
@@ -134,6 +141,8 @@ export async function GET() {
       sentiment_breakdown: sentimentBreakdown,
       event_type_breakdown: eventTypeBreakdown,
       last_run: lastRun ?? null,
+      // Freshness signal for the UI (real last ingest, not the named cron).
+      last_ingest_ms: lastIngestMs || null,
     });
   } catch (err) {
     // Never 504 the header — return an empty-but-valid shape so the UI
@@ -147,6 +156,7 @@ export async function GET() {
         sentiment_breakdown: [],
         event_type_breakdown: [],
         last_run: null,
+        last_ingest_ms: null,
         error: (err as Error).message ?? "stats query failed",
       },
       { status: 200 },

@@ -50,7 +50,12 @@ function categoryKind(base: string): string {
   return "token";
 }
 
-export default async function TradePage() {
+export default async function TradePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ market?: string; side?: string }>;
+}) {
+  const sp = await searchParams;
   // Perps-only terminal. Build the market list from SoDEX's FULL live perp
   // catalogue (every tradable perp), enriching each with Helix universe data
   // (name / kind / logo) when we have it, and classifying the rest.
@@ -111,9 +116,22 @@ export default async function TradePage() {
     };
   }
 
+  // Optional deep-link preset (e.g. from the Event Stream): ?market=AMD-USD&side=long
+  const wantMarket = sp.market?.toUpperCase();
+  const initialAssetId = wantMarket
+    ? assets.find((a) => a.sodex_symbol?.toUpperCase() === wantMarket)?.id
+    : undefined;
+  const initialSide =
+    sp.side === "short" ? "sell" : sp.side === "long" ? "buy" : undefined;
+
   return (
     <Shell bleed>
-      <TradeTerminal assets={assets} symbolMeta={symbolMeta} />
+      <TradeTerminal
+        assets={assets}
+        symbolMeta={symbolMeta}
+        initialAssetId={initialAssetId}
+        initialSide={initialSide}
+      />
     </Shell>
   );
 }
