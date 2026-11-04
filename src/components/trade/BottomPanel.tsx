@@ -9,8 +9,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { cn } from "@/components/ui/cn";
+import { useSodexAuth } from "@/components/sodex/auth/SodexAuthProvider";
 import { AssetLogo } from "@/components/ui/AssetLogo";
 import { TpSlModal, type TpSlMeta } from "./TpSlModal";
 import { CloseModal } from "./CloseModal";
@@ -111,8 +111,10 @@ const fmtDateTime = (t: number) =>
 // Display names use the -PERP convention everywhere, matching the header.
 const perpName = (s: string) => s.replace(/-USDC?$/i, "-PERP");
 const baseOf = (s: string) => s.split("-")[0] || s;
-const marginModeLabel = (m?: string) =>
-  m ? m.charAt(0).toUpperCase() + m.slice(1).toLowerCase() : null;
+const marginModeLabel = (m?: string) => {
+  const t = m?.trim();
+  return t ? t.charAt(0).toUpperCase() + t.slice(1).toLowerCase() : null;
+};
 
 // Read endpoints return "BUY"/"SELL"/"MARKET"/"LIMIT"/"NEW" as STRINGS; the
 // place path uses the numeric enums. These helpers accept either.
@@ -429,16 +431,17 @@ export function BottomPanel({
 }
 
 function Empty({ children, cta }: { children: React.ReactNode; cta?: boolean }) {
+  const auth = useSodexAuth();
   return (
     <div className="flex flex-col items-center gap-2 px-4 py-8 text-center text-[12px] text-fg-dim">
       <span className="max-w-sm">{children}</span>
       {cta ? (
-        <Link
-          href="/settings/connect-sodex"
+        <button
+          onClick={() => auth.openSetup()}
           className="rounded-md border border-accent/50 bg-accent/15 px-3 py-1.5 text-[12px] font-medium text-accent-2 transition-colors hover:bg-accent/25"
         >
-          Connect SoDEX
-        </Link>
+          {auth.step === "wallet" ? "Connect SoDEX" : "Finish setup"}
+        </button>
       ) : null}
     </div>
   );

@@ -256,13 +256,16 @@ export function SodexAuthProvider({ children }: { children: React.ReactNode }) {
             : "done";
   const ready = step === "done" && disclaimerAccepted;
 
-  // Fire the "return to what you were doing" callback once ready after setup.
+  // Once ready, always close the modal (whether it was opened from the header
+  // with no callback, or from an action that wants to resume) and fire the
+  // "return to what you were doing" callback if there is one. Also closes
+  // automatically if the modal is opened while already fully set up.
   useEffect(() => {
-    if (ready && modalOpen && onReadyRef.current) {
+    if (ready && modalOpen) {
       const cb = onReadyRef.current;
       onReadyRef.current = null;
       setModalOpen(false);
-      cb();
+      if (cb) cb();
     }
   }, [ready, modalOpen]);
 

@@ -10,14 +10,15 @@
  * connect → approve → trade path impossible to miss, so demo visitors
  * convert into fee-generating users instead of just reading paper data.
  *
- * State comes from the shared `useTradeMode` hook (same source of truth
- * as the top-bar badge), so it can never disagree with the rest of the
- * UI. In demo mode it shows a prominent 3-step banner; once the browser
- * is live it collapses to a slim reassurance strip.
+ * State comes from the shared SodexAuth provider (the same source of
+ * truth as the top-bar account button), so it can never disagree with
+ * the rest of the UI. Its button opens the ONE global setup modal. In
+ * demo mode it shows a prominent 3-step banner; once the browser is
+ * live it collapses to a slim "✓ Connected · Open terminal" strip.
  */
 
 import Link from "next/link";
-import { useTradeMode } from "@/lib/sodex-onchain/useTradeMode";
+import { useSodexAuth } from "@/components/sodex/auth/SodexAuthProvider";
 
 type Context = "dashboard" | "index";
 
@@ -33,26 +34,35 @@ const COPY: Record<Context, { headline: string; sub: string }> = {
 };
 
 export function LiveTradeCta({ context = "dashboard" }: { context?: Context }) {
-  const tm = useTradeMode("mainnet");
+  const auth = useSodexAuth();
 
   // Avoid a pre-hydration flash of the wrong state on reload.
-  if (tm.loading) return null;
+  if (auth.loading) return null;
 
-  // Already live — a slim, non-nagging confirmation instead of the pitch.
-  if (tm.ready) {
+  // Already live — a slim, non-nagging confirmation + a jump to the terminal.
+  if (auth.ready) {
     return (
       <div className="flex items-center gap-2 rounded-lg border border-positive/30 bg-positive/10 px-3 py-2 text-[12px] text-positive">
         <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-positive" />
         <span>
-          Live on SoDEX
-          {tm.address ? ` · ${tm.address.slice(0, 6)}…${tm.address.slice(-4)}` : ""} —
-          every order routes with Helix&apos;s builder code.
+          ✓ Connected
+          {auth.address
+            ? ` · ${auth.address.slice(0, 6)}…${auth.address.slice(-4)}`
+            : ""}{" "}
+          — every order routes with Helix&apos;s builder code.
         </span>
+        <Link
+          href="/trade"
+          className="ml-auto shrink-0 rounded border border-positive/40 bg-positive/10 px-2.5 py-1 text-[11px] font-medium text-positive hover:bg-positive/20"
+        >
+          Open terminal →
+        </Link>
       </div>
     );
   }
 
   const { headline, sub } = COPY[context];
+  const cta = auth.step === "wallet" ? "Connect SoDEX" : "Finish setup";
 
   return (
     <div className="relative overflow-hidden rounded-xl border border-accent/30 bg-gradient-to-br from-accent/10 via-surface to-surface p-5">
@@ -82,12 +92,12 @@ export function LiveTradeCta({ context = "dashboard" }: { context?: Context }) {
         </div>
 
         <div className="shrink-0">
-          <Link
-            href="/settings/connect-sodex"
+          <button
+            onClick={() => auth.openSetup()}
             className="dash-btn-primary inline-flex items-center gap-1.5 rounded-md border border-accent/50 bg-accent/20 px-4 py-2.5 text-[13px] font-medium text-accent-2 transition-colors hover:bg-accent/30"
           >
-            Connect SoDEX →
-          </Link>
+            {cta} →
+          </button>
         </div>
       </div>
     </div>

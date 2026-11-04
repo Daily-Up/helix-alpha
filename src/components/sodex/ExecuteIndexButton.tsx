@@ -97,12 +97,12 @@ export function ExecuteIndexButton({ legs }: { legs: IndexLeg[] }) {
     setBusy(true);
     try {
       const key = readLocalKey(network);
-      if (!key) throw new Error("Set up a SoDEX key on /settings/connect-sodex first.");
+      if (!key) throw new Error("Set up a SoDEX trading key first — use the account button, top right.");
       const lookup = key.masterAddress ?? connectedMaster ?? key.address;
       const state = await getAccountState(network, lookup);
       if (!state.aid) {
         throw new Error(
-          "SoDEX account not found for this wallet — connect the master wallet you used on /settings/connect-sodex, then try again.",
+          "SoDEX account not found for this wallet — connect the master wallet you set up with, then try again.",
         );
       }
       const avail = usdcAvailable(state.B ?? []);

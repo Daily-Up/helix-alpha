@@ -1,13 +1,16 @@
 "use client";
 
 /**
- * AccountButton — the single top-right entry point. Not ready → "Connect" or
- * "Finish setup" opens the setup modal. Ready → an address pill that opens the
- * account menu (key expiry + renew, builder-fee status, links, disconnect).
- * Replaces the old TradeModeBadge; reads only from SodexAuthProvider.
+ * AccountButton — the single top-right entry point, rendered on every page via
+ * the shared Topbar. Renders in ALL states: loading → skeleton pill, not ready
+ * → "Connect" / "Finish setup" (opens the setup modal), ready → address pill +
+ * account menu. The menu is portaled to <body> on a top z-index layer with a
+ * solid background, so no page's stacking context (e.g. the ticket's sliding
+ * Buy/Sell pill transform) can ever draw over it.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { cn } from "@/components/ui/cn";
 import { formatExpiry } from "@/lib/sodex-onchain/local-keys";
@@ -16,48 +19,46 @@ import { useSodexAuth } from "./SodexAuthProvider";
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const DAY = 24 * 60 * 60 * 1000;
+const MENU_BG = "#171c23";
 
 export function AccountButton() {
   const a = useSodexAuth();
 
-  if (a.loading) {
-    return <div style={{ width: 96, height: 28 }} aria-hidden />;
-  }
-
-  if (!a.ready) {
-    const label = a.step === "wallet" ? "Connect" : "Finish setup";
-    return (
-      <button
-        onClick={() => a.openSetup()}
-        className="rounded-full bg-[color:var(--accent-trade)] px-3.5 py-1.5 text-[12px] font-semibold text-[#0b0e11] transition-all hover:brightness-110"
-      >
-        {label}
-      </button>
-    );
-  }
-
-  return <ReadyPill />;
+  // Scope to .trade-terminal so --accent-trade (and the rest of the terminal
+  // palette the menu/modal use) resolves here too. The global Topbar sits
+  // OUTSIDE .trade-terminal, where --accent-trade is undefined — without this
+  // the button's background collapses to transparent and it renders invisible
+  // on the dark header (the "empty header" bug). .trade-terminal only sets CSS
+  // vars + font, so it's safe as a wrapper.
+  return (
+    <div className="trade-terminal flex items-center">
+      {a.loading ? (
+        <div
+          className="h-7 w-24 animate-pulse rounded-full bg-surface-2"
+          aria-hidden
+        />
+      ) : !a.ready ? (
+        <button
+          onClick={() => a.openSetup()}
+          className="rounded-full bg-[color:var(--accent-trade)] px-3.5 py-1.5 text-[12px] font-semibold text-[#0b0e11] transition-all hover:brightness-110"
+        >
+          {a.step === "wallet" ? "Connect" : "Finish setup"}
+        </button>
+      ) : (
+        <ReadyPill />
+      )}
+    </div>
+  );
 }
 
 function ReadyPill() {
   const a = useSodexAuth();
-  const wrapRef = useRef<HTMLDivElement>(null);
-
-  // Close the menu on outside click.
-  useEffect(() => {
-    if (!a.menuOpen) return;
-    const onClick = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
-        a.setMenuOpen(false);
-      }
-    };
-    window.addEventListener("mousedown", onClick);
-    return () => window.removeEventListener("mousedown", onClick);
-  }, [a]);
+  const btnRef = useRef<HTMLButtonElement>(null);
 
   return (
-    <div ref={wrapRef} className="trade-terminal relative">
+    <>
       <button
+        ref={btnRef}
         onClick={() => a.setMenuOpen(!a.menuOpen)}
         className="flex items-center gap-2 rounded-full border border-line bg-surface-2/50 py-1 pl-1.5 pr-3 transition-colors hover:border-line-2"
       >
@@ -69,18 +70,48 @@ function ReadyPill() {
         </span>
         <span className="h-1.5 w-1.5 rounded-full bg-positive" aria-hidden />
       </button>
-      {a.menuOpen ? <Menu /> : null}
-    </div>
+      {a.menuOpen ? <Menu anchor={btnRef} /> : null}
+    </>
   );
 }
 
-function Menu() {
+function Menu({ anchor }: { anchor: React.RefObject<HTMLButtonElement | null> }) {
   const a = useSodexAuth();
   const [copied, setCopied] = useState(false);
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const fee = getBuilderCode("mainnet")?.fee ?? 10;
   const expLabel = a.keyExpiry ? formatExpiry(a.keyExpiry) : "";
-  const needsRenew =
-    a.keyExpiry?.msLeft != null && a.keyExpiry.msLeft < DAY;
+  const needsRenew = a.keyExpiry?.msLeft != null && a.keyExpiry.msLeft < DAY;
+
+  // Position the portaled menu under the anchor (fixed coords → escapes any
+  // transformed ancestor's stacking context).
+  useLayoutEffect(() => {
+    const r = anchor.current?.getBoundingClientRect();
+    if (r) setPos({ top: r.bottom + 6, right: window.innerWidth - r.right });
+  }, [anchor]);
+
+  // Close on outside click / Escape.
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (
+        menuRef.current &&
+        !menuRef.current.contains(e.target as Node) &&
+        !anchor.current?.contains(e.target as Node)
+      ) {
+        a.setMenuOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && a.setMenuOpen(false);
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [a, anchor]);
+
+  if (typeof document === "undefined" || !pos) return null;
 
   const copy = async () => {
     if (!a.address) return;
@@ -93,8 +124,12 @@ function Menu() {
     }
   };
 
-  return (
-    <div className="absolute right-0 top-[calc(100%+6px)] z-50 w-[272px] rounded-lg border border-line bg-surface p-3 text-[12px] shadow-2xl">
+  return createPortal(
+    <div
+      ref={menuRef}
+      className="trade-terminal fixed z-[1000] w-[272px] rounded-lg border border-line p-3 text-[12px] shadow-2xl"
+      style={{ top: pos.top, right: pos.right, background: MENU_BG }}
+    >
       {/* address */}
       <div className="flex items-center justify-between">
         <span className="font-[var(--font-jetbrains-mono)] text-[12px] text-fg">
@@ -112,10 +147,13 @@ function Menu() {
       <div className="my-2.5 border-t border-line" />
 
       {/* trading key */}
-      <Row label="Trading key">
-        <span className="text-fg-muted">{a.key?.name || "—"}</span>
-      </Row>
       <div className="flex items-center justify-between">
+        <span className="text-fg-muted">Trading key</span>
+        <span className="font-[var(--font-jetbrains-mono)] text-fg-muted">
+          {a.key?.name || "—"}
+        </span>
+      </div>
+      <div className="mt-0.5 flex items-center justify-between">
         <span
           className={cn(
             "text-[10.5px]",
@@ -166,7 +204,6 @@ function Menu() {
 
       <div className="my-2.5 border-t border-line" />
 
-      {/* links */}
       <div className="flex flex-col gap-1">
         <MenuLink href="/portfolio" onNav={() => a.setMenuOpen(false)}>
           Portfolio
@@ -192,16 +229,8 @@ function Menu() {
           Disconnect &amp; revoke key on SoDEX
         </button>
       </div>
-    </div>
-  );
-}
-
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between">
-      <span className="text-fg-muted">{label}</span>
-      {children}
-    </div>
+    </div>,
+    document.body,
   );
 }
 

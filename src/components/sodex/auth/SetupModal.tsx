@@ -8,6 +8,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "@/components/ui/cn";
 import { getBuilderCode } from "@/lib/sodex-onchain/chains";
 import { useSodexAuth, type AuthStep } from "./SodexAuthProvider";
@@ -40,14 +41,17 @@ function ModalInner() {
     return () => window.removeEventListener("keydown", onKey);
   }, [a]);
 
-  return (
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <div
-      className="trade-terminal fixed inset-0 z-50 flex items-center justify-center p-4"
+      className="trade-terminal fixed inset-0 z-[1000] flex items-center justify-center p-4"
       style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(2px)" }}
       onClick={a.closeModal}
     >
       <div
-        className="relative w-full max-w-[440px] rounded-xl border border-line bg-surface p-5 shadow-2xl"
+        className="relative w-full max-w-[440px] rounded-xl border border-line p-5 shadow-2xl"
+        style={{ background: "#171c23" }}
         onClick={(e) => e.stopPropagation()}
       >
         <button
@@ -113,7 +117,8 @@ function ModalInner() {
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

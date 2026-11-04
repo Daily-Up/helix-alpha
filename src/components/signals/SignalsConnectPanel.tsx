@@ -28,6 +28,7 @@ import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount } from "wagmi";
 import { getAccountState } from "@/lib/sodex-onchain/client";
 import { useTradeMode } from "@/lib/sodex-onchain/useTradeMode";
+import { useSodexAuth } from "@/components/sodex/auth/SodexAuthProvider";
 
 type Stage =
   | "loading"
@@ -46,6 +47,7 @@ type Stage =
 
 export function SignalsConnectPanel() {
   const tm = useTradeMode("mainnet");
+  const auth = useSodexAuth();
   const { isConnected, address } = useAccount();
 
   // Only the PRE-KEY setup stages depend on the wagmi session. Once a
@@ -140,12 +142,12 @@ export function SignalsConnectPanel() {
               chainStatus="none"
               showBalance={false}
             />
-            <Link
-              href="/settings/connect-sodex"
+            <button
+              onClick={() => auth.openSetup()}
               className="text-[11px] text-fg-dim underline decoration-dotted underline-offset-4 hover:text-fg"
             >
               How it works →
-            </Link>
+            </button>
           </div>
         </>
       )}
@@ -171,12 +173,12 @@ export function SignalsConnectPanel() {
             >
               Open SoDEX ↗
             </a>
-            <Link
-              href="/settings/connect-sodex"
+            <button
+              onClick={() => auth.openSetup()}
               className="inline-flex items-center text-[11px] text-fg-dim underline decoration-dotted underline-offset-4 hover:text-fg"
             >
               Full setup steps →
-            </Link>
+            </button>
           </div>
         </>
       )}
@@ -195,31 +197,29 @@ export function SignalsConnectPanel() {
             <span className="font-mono">default</span> keys don&apos;t
             count for execution.
           </p>
-          <Link
-            href="/settings/connect-sodex"
+          <button
+            onClick={() => auth.openSetup()}
             className="inline-flex items-center justify-center gap-2 rounded border border-accent/50 bg-accent/15 px-3 py-1.5 text-xs font-medium text-accent-2 transition-colors hover:border-accent/70 hover:bg-accent/25"
           >
             + Create API key →
-          </Link>
+          </button>
         </>
       )}
 
       {stage === "key-no-disclaimer" && (
         <>
-          <h3 className="text-sm font-medium text-fg">
-            Accept the safety limits
-          </h3>
+          <h3 className="text-sm font-medium text-fg">One last step</h3>
           <p className="text-xs leading-relaxed text-fg-muted">
             Helix key <span className="font-mono text-fg">{keyName}</span>{" "}
-            is registered. Set your per-trade max + tick the disclaimer
-            to unlock the Execute Live buttons on signal cards.
+            is registered. Tick the risk acknowledgement to unlock the
+            Execute Live buttons on signal cards.
           </p>
-          <Link
-            href="/settings/connect-sodex"
+          <button
+            onClick={() => auth.openSetup()}
             className="inline-flex items-center justify-center gap-2 rounded border border-accent/40 bg-accent/10 px-3 py-1.5 text-xs font-medium text-accent-2 hover:bg-accent/20"
           >
-            Set limits →
-          </Link>
+            Finish setup →
+          </button>
         </>
       )}
 
@@ -234,7 +234,7 @@ export function SignalsConnectPanel() {
             <span className="font-mono text-fg">{shortAddr}</span>
           </p>
           <Link
-            href="/settings/connect-sodex"
+            href="/settings/sodex"
             className="text-[11px] text-fg-dim underline decoration-dotted underline-offset-4 hover:text-fg"
           >
             Manage keys → revoke / rotate

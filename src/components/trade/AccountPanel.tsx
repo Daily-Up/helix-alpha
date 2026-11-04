@@ -7,9 +7,9 @@
  * account state. Shows a Connect CTA until the browser trading key is live.
  */
 
-import Link from "next/link";
 import { cn } from "@/components/ui/cn";
 import type { SodexPerpsAccountState } from "@/lib/sodex-onchain/types";
+import { useSodexAuth } from "@/components/sodex/auth/SodexAuthProvider";
 
 const money = (v: number | null | undefined, d = 2) =>
   v == null || !Number.isFinite(v)
@@ -27,6 +27,7 @@ export function AccountPanel({
   account: SodexPerpsAccountState | null;
   ready: boolean;
 }) {
+  const auth = useSodexAuth();
   // av = account value (collateral + uPnL) = equity; am = free collateral.
   const equity = account ? Number(account.av) : null;
   const available = account ? Number(account.am) : null;
@@ -65,12 +66,12 @@ export function AccountPanel({
           <p className="text-center text-[11px] text-fg-dim">
             Connect to see your balances.
           </p>
-          <Link
-            href="/settings/connect-sodex"
+          <button
+            onClick={() => auth.openSetup()}
             className="rounded-md border border-accent/50 bg-accent/15 px-4 py-2 text-[12px] font-semibold text-accent-2 transition-colors hover:bg-accent/25"
           >
-            Connect SoDEX
-          </Link>
+            {auth.step === "wallet" ? "Connect SoDEX" : "Finish setup"}
+          </button>
         </div>
       ) : (
         <div className="flex flex-col gap-3">
