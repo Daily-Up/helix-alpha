@@ -178,7 +178,14 @@ export function WealthDashboard() {
             Wealth catalog
           </h2>
           {catalog?.funds && (
-            <span className="text-[11px] text-fg-dim">
+            <span className="flex items-center gap-2 text-[11px] text-fg-dim">
+              {flaggedFunds.size > 0 && (
+                <span className="flex items-center gap-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+                  has a live suggestion
+                  <span className="px-1">·</span>
+                </span>
+              )}
               {catalog.funds.length} live products · SoDEX Wealth
             </span>
           )}
@@ -269,10 +276,20 @@ function MyWealth({
               </div>
             </div>
             <PnlStat label="24h PnL" value={portfolio?.totalPnl24h ?? null} />
-            <PnlStat label="Total PnL" value={portfolio?.totalPnl ?? null} />
+            <PnlStat
+              label="All-time PnL"
+              value={portfolio?.totalPnl ?? null}
+              title="Realised (incl. redeemed positions) + unrealised on current holdings"
+            />
+            <PnlStat
+              label="Realised"
+              value={portfolio?.totalRealizedPnl ?? null}
+              title="Locked in from closed / redeemed positions"
+            />
             <PnlStat
               label="Unrealised"
               value={portfolio?.totalUnrealizedPnl ?? null}
+              title="On current open positions (SoDEX cost basis is airdrop-adjusted)"
             />
           </div>
           <a
@@ -322,11 +339,22 @@ function MyWealth({
   );
 }
 
-function PnlStat({ label, value }: { label: string; value: number | null }) {
+function PnlStat({
+  label,
+  value,
+  title,
+}: {
+  label: string;
+  value: number | null;
+  title?: string;
+}) {
   const up = (value ?? 0) >= 0;
   return (
-    <div>
-      <div className="text-[10px] uppercase tracking-wider text-fg-dim">{label}</div>
+    <div title={title}>
+      <div className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-fg-dim">
+        {label}
+        {title && <span className="cursor-help text-fg-dim/70">ⓘ</span>}
+      </div>
       <div
         className={cn(
           "mt-0.5 font-[var(--font-jetbrains-mono)] text-[15px] font-medium tabular-nums",

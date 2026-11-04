@@ -11,6 +11,7 @@
 import { cn } from "@/components/ui/cn";
 import { fmtPct } from "@/lib/format";
 import type { WealthFundView } from "@/lib/wealth/types";
+import { WealthSparkline } from "./WealthSparkline";
 
 function signClass(n: number | null): string {
   if (n == null) return "text-fg-dim";
@@ -103,19 +104,33 @@ export function FundCard({
         )}
       </div>
 
-      <div className="mt-3 flex items-center justify-between border-t border-line pt-2.5">
+      {/* 1-month sparkline */}
+      <div className="mt-2.5">
+        <WealthSparkline fundId={fund.fundId} />
+      </div>
+
+      <div className="mt-2 flex items-center justify-between border-t border-line pt-2.5">
         <span className="text-[10.5px] text-fg-dim group-hover:text-fg-muted">
           View details
         </span>
-        <a
-          href={fund.investUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(e) => e.stopPropagation()}
-          className="rounded border border-accent/40 bg-accent/10 px-2.5 py-1 text-[11px] font-medium text-accent-2 transition-colors hover:bg-accent/20"
-        >
-          Invest ↗
-        </a>
+        {status === "CLOSED" ? (
+          <span
+            title="Market closed — open the details to invest on SoDEX"
+            className="cursor-not-allowed rounded border border-line bg-surface-2/60 px-2.5 py-1 text-[11px] font-medium text-fg-dim"
+          >
+            Closed
+          </span>
+        ) : (
+          <a
+            href={fund.investUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="rounded border border-accent/40 bg-accent/10 px-2.5 py-1 text-[11px] font-medium text-accent-2 transition-colors hover:bg-accent/20"
+          >
+            Invest ↗
+          </a>
+        )}
       </div>
     </div>
   );

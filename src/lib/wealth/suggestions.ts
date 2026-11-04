@@ -1,24 +1,30 @@
 /**
  * Wealth Index suggestion engine.
  *
- * Produces factual, input-grounded "here's what you can do" cards. Rules
- * (from the product spec):
- *   • Events/news LEAD: a card about a fund fires when its underlying has
- *     recent notable news (SoDEX per-fund news) and/or matching Helix events.
- *     The triggering items are attached as linked sources.
- *   • Efficiency is the always-on BASELINE: idle USDC + the APY gap between
- *     similar-risk Stable Earn products — evaluated even when there's no news.
- *   • Risk is a GUARDRAIL, never a standalone card: concentration context is
- *     attached to other cards, and an event card is downgraded/suppressed when
- *     the fund is already a large share of the user's wealth book.
- *   • Strictly factual: observation states what's true, option states a thing
- *     the user COULD do — never a directive. Every number in the text also
- *     appears in `inputs` with its timestamp. If a datum is missing, no card.
- *   • Max 3–5 cards, ranked by relevance; each carries its asOf timestamp.
- *     ("Not financial advice" is rendered by the UI on every card.)
+ * Factual, input-grounded "here's what you can do" cards. Rules:
+ *   • Event cards are driven by Helix's CLASSIFIED events matched to a fund's
+ *     actual underlying by ASSET ID (not keywords): QQQ ↔ Nasdaq-100
+ *     constituents + index, SMH ↔ semiconductor names, VOO ↔ S&P 500/index,
+ *     etc. Require ≥2 relevant events at confidence ≥0.6; dedupe near-identical
+ *     headlines (duplicate_of + title similarity) like the Event Stream. Funds
+ *     with no Helix-tracked underlying (CXMT, Unitree) fall back to SoDEX's
+ *     per-fund news feed.
+ *   • Card wording: a sentiment summary + the top driver — e.g. "US Semis 25:
+ *     3 bullish events in 48h; biggest: AMD shares up 7.3%." Factual, no
+ *     directives.
+ *   • Efficiency is the always-on baseline: idle USDC vs USDC Earn APY, and a
+ *     yield-gap when a similar-risk Stable Earn pays ≥0.5pp more than one the
+ *     user holds.
+ *   • Risk is a guardrail: concentration context is attached (not standalone)
+ *     only when a fund is ≥30% of the wealth book; event cards are suppressed
+ *     when ≥50%.
+ *   • Ranking: max 4 cards, ≤2 event cards, ≥1 efficiency card when applicable.
+ *     Rank by holdings first, then severity × confidence.
+ *   • No invented numbers; every number is in `inputs` with its timestamp. The
+ *     UI renders "Not financial advice" on every card.
  */
 
-import { Events } from "@/lib/db";
+import { all } from "@/lib/db";
 import { fetchFundNews, type WealthNewsItem } from "./client";
 import type {
   WealthFundView,
@@ -28,23 +34,36 @@ import type {
 
 const DAY = 24 * 60 * 60 * 1000;
 const SODEX_WEALTH_URL = "https://sodex.com/wealth";
-const MIN_IDLE_USDC = 10; // SoDEX min subscription
-const YIELD_GAP_PP = 0.25; // min APY gap to surface a rotation observation
+const MIN_IDLE_USDC = 10;
+const YIELD_GAP_PP = 0.5;
+const CONCENTRATION_FLAG_PCT = 30;
 const CONCENTRATION_SUPPRESS_PCT = 50;
-const CONCENTRATION_FLAG_PCT = 40;
+const MIN_EVENT_CONFIDENCE = 0.6;
+const MIN_EVENTS_FOR_CARD = 2;
 
-/** Keywords used to match Helix's own event stream to a fund's underlying. */
-const FUND_KEYWORDS: Record<string, string[]> = {
-  CXMT: ["cxmt", "changxin", "dram", "memory chip", "micron", "hbm"],
-  UNITREE: ["unitree", "humanoid", "robotics", "robot"],
-  vSMH: ["semiconductor", "chipmaker", "nvidia", "amd", "micron", "tsmc", "sk hynix"],
-  vQQQ: ["nasdaq", "nasdaq-100", "big tech", "mega-cap tech"],
-  vVGT: ["technology sector", "it sector"],
-  vVOO: ["s&p 500", "s&p500", "sp500"],
-  vSCHD: ["dividend"],
-  vVYM: ["dividend"],
-  vBOXX: ["treasury", "t-bill", "fed ", "interest rate", "rate cut", "rate hike"],
-  "Morpho-Earn": ["treasury", "fed ", "interest rate", "rate cut", "rate hike", "stablecoin yield"],
+/**
+ * Each fund → the Helix asset_ids that ARE its underlying. Event cards fire
+ * only when a classified event's affected assets intersect this set. Funds not
+ * listed (dividend baskets, CXMT, Unitree) have no Helix-tracked underlying and
+ * get no Helix-event card (CXMT/Unitree use SoDEX news instead).
+ */
+const MEGA_CAP_TECH = [
+  "stk-aapl", "stk-msft", "stk-nvda", "stk-googl", "stk-amzn", "stk-meta",
+  "stk-tsla", "stk-amd", "stk-intc", "stk-mu", "stk-orcl", "stk-pltr", "stk-tsm",
+];
+const SEMIS = ["stk-nvda", "stk-amd", "stk-intc", "stk-mu", "stk-tsm"];
+const RATE_MACRO = [
+  "mac-fomc", "mac-cpi", "mac-core-cpi", "mac-nonfarm-payrolls", "mac-ppi",
+  "mac-ism-manufacturing-pmi", "mac-ism-non-manufacturing-pmi",
+];
+const FUND_UNDERLYING: Record<string, string[]> = {
+  vQQQ: ["perp-ustech100", "idx-ssimag7", ...MEGA_CAP_TECH],
+  vVGT: ["perp-ustech100", "idx-ssimag7", ...MEGA_CAP_TECH],
+  vVOO: ["perp-us500", "idx-ssimag7"], // S&P 500 / index-level only (too broad for constituents)
+  vSMH: SEMIS,
+  vSTRC: ["trs-mstr"],
+  "Morpho-Earn": RATE_MACRO,
+  vBOXX: RATE_MACRO,
 };
 
 const pct = (n: number | null) =>
@@ -54,55 +73,108 @@ const usd = (n: number | null) =>
 const when = (iso: string | null) =>
   iso ? new Date(iso).toISOString().replace("T", " ").slice(0, 16) + "Z" : "unknown";
 
-interface HelixMatch {
+type Sent = "positive" | "negative" | "neutral";
+const SENT_WORD: Record<Sent, string> = {
+  positive: "bullish",
+  negative: "bearish",
+  neutral: "neutral",
+};
+const SEVERITY_WEIGHT: Record<string, number> = { high: 3, medium: 2, low: 1 };
+
+interface ClassifiedEvent {
   id: string;
+  release_time: number;
   title: string;
   href: string | null;
-  ts: string;
+  sentiment: Sent;
+  severity: string;
+  confidence: number;
+  assetIds: string[];
+  score: number; // severity × confidence
 }
 
-/** Recent Helix events whose title/matched symbols hit a fund's keywords. */
-function matchHelixEvents(
-  events: Array<{
+/** Recent canonical classified events (deduped by duplicate_of, conf ≥ 0.6). */
+async function fetchClassifiedEvents(sinceMs: number): Promise<ClassifiedEvent[]> {
+  const rows = await all<{
     id: string;
-    title: string;
     release_time: number;
-    original_link: string | null;
+    title: string;
     source_link: string | null;
-    matched_currencies: Array<{ symbol: string; name: string }>;
-  }>,
-  keywords: string[],
-  now: number,
-): HelixMatch[] {
-  const kw = keywords.map((k) => k.toLowerCase());
-  const out: HelixMatch[] = [];
-  for (const e of events) {
-    if (now - e.release_time > 2 * DAY) continue;
-    const hay =
-      (e.title || "").toLowerCase() +
-      " " +
-      e.matched_currencies.map((c) => `${c.symbol} ${c.name}`).join(" ").toLowerCase();
-    if (kw.some((k) => hay.includes(k))) {
-      out.push({
-        id: e.id,
-        title: e.title,
-        href: e.original_link || e.source_link || `/events`,
-        ts: new Date(e.release_time).toISOString(),
-      });
+    original_link: string | null;
+    sentiment: Sent;
+    severity: string;
+    confidence: number;
+    affected_asset_ids: string | null;
+  }>(
+    `SELECT n.id, n.release_time, n.title, n.source_link, n.original_link,
+            c.sentiment, c.severity, c.confidence, c.affected_asset_ids
+     FROM news_events n
+     JOIN classifications c ON c.event_id = n.id
+     LEFT JOIN skipped_pre_classify s ON s.id = n.id
+     WHERE n.duplicate_of IS NULL AND s.id IS NULL
+       AND n.release_time >= ?
+       AND c.confidence >= ?
+     ORDER BY n.release_time DESC
+     LIMIT 400`,
+    [sinceMs, MIN_EVENT_CONFIDENCE],
+  );
+  return rows.map((r) => {
+    let assetIds: string[] = [];
+    try {
+      assetIds = r.affected_asset_ids ? (JSON.parse(r.affected_asset_ids) as string[]) : [];
+    } catch {
+      assetIds = [];
     }
-    if (out.length >= 3) break;
-  }
-  return out;
+    return {
+      id: r.id,
+      release_time: r.release_time,
+      title: cleanTitle(r.title),
+      href: r.original_link || r.source_link || "/events",
+      sentiment: r.sentiment,
+      severity: r.severity,
+      confidence: r.confidence,
+      assetIds,
+      score: (SEVERITY_WEIGHT[r.severity] ?? 1) * r.confidence,
+    };
+  });
 }
 
-function concentrationPct(
-  portfolio: WealthPortfolio | null,
-  fundId: string,
-): number | null {
+function cleanTitle(t: string): string {
+  return t.replace(/^(Express News|Flash|BREAKING|QUICK SPARK)\s*[|:]\s*/i, "").trim();
+}
+
+// ── Near-identical-headline dedup (token-set Jaccard) ──────────────────
+function tokens(t: string): Set<string> {
+  return new Set(
+    t.toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter((w) => w.length > 3),
+  );
+}
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let inter = 0;
+  for (const w of a) if (b.has(w)) inter++;
+  return inter / (a.size + b.size - inter);
+}
+/** Collapse near-duplicate headlines, keeping the highest-scoring one. */
+function dedupeEvents(events: ClassifiedEvent[]): ClassifiedEvent[] {
+  const sorted = [...events].sort((a, b) => b.score - a.score);
+  const kept: Array<{ e: ClassifiedEvent; tok: Set<string> }> = [];
+  for (const e of sorted) {
+    const tk = tokens(e.title);
+    if (kept.some((k) => jaccard(k.tok, tk) >= 0.6)) continue;
+    kept.push({ e, tok: tk });
+  }
+  return kept.map((k) => k.e);
+}
+
+function concentrationPct(portfolio: WealthPortfolio | null, fundId: string): number | null {
   if (!portfolio || !portfolio.totalWealth || portfolio.totalWealth <= 0) return null;
   const pos = portfolio.positions.find((p) => p.fundId === fundId);
   if (!pos || pos.marketValue == null) return null;
   return (pos.marketValue / portfolio.totalWealth) * 100;
+}
+function isHeld(portfolio: WealthPortfolio | null, fundId: string): boolean {
+  return !!portfolio?.positions.some((p) => p.fundId === fundId && (p.marketValue ?? 0) > 0.01);
 }
 
 // ── Efficiency baseline ────────────────────────────────────────────────
@@ -128,122 +200,165 @@ function idleUsdcCard(
     sources: [],
     riskNote: null,
     asOf: earn.asOf ?? asOfBalance ?? new Date().toISOString(),
-    relevance: 72,
+    relevance: 80,
     ctaLabel: `View ${earn.displayName} on SoDEX`,
     ctaHref: SODEX_WEALTH_URL,
   };
 }
 
-function yieldGapCard(catalog: WealthFundView[]): WealthSuggestion | null {
-  const yieldFunds = catalog
-    .filter((f) => f.category === "stable_earn" && f.apy7d != null)
-    .sort((a, b) => (b.apy7d ?? 0) - (a.apy7d ?? 0));
-  if (yieldFunds.length < 2) return null;
-  const hi = yieldFunds[0];
-  const lo = yieldFunds[yieldFunds.length - 1];
-  const gap = (hi.apy7d ?? 0) - (lo.apy7d ?? 0);
+function redemptionNote(f: WealthFundView): string {
+  if (f.fundId === "Morpho-Earn") return "redeemable anytime";
+  if (f.marketStatus) return `follows market hours (currently ${f.marketStatus})`;
+  return "see SoDEX for redemption terms";
+}
+
+/** Yield gap: a Stable Earn pays ≥0.5pp more than a Stable Earn the user holds. */
+function yieldGapCard(
+  catalog: WealthFundView[],
+  portfolio: WealthPortfolio | null,
+): WealthSuggestion | null {
+  const stable = catalog.filter((f) => f.category === "stable_earn" && f.apy7d != null);
+  const held = stable.filter((f) => isHeld(portfolio, f.fundId));
+  if (held.length === 0) return null;
+  // Lowest-yielding held product vs the highest-yielding Stable Earn overall.
+  const heldLow = [...held].sort((a, b) => (a.apy7d ?? 0) - (b.apy7d ?? 0))[0];
+  const best = [...stable].sort((a, b) => (b.apy7d ?? 0) - (a.apy7d ?? 0))[0];
+  if (best.fundId === heldLow.fundId) return null;
+  const gap = (best.apy7d ?? 0) - (heldLow.apy7d ?? 0);
   if (gap < YIELD_GAP_PP) return null;
   return {
     id: "eff-yield-gap",
     kind: "yield_rotation",
-    fundId: hi.fundId,
-    observation: `${hi.displayName}'s 7-day APY (${pct(hi.apy7d)}) is currently higher than ${lo.displayName}'s (${pct(lo.apy7d)}).`,
-    option: `Both are Stable Earn products; the ${gap.toFixed(2)}-point gap is one factor among several (duration, backing, redemption terms).`,
+    fundId: best.fundId,
+    observation: `${best.displayName}'s 7-day APY (${pct(best.apy7d)}) is ${gap.toFixed(2)} points higher than ${heldLow.displayName}'s (${pct(heldLow.apy7d)}), which you hold.`,
+    option: `Both are Stable Earn. ${heldLow.displayName} ${redemptionNote(heldLow)}; ${best.displayName} ${redemptionNote(best)}.`,
     inputs: [
-      `${hi.displayName} 7D APY: ${pct(hi.apy7d)} (as of ${when(hi.asOf)})`,
-      `${lo.displayName} 7D APY: ${pct(lo.apy7d)} (as of ${when(lo.asOf)})`,
+      `${best.displayName} 7D APY: ${pct(best.apy7d)} (as of ${when(best.asOf)})`,
+      `${heldLow.displayName} 7D APY: ${pct(heldLow.apy7d)} (as of ${when(heldLow.asOf)})`,
       `Difference: ${gap.toFixed(2)} points`,
     ],
     sources: [],
     riskNote: null,
-    asOf: hi.asOf ?? new Date().toISOString(),
-    relevance: 56,
+    asOf: best.asOf ?? new Date().toISOString(),
+    relevance: 70,
     ctaLabel: "Compare on SoDEX",
     ctaHref: SODEX_WEALTH_URL,
   };
 }
 
-// ── Event/news-led ─────────────────────────────────────────────────────
+// ── Event cards ─────────────────────────────────────────────────────────
 
-function eventCard(
+function sentimentSummary(events: ClassifiedEvent[]): string {
+  const counts: Record<Sent, number> = { positive: 0, negative: 0, neutral: 0 };
+  for (const e of events) counts[e.sentiment]++;
+  const parts: string[] = [];
+  (["negative", "positive", "neutral"] as Sent[]).forEach((s) => {
+    if (counts[s] > 0) parts.push(`${counts[s]} ${SENT_WORD[s]}`);
+  });
+  return parts.join(", ");
+}
+
+function helixEventCard(
   fund: WealthFundView,
-  news: WealthNewsItem[],
-  helix: HelixMatch[],
+  events: ClassifiedEvent[],
   portfolio: WealthPortfolio | null,
-  now: number,
 ): WealthSuggestion | null {
-  const recentNews = news.filter(
-    (n) => n.ts && now - Date.parse(n.ts) <= 2 * DAY,
-  );
-  const bull = recentNews.filter((n) => n.sentiment === "Bullish").length;
-  const bear = recentNews.filter((n) => n.sentiment === "Bearish").length;
-
-  // Trigger: ≥2 recent news items, or any matched Helix event.
-  if (recentNews.length < 2 && helix.length === 0) return null;
+  const deduped = dedupeEvents(events);
+  if (deduped.length < MIN_EVENTS_FOR_CARD) return null;
 
   const conc = concentrationPct(portfolio, fund.fundId);
-  if (conc != null && conc > CONCENTRATION_SUPPRESS_PCT) return null; // guardrail
+  if (conc != null && conc >= CONCENTRATION_SUPPRESS_PCT) return null; // guardrail
 
-  const retLabel =
-    fund.changePct != null
-      ? `${fund.displayName} is ${pct(fund.changePct)} over 24h`
-      : fund.headlineValue != null
-        ? `${fund.displayName}'s ${fund.headlineLabel.toLowerCase()} is ${pct(fund.headlineValue)}`
-        : fund.displayName;
-  const monthCtx =
-    fund.roi1M != null ? `, ${pct(fund.roi1M)} over the past month` : "";
+  const top = [...deduped].sort((a, b) => b.score - a.score)[0];
+  const summary = sentimentSummary(deduped);
+  const held = isHeld(portfolio, fund.fundId);
+  const newest = Math.max(...deduped.map((e) => e.release_time));
 
-  const inputs: string[] = [];
-  if (recentNews.length) {
-    inputs.push(`SoDEX news items (48h): ${recentNews.length}` + (bull || bear ? ` — ${bull} bullish, ${bear} bearish` : ""));
-  }
-  if (helix.length) inputs.push(`Matching Helix events (48h): ${helix.length}`);
-  if (fund.changePct != null) inputs.push(`24h change: ${pct(fund.changePct)} (as of ${when(fund.asOf)})`);
-  if (fund.roi1M != null) inputs.push(`1-month return: ${pct(fund.roi1M)}`);
-  if (fund.headlineValue != null && fund.isYield) inputs.push(`${fund.headlineLabel}: ${pct(fund.headlineValue)}`);
+  const inputs = [
+    `Relevant Helix events (48h, conf ≥ 60%): ${deduped.length} — ${summary}`,
+    `Top driver: ${top.title.slice(0, 90)} (${SENT_WORD[top.sentiment]}, ${top.severity}, conf ${(top.confidence * 100).toFixed(0)}%)`,
+  ];
+  if (fund.changePct != null) inputs.push(`${fund.symbol} 24h: ${pct(fund.changePct)} (as of ${when(fund.asOf)})`);
+  else if (fund.headlineValue != null) inputs.push(`${fund.headlineLabel}: ${pct(fund.headlineValue)}`);
 
-  const sources = [
-    ...helix.map((h) => ({ label: `Helix: ${h.title.slice(0, 80)}`, href: h.href ?? undefined, ts: h.ts })),
-    ...recentNews.slice(0, 3).map((n) => ({
-      label: `${n.sentiment ? n.sentiment + " · " : ""}${n.title.slice(0, 80)}`,
-      href: n.url ?? undefined,
-      ts: n.ts ?? undefined,
-    })),
-  ].slice(0, 4);
-
-  const newestTs = [
-    ...recentNews.map((n) => (n.ts ? Date.parse(n.ts) : 0)),
-    ...helix.map((h) => Date.parse(h.ts)),
-    fund.asOf ? Date.parse(fund.asOf) : 0,
-  ].reduce((a, b) => Math.max(a, b), 0);
-
-  let relevance =
-    60 + recentNews.length * 3 + (bull + bear) * 2 + helix.length * 6 + Math.min(10, Math.abs(fund.changePct ?? 0));
   let riskNote: string | null = null;
-  if (conc != null) {
+  if (conc != null && conc >= CONCENTRATION_FLAG_PCT) {
     riskNote = `${fund.displayName} is already ${conc.toFixed(1)}% of your wealth book.`;
-    if (conc > CONCENTRATION_FLAG_PCT) relevance -= 25; // downgrade
   }
 
-  const sentimentPhrase =
-    recentNews.length >= 2
-      ? ` (${bull} flagged bullish, ${bear} bearish)`
-      : "";
+  const sumScore = deduped.reduce((s, e) => s + e.score, 0);
+  const relevance = (held ? 1000 : 0) + Math.round(sumScore * 10);
 
   return {
     id: `evt-${fund.fundId}`,
     kind: "event",
     fundId: fund.fundId,
-    observation:
-      recentNews.length >= 2
-        ? `${fund.displayName} (${fund.symbol}) has ${recentNews.length} news items in the last 48h${sentimentPhrase}.`
-        : `There ${helix.length === 1 ? "is" : "are"} ${helix.length} recent Helix event${helix.length === 1 ? "" : "s"} touching ${fund.displayName} (${fund.symbol}).`,
-    option: `${retLabel}${monthCtx}.`,
+    observation: `${fund.displayName}: ${summary} event${deduped.length === 1 ? "" : "s"} in 48h; biggest: ${top.title.slice(0, 70)}.`,
+    option:
+      fund.changePct != null
+        ? `${fund.displayName} is ${pct(fund.changePct)} over 24h${fund.roi1M != null ? `, ${pct(fund.roi1M)} over the past month` : ""}.`
+        : `${fund.displayName}'s ${fund.headlineLabel.toLowerCase()} is ${pct(fund.headlineValue)}.`,
     inputs,
-    sources,
+    sources: deduped.slice(0, 3).map((e) => ({
+      label: `${SENT_WORD[e.sentiment]} · ${e.title.slice(0, 70)}`,
+      href: e.href ?? undefined,
+      ts: new Date(e.release_time).toISOString(),
+    })),
     riskNote,
-    asOf: newestTs > 0 ? new Date(newestTs).toISOString() : new Date().toISOString(),
+    asOf: new Date(newest).toISOString(),
     relevance,
+    ctaLabel: `View ${fund.displayName} on SoDEX`,
+    ctaHref: SODEX_WEALTH_URL,
+  };
+}
+
+/** SoDEX per-fund news card — only for funds with no Helix-tracked underlying. */
+function newsCard(
+  fund: WealthFundView,
+  news: WealthNewsItem[],
+  portfolio: WealthPortfolio | null,
+  now: number,
+): WealthSuggestion | null {
+  const recent = news.filter((n) => n.ts && now - Date.parse(n.ts) <= 2 * DAY);
+  if (recent.length < MIN_EVENTS_FOR_CARD) return null;
+
+  const conc = concentrationPct(portfolio, fund.fundId);
+  if (conc != null && conc >= CONCENTRATION_SUPPRESS_PCT) return null;
+
+  const bull = recent.filter((n) => n.sentiment === "Bullish").length;
+  const bear = recent.filter((n) => n.sentiment === "Bearish").length;
+  const sentBits = [bull ? `${bull} bullish` : "", bear ? `${bear} bearish` : ""].filter(Boolean).join(", ");
+  const top = recent[0];
+  const held = isHeld(portfolio, fund.fundId);
+  const newest = Math.max(...recent.map((n) => (n.ts ? Date.parse(n.ts) : 0)));
+
+  const inputs = [`SoDEX news items (48h): ${recent.length}${sentBits ? ` — ${sentBits}` : ""}`];
+  if (fund.changePct != null) inputs.push(`${fund.symbol} 24h: ${pct(fund.changePct)} (as of ${when(fund.asOf)})`);
+  if (fund.roi1M != null) inputs.push(`1-month: ${pct(fund.roi1M)}`);
+
+  let riskNote: string | null = null;
+  if (conc != null && conc >= CONCENTRATION_FLAG_PCT) {
+    riskNote = `${fund.displayName} is already ${conc.toFixed(1)}% of your wealth book.`;
+  }
+
+  return {
+    id: `news-${fund.fundId}`,
+    kind: "event",
+    fundId: fund.fundId,
+    observation: `${fund.displayName}: ${recent.length} news items in 48h${sentBits ? ` (${sentBits})` : ""}; biggest: ${top.title.slice(0, 70)}.`,
+    option:
+      fund.changePct != null
+        ? `${fund.displayName} is ${pct(fund.changePct)} over 24h${fund.roi1M != null ? `, ${pct(fund.roi1M)} over the past month` : ""}.`
+        : `${fund.displayName}'s ${fund.headlineLabel.toLowerCase()} is ${pct(fund.headlineValue)}.`,
+    inputs,
+    sources: recent.slice(0, 3).map((n) => ({
+      label: `${n.sentiment ? n.sentiment + " · " : ""}${n.title.slice(0, 70)}`,
+      href: n.url ?? undefined,
+      ts: n.ts ?? undefined,
+    })),
+    riskNote,
+    asOf: newest > 0 ? new Date(newest).toISOString() : new Date().toISOString(),
+    relevance: (held ? 1000 : 0) + recent.length * 4 + (bull + bear) * 3,
     ctaLabel: `View ${fund.displayName} on SoDEX`,
     ctaHref: SODEX_WEALTH_URL,
   };
@@ -260,47 +375,58 @@ export async function buildSuggestions(args: {
 }): Promise<WealthSuggestion[]> {
   const { catalog, portfolio, idleUsdc, idleUsdcAsOf } = args;
   const now = args.now ?? Date.now();
+  const sinceMs = now - 2 * DAY;
 
-  // Pull recent Helix events once (crypto-weighted stream; matches for these
-  // US-equity / China / yield funds will be sparse, and that's fine).
-  let helixEvents: Awaited<ReturnType<typeof Events.listRecentEvents>> = [];
+  // Helix classified events (asset-tagged, deduped, conf ≥ 0.6).
+  let events: ClassifiedEvent[] = [];
   try {
-    helixEvents = await Events.listRecentEvents({ limit: 150 });
+    events = await fetchClassifiedEvents(sinceMs);
   } catch {
-    helixEvents = [];
+    events = [];
   }
 
-  // SoDEX per-fund news for funds we have a verified seoName for.
-  const newsFunds = catalog.filter((f) => f.newsSeo);
-  const newsResults = await Promise.all(
-    newsFunds.map((f) => fetchFundNews(f.newsSeo as string, 30).then((n) => [f.fundId, n] as const)),
-  );
-  const newsByFund = new Map(newsResults);
-
-  const cards: WealthSuggestion[] = [];
-
-  // Efficiency baseline (always evaluated)
-  const idle = idleUsdcCard(catalog, idleUsdc, idleUsdcAsOf);
-  if (idle) cards.push(idle);
-  const gap = yieldGapCard(catalog);
-  if (gap) cards.push(gap);
-
-  // Event/news-led (primary)
+  // Event cards — one per fund with a Helix-tracked underlying.
+  const eventCards: WealthSuggestion[] = [];
   for (const fund of catalog) {
-    const news = newsByFund.get(fund.fundId) ?? [];
-    const helix = matchHelixEvents(helixEvents, FUND_KEYWORDS[fund.fundId] ?? [], now);
-    const card = eventCard(fund, news, helix, portfolio, now);
-    if (card) cards.push(card);
+    const underlying = FUND_UNDERLYING[fund.fundId];
+    if (!underlying) continue;
+    const set = new Set(underlying);
+    const matched = events.filter((e) => e.assetIds.some((a) => set.has(a)));
+    const card = helixEventCard(fund, matched, portfolio);
+    if (card) eventCards.push(card);
   }
 
-  // Rank by relevance; cap at 5. Events can lead, but the efficiency baseline
-  // always keeps a slot when one exists (swap it in for the weakest card).
-  cards.sort((a, b) => b.relevance - a.relevance);
-  const top = cards.slice(0, 5);
-  const isEff = (k: string) => k === "efficiency" || k === "yield_rotation";
-  if (top.length > 0 && !top.some((c) => isEff(c.kind))) {
-    const bestEff = cards.find((c) => isEff(c.kind));
-    if (bestEff) top[top.length - 1] = bestEff;
+  // SoDEX-news cards — only for funds with no Helix underlying (CXMT, Unitree).
+  const newsFunds = catalog.filter((f) => f.newsSeo && !FUND_UNDERLYING[f.fundId]);
+  const newsResults = await Promise.all(
+    newsFunds.map((f) => fetchFundNews(f.newsSeo as string, 30).then((n) => [f, n] as const)),
+  );
+  for (const [fund, news] of newsResults) {
+    const card = newsCard(fund, news, portfolio, now);
+    if (card) eventCards.push(card);
   }
-  return top;
+
+  // Efficiency baseline.
+  const effCards: WealthSuggestion[] = [];
+  const idle = idleUsdcCard(catalog, idleUsdc, idleUsdcAsOf);
+  if (idle) effCards.push(idle);
+  const gap = yieldGapCard(catalog, portfolio);
+  if (gap) effCards.push(gap);
+
+  // Caps: ≤2 event cards (ranked: holdings first, then severity × confidence),
+  // ≥1 efficiency when available, 4 total. Dedupe event cards that share their
+  // top driver — the same AMD story shouldn't fill both the Nasdaq-100 and
+  // broad-tech cards; keep the higher-ranked (held) fund.
+  const seenTop = new Set<string>();
+  const topEvents: WealthSuggestion[] = [];
+  for (const c of eventCards.sort((a, b) => b.relevance - a.relevance)) {
+    const topKey = c.sources[0]?.href || c.sources[0]?.label || c.id;
+    if (seenTop.has(topKey)) continue;
+    seenTop.add(topKey);
+    topEvents.push(c);
+    if (topEvents.length >= 2) break;
+  }
+  const combined = [...topEvents, ...effCards];
+  combined.sort((a, b) => b.relevance - a.relevance);
+  return combined.slice(0, 4);
 }
