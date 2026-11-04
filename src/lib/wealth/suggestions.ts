@@ -66,6 +66,48 @@ const FUND_UNDERLYING: Record<string, string[]> = {
   vBOXX: RATE_MACRO,
 };
 
+export function fundHasHelixUnderlying(fundId: string): boolean {
+  return !!FUND_UNDERLYING[fundId];
+}
+
+export interface FundEvent {
+  id: string;
+  title: string;
+  href: string | null;
+  sentiment: "positive" | "negative" | "neutral";
+  severity: string;
+  confidence: number;
+  ts: string;
+}
+
+/**
+ * Deduped, asset-matched Helix classified events for ONE fund — used by the
+ * per-fund page's News tab. Same strict asset-id mapping as the cards, over a
+ * wider window.
+ */
+export async function matchedFundEvents(
+  fundId: string,
+  windowMs = 7 * DAY,
+  now = Date.now(),
+): Promise<FundEvent[]> {
+  const underlying = FUND_UNDERLYING[fundId];
+  if (!underlying) return [];
+  const events = await fetchClassifiedEvents(now - windowMs);
+  const set = new Set(underlying);
+  const matched = events.filter((e) => e.assetIds.some((a) => set.has(a)));
+  return dedupeEvents(matched)
+    .sort((a, b) => b.release_time - a.release_time)
+    .map((e) => ({
+      id: e.id,
+      title: e.title,
+      href: e.href,
+      sentiment: e.sentiment,
+      severity: e.severity,
+      confidence: e.confidence,
+      ts: new Date(e.release_time).toISOString(),
+    }));
+}
+
 const pct = (n: number | null) =>
   n == null ? "—" : `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
 const usd = (n: number | null) =>

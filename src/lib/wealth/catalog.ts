@@ -187,6 +187,65 @@ export function buildCatalog(
     });
 }
 
+// ── Per-fund page metadata (underlying / redemption / hours / min sub) ──
+// Transcribed from sodex.com/wealth + public ETF facts; redemption terms are
+// kept deliberately non-specific where SoDEX doesn't publish them (no guesses).
+
+export interface FundPageMeta {
+  minSubUsd: number;
+  underlying: string;
+  redemption: string;
+  hours: string;
+}
+
+const ETF_HOURS = "US market hours (≈24/5)";
+const ETF_REDEEM = "Sell on the SoDEX order book during market hours.";
+
+const PAGE_META: Record<string, FundPageMeta> = {
+  "Morpho-Earn": {
+    minSubUsd: 10,
+    underlying: "USDC supplied to Morpho prime lending markets",
+    redemption: "Redeemable anytime (continuous).",
+    hours: "24/7",
+  },
+  vBOXX: {
+    minSubUsd: 10,
+    underlying: "BOXX — short-dated box-spread (T-bill-like) yield",
+    redemption: "Sell on the SoDEX order book during market hours.",
+    hours: "≈24/5",
+  },
+  vQQQ: { minSubUsd: 10, underlying: "Invesco QQQ — Nasdaq-100", redemption: ETF_REDEEM, hours: ETF_HOURS },
+  vVOO: { minSubUsd: 10, underlying: "Vanguard VOO — S&P 500", redemption: ETF_REDEEM, hours: ETF_HOURS },
+  vVGT: { minSubUsd: 10, underlying: "Vanguard VGT — US information-technology", redemption: ETF_REDEEM, hours: ETF_HOURS },
+  vSCHD: { minSubUsd: 10, underlying: "Schwab SCHD — US quality dividend equity", redemption: ETF_REDEEM, hours: ETF_HOURS },
+  vVYM: { minSubUsd: 10, underlying: "Vanguard VYM — US high-dividend equity", redemption: ETF_REDEEM, hours: ETF_HOURS },
+  vSMH: { minSubUsd: 10, underlying: "VanEck SMH — US semiconductors", redemption: ETF_REDEEM, hours: ETF_HOURS },
+  vSTRC: { minSubUsd: 10, underlying: "Strategy (MSTR) preferred — STRC", redemption: ETF_REDEEM, hours: ETF_HOURS },
+  CXMT: {
+    minSubUsd: 100,
+    underlying: "Changxin Memory Technologies (CXMT) — China DRAM maker",
+    redemption: "Subscription open 24/7; redemption terms are set by the vault — see SoDEX.",
+    hours: "24/7 subscription",
+  },
+  UNITREE: {
+    minSubUsd: 100,
+    underlying: "Unitree Robotics — China humanoid robotics",
+    redemption: "Subscription open 24/7; redemption terms are set by the vault — see SoDEX.",
+    hours: "24/7 subscription",
+  },
+};
+
+export function fundPageMeta(fundId: string, category: WealthCategory): FundPageMeta {
+  return (
+    PAGE_META[fundId] ?? {
+      minSubUsd: category === "specialty" ? 100 : 10,
+      underlying: "—",
+      redemption: "See SoDEX for redemption terms.",
+      hours: category === "stable_earn" ? "24/7" : "≈24/5",
+    }
+  );
+}
+
 /** Group catalog rows by category, in display order. */
 export function groupByCategory(
   rows: WealthFundView[],

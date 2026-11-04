@@ -15,6 +15,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Card, CardBody } from "@/components/ui/Card";
 import { PanelSkeleton } from "@/components/ui/Skeleton";
 import { cn } from "@/components/ui/cn";
@@ -29,7 +30,6 @@ import {
 } from "@/lib/wealth/types";
 import { SuggestionCard } from "./SuggestionCard";
 import { FundCard } from "./FundCard";
-import { FundDetailModal } from "./FundDetailModal";
 
 interface CatalogResp {
   ok: boolean;
@@ -48,14 +48,15 @@ interface SuggestionsResp {
 
 export function WealthDashboard() {
   const auth = useSodexAuth();
+  const router = useRouter();
   const address = auth.address;
+  const openFund = (f: WealthFundView) => router.push(`/wealth/${f.fundId}`);
 
   const [catalog, setCatalog] = useState<CatalogResp | null>(null);
   const [portfolio, setPortfolio] = useState<WealthPortfolio | null>(null);
   const [suggestions, setSuggestions] = useState<WealthSuggestion[] | null>(null);
   const [loadingCatalog, setLoadingCatalog] = useState(true);
   const [loadingSug, setLoadingSug] = useState(true);
-  const [selected, setSelected] = useState<WealthFundView | null>(null);
 
   // Catalog (not wallet-specific) — once on mount.
   useEffect(() => {
@@ -146,7 +147,7 @@ export function WealthDashboard() {
                 key={s.id}
                 suggestion={s}
                 fund={s.fundId ? fundById.get(s.fundId) ?? null : null}
-                onOpenFund={(f) => setSelected(f)}
+                onOpenFund={openFund}
               />
             ))}
           </div>
@@ -199,7 +200,7 @@ export function WealthDashboard() {
               category={g.category}
               funds={g.funds}
               flagged={flaggedFunds}
-              onSelect={(f) => setSelected(f)}
+              onSelect={openFund}
             />
           ))
         ) : (
@@ -214,9 +215,6 @@ export function WealthDashboard() {
         )}
       </section>
 
-      {selected && (
-        <FundDetailModal fund={selected} onClose={() => setSelected(null)} />
-      )}
     </div>
   );
 }
