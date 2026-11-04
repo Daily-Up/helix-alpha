@@ -439,10 +439,16 @@ export interface HelixWindow {
   builderFees: number;
 }
 
-export interface HelixStripStats {
+export interface HelixWindowTriple {
   d1: HelixWindow;
   w1: HelixWindow;
   all: HelixWindow;
+}
+
+export interface HelixStripStats extends HelixWindowTriple {
+  /** Subset routed from the Event Stream (helix-evt- prefix) — a breakdown of
+   *  the totals above, never additional to them. */
+  evt: HelixWindowTriple;
 }
 
 export interface TradeStats {
@@ -454,10 +460,14 @@ export interface TradeStats {
 
 const emptyWindow = (): HelixWindow => ({ volume: 0, fills: 0, builderFees: 0 });
 
-function helixWindow(trades: SodexTrade[], sinceMs: number): HelixWindow {
+function helixWindow(
+  trades: SodexTrade[],
+  sinceMs: number,
+  prefix = "helix-",
+): HelixWindow {
   const w = emptyWindow();
   for (const t of trades) {
-    if (!(t.clOrdID ?? "").startsWith("helix-")) continue;
+    if (!(t.clOrdID ?? "").startsWith(prefix)) continue;
     if (sinceMs > 0 && t.time < sinceMs) continue;
     w.volume += tradeValue(t);
     w.fills += 1;
@@ -491,6 +501,11 @@ export async function fetchTradeStats(address: string): Promise<TradeStats> {
     d1: helixWindow(allHelix, now - DAY),
     w1: helixWindow(allHelix, now - 7 * DAY),
     all: helixWindow(allHelix, 0),
+    evt: {
+      d1: helixWindow(allHelix, now - DAY, "helix-evt-"),
+      w1: helixWindow(allHelix, now - 7 * DAY, "helix-evt-"),
+      all: helixWindow(allHelix, 0, "helix-evt-"),
+    },
   };
 
   const perpsRealized30d = closed.reduce(

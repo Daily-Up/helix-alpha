@@ -16,6 +16,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Market } from "@/lib/sodex";
 import type { SodexCandle, SodexTicker } from "@/lib/sodex/types";
+import { useTradeMode } from "@/lib/sodex-onchain/useTradeMode";
+import { getPerpsAccountState } from "@/lib/sodex-onchain/client";
 import {
   resolveAsset,
   baseCategory,
@@ -126,6 +128,50 @@ export function usePerpMarkets(): PerpMarkets {
   }, []);
 
   return data;
+}
+
+// ── open positions (For You priority) ─────────────────────────────────────────
+
+/** Base tickers (e.g. "BTC") the user holds an OPEN perp position in, read
+ *  straight from SoDEX account state. Empty when no trading identity is set up.
+ *  Read-only, polled slowly — drives the "For You" tab's top priority. */
+export function useOpenPositionBases(): Set<string> {
+  const tm = useTradeMode("mainnet");
+  const [bases, setBases] = useState<Set<string>>(new Set());
+  const address = tm.address;
+
+  useEffect(() => {
+    if (!address) {
+      setBases(new Set());
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const st = await getPerpsAccountState("mainnet", address);
+        if (cancelled) return;
+        const s = new Set<string>();
+        for (const p of st.P ?? []) {
+          if (Number(p.sz) === 0) continue; // flat = not a holding
+          const base = (p.s ?? "").toUpperCase().replace(/-USDC?$/, "");
+          if (base) s.add(base);
+        }
+        setBases((prev) =>
+          prev.size === s.size && [...s].every((b) => prev.has(b)) ? prev : s,
+        );
+      } catch {
+        /* keep last good */
+      }
+    };
+    load();
+    const t = setInterval(load, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [address]);
+
+  return bases;
 }
 
 // ── events ────────────────────────────────────────────────────────────────────

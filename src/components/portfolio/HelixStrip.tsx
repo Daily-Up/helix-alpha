@@ -3,17 +3,32 @@
 /**
  * HelixStrip — a muted "Traded via Helix" card. SoDEX tags Helix-routed fills
  * with a "helix-" clOrdID prefix; this sums volume, fill count and builder fees
- * paid over 1D / 1W / All for those fills. Small and quiet — it sits at the
+ * paid over 1D / 1W / All for those fills. A "From Event Stream" sub-block then
+ * breaks out the slice opened from the Event Stream (a "helix-evt-" prefix — a
+ * subset of the totals, never added to them). Small and quiet — it sits at the
  * bottom of the portfolio, a footnote on how much flow went through Helix.
  */
 
 import { compactUsd, money } from "./fmt";
-import type { HelixStripStats, HelixWindow } from "@/lib/portfolio/fetch";
+import type {
+  HelixStripStats,
+  HelixWindow,
+  HelixWindowTriple,
+} from "@/lib/portfolio/fetch";
 
-const WINDOWS: { key: keyof HelixStripStats; label: string }[] = [
+const WINDOWS: { key: keyof HelixWindowTriple; label: string }[] = [
   { key: "d1", label: "1D" },
   { key: "w1", label: "1W" },
   { key: "all", label: "All" },
+];
+
+const METRICS: { label: string; render: (w: HelixWindow) => string }[] = [
+  { label: "Volume", render: (v) => compactUsd(v.volume) },
+  { label: "Fills", render: (v) => v.fills.toLocaleString() },
+  {
+    label: "Builder fees",
+    render: (v) => (v.builderFees > 0 ? money(v.builderFees, 4) : "$0"),
+  },
 ];
 
 export function HelixStrip({ helix }: { helix: HelixStripStats | null }) {
@@ -42,17 +57,23 @@ export function HelixStrip({ helix }: { helix: HelixStripStats | null }) {
           </span>
         ))}
 
-        <Row label="Volume" render={(v) => compactUsd(v.volume)} helix={helix} />
-        <Row
-          label="Fills"
-          render={(v) => v.fills.toLocaleString()}
-          helix={helix}
-        />
-        <Row
-          label="Builder fees"
-          render={(v) => (v.builderFees > 0 ? money(v.builderFees, 4) : "$0")}
-          helix={helix}
-        />
+        {METRICS.map((m) => (
+          <Row key={m.label} label={m.label} render={m.render} windows={helix} />
+        ))}
+
+        {/* From Event Stream — the helix-evt- subset of the totals above. */}
+        <span className="col-span-4 mt-2 border-t border-line pt-2 text-[9px] uppercase tracking-wider text-fg-dim">
+          From Event Stream
+        </span>
+        {METRICS.map((m) => (
+          <Row
+            key={`evt-${m.label}`}
+            label={m.label}
+            render={m.render}
+            windows={helix?.evt ?? null}
+            muted
+          />
+        ))}
       </div>
     </div>
   );
@@ -61,21 +82,25 @@ export function HelixStrip({ helix }: { helix: HelixStripStats | null }) {
 function Row({
   label,
   render,
-  helix,
+  windows,
+  muted,
 }: {
   label: string;
   render: (w: HelixWindow) => string;
-  helix: HelixStripStats | null;
+  windows: HelixWindowTriple | null;
+  muted?: boolean;
 }) {
   return (
     <>
-      <span className="text-fg-muted">{label}</span>
+      <span className={muted ? "text-fg-dim" : "text-fg-muted"}>{label}</span>
       {WINDOWS.map((w) => (
         <span
           key={w.key}
-          className="text-right font-[var(--font-jetbrains-mono)] tabular-nums text-fg"
+          className={`text-right font-[var(--font-jetbrains-mono)] tabular-nums ${
+            muted ? "text-fg-muted" : "text-fg"
+          }`}
         >
-          {helix ? render(helix[w.key]) : "—"}
+          {windows ? render(windows[w.key]) : "—"}
         </span>
       ))}
     </>

@@ -14,6 +14,7 @@ import {
   usePerpMarkets,
   useStreamEvents,
   useKlines,
+  useOpenPositionBases,
   pctSince,
   type StreamEvent,
 } from "@/lib/events/use-stream";
@@ -37,6 +38,7 @@ export function EventStream() {
   const { perpSet, tickers, movers } = usePerpMarkets();
   const { events, loading } = useStreamEvents(perpSet);
   const { list: watchlist } = useWatchlist();
+  const posBases = useOpenPositionBases();
 
   const [tab, setTab] = useState<CenterTab>("For You");
   const [topic, setTopic] = useState<string | null>(null);
@@ -100,24 +102,35 @@ export function EventStream() {
   );
   const heroIds = useMemo(() => new Set(heroes.map((h) => h.id)), [heroes]);
 
-  // Feed: center tab + topic + relevance filter, heroes excluded.
+  // Feed: center tab + topic + relevance filter, heroes excluded. "For You"
+  // keeps events I have a position in, a watchlist asset, or high severity —
+  // then ranks them in that priority (positions first), newest within a rank.
   const feed = useMemo(() => {
     const watchSet = new Set(watchlist);
-    return priced.filter((e) => {
+    const baseOf = (s: string) => s.toUpperCase().replace(/-USDC?$/, "");
+    const onPos = (e: StreamEvent) =>
+      e.tradable.some((a) => a.sodexSymbol && posBases.has(baseOf(a.sodexSymbol)));
+    const onWatch = (e: StreamEvent) =>
+      e.tradable.some((a) => a.sodexSymbol && watchSet.has(a.sodexSymbol));
+
+    const filtered = priced.filter((e) => {
       if (heroIds.has(e.id)) return false;
       if (topic && e.event_type !== topic) return false;
       if (tab === "Equities" && e.category !== "equity") return false;
       if (tab === "Crypto" && e.category !== "crypto") return false;
       if (tab === "Macro" && !MACRO_CATS.has(e.category)) return false;
-      if (tab === "For You") {
-        const onWatch = e.tradable.some(
-          (a) => a.sodexSymbol && watchSet.has(a.sodexSymbol),
-        );
-        if (!onWatch && e.severity !== "high") return false;
-      }
+      if (tab === "For You" && !onPos(e) && !onWatch(e) && e.severity !== "high")
+        return false;
       return true;
     });
-  }, [priced, tab, topic, heroIds, watchlist]);
+
+    if (tab !== "For You") return filtered;
+    // positions (0) → watchlist (1) → high severity (2); stable sort keeps the
+    // newest-first order within each rank.
+    const rank = (e: StreamEvent) =>
+      onPos(e) ? 0 : onWatch(e) ? 1 : e.severity === "high" ? 2 : 3;
+    return [...filtered].sort((a, b) => rank(a) - rank(b));
+  }, [priced, tab, topic, heroIds, watchlist, posBases]);
 
   const isRelevant = (e: StreamEvent) =>
     e.assets.length > 0 && (e.confidence ?? 0) >= 0.5;
