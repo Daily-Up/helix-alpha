@@ -44,9 +44,21 @@ export interface EventCardData {
   skip_score?: number | null;
 }
 
+/** Price move for an asset from the event's publish time to now. */
+export interface PriceMove {
+  /** % change, basePrice → lastPrice. */
+  pct: number;
+  /** Mark at (the candle at/just before) the event's publish time. */
+  basePrice: number;
+  /** Latest mark. */
+  lastPrice: number;
+  /** openTime (ms) of the baseline candle. */
+  baseMs: number;
+}
+
 export interface StreamAsset extends AssetRef {
-  /** % move since the event's release time, if klines cover it. */
-  pctSinceEvent: number | null;
+  /** Price move since the event's release time, if klines cover it. */
+  move: PriceMove | null;
 }
 
 export interface StreamEvent extends EventCardData {
@@ -192,7 +204,7 @@ function enrich(ev: EventCardData, perpSet: Set<string>): StreamEvent {
       : ev.matched_currencies.map((c) => `tok-${c.symbol.toLowerCase()}`);
   const assets: StreamAsset[] = ids.map((id) => ({
     ...resolveAsset(id, perpSet),
-    pctSinceEvent: null,
+    move: null,
   }));
   const tradable = assets.filter((a) => a.sodexSymbol);
   const category: MarketCategory =
@@ -350,23 +362,47 @@ export function useKlines(symbols: string[]): Map<string, SodexCandle[]> {
   return map;
 }
 
-/** % move from the candle nearest the event time to the latest close. */
+/**
+ * Price move from the candle at/just before the event to the latest close.
+ * Candles must be ascending (useKlines sorts them). Returns the baseline price
+ * (mark at publish time), the latest price, that baseline candle's openTime and
+ * the % between them — enough for the pill AND its "$X at publish → $Y now"
+ * tooltip. null when klines don't cover the asset.
+ */
+export function priceMove(
+  candles: SodexCandle[] | undefined,
+  eventMs: number,
+): PriceMove | null {
+  if (!candles || candles.length < 2) return null;
+  const lastPrice = Number(candles[candles.length - 1].close);
+  if (!Number.isFinite(lastPrice) || lastPrice === 0) return null;
+  let basePrice: number | null = null;
+  let baseMs = candles[0].openTime;
+  for (const c of candles) {
+    if (c.openTime <= eventMs) {
+      basePrice = Number(c.close);
+      baseMs = c.openTime;
+    } else break;
+  }
+  if (basePrice == null) {
+    basePrice = Number(candles[0].close); // event predates the window
+    baseMs = candles[0].openTime;
+  }
+  if (!Number.isFinite(basePrice) || basePrice === 0) return null;
+  return {
+    pct: ((lastPrice - basePrice) / basePrice) * 100,
+    basePrice,
+    lastPrice,
+    baseMs,
+  };
+}
+
+/** Back-compat thin wrapper: just the % of priceMove(). */
 export function pctSince(
   candles: SodexCandle[] | undefined,
   eventMs: number,
 ): number | null {
-  if (!candles || candles.length < 2) return null;
-  const last = Number(candles[candles.length - 1].close);
-  if (!Number.isFinite(last) || last === 0) return null;
-  // Candles are ascending; find the last one at/just before the event.
-  let base: number | null = null;
-  for (const c of candles) {
-    if (c.openTime <= eventMs) base = Number(c.close);
-    else break;
-  }
-  if (base == null) base = Number(candles[0].close); // event predates window
-  if (!Number.isFinite(base) || base === 0) return null;
-  return ((last - base) / base) * 100;
+  return priceMove(candles, eventMs)?.pct ?? null;
 }
 
 // ── hero images (Unsplash, cached per event) ─────────────────────────────────

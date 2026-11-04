@@ -14,7 +14,7 @@ import { safeHref } from "@/lib/safe-url";
 import { cn } from "@/components/ui/cn";
 import { AssetLogo } from "@/components/ui/AssetLogo";
 import { perpDisplay } from "@/lib/events/market-map";
-import { pctSince, type StreamEvent } from "@/lib/events/use-stream";
+import { priceMove, type StreamEvent } from "@/lib/events/use-stream";
 import type { SodexCandle } from "@/lib/sodex/types";
 import { AssetPill } from "./AssetPill";
 import { Sparkline } from "./Sparkline";
@@ -121,10 +121,11 @@ export function DetailPanel({
                 const candles = a.sodexSymbol
                   ? klines.get(a.sodexSymbol)
                   : undefined;
-                const pct = candles
-                  ? pctSince(candles, ev.release_time)
+                const move = candles
+                  ? priceMove(candles, ev.release_time)
                   : null;
-                const asset = { ...a, pctSinceEvent: pct };
+                const pct = move?.pct ?? null;
+                const asset = { ...a, move };
                 return (
                   <div
                     key={a.id}
@@ -167,7 +168,13 @@ export function DetailPanel({
                       </div>
                     )}
                     <div className="mt-2 flex">
-                      <AssetPill asset={asset} sentiment={ev.sentiment} both star />
+                      <AssetPill
+                        asset={asset}
+                        sentiment={ev.sentiment}
+                        publishMs={ev.release_time}
+                        both
+                        star
+                      />
                     </div>
                   </div>
                 );

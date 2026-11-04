@@ -20,7 +20,7 @@ import {
   useStreamEvents,
   useKlines,
   useHeroImages,
-  pctSince,
+  priceMove,
   type StreamEvent,
 } from "@/lib/events/use-stream";
 import type { MarketCategory } from "@/lib/events/market-map";
@@ -93,8 +93,8 @@ export function EventStream() {
         ...e,
         tradable: e.tradable.map((a) => ({
           ...a,
-          pctSinceEvent: a.sodexSymbol
-            ? pctSince(klines.get(a.sodexSymbol), e.release_time)
+          move: a.sodexSymbol
+            ? priceMove(klines.get(a.sodexSymbol), e.release_time)
             : null,
         })),
       })),
@@ -117,7 +117,6 @@ export function EventStream() {
     [priced, tab],
   );
   const heroIds = useMemo(() => new Set(heroes.map((h) => h.id)), [heroes]);
-  const heroImages = useHeroImages(heroes);
 
   // The single pool everything downstream reads: the selected tab, heroes
   // removed, relevance toggle applied — but NOT the topic filter. Topic-chip
@@ -168,6 +167,27 @@ export function EventStream() {
     ).length;
   }, [priced, tab, topic, heroIds, showAll]);
 
+  // Hero + feed cards share one Unsplash image cache (keyed by event).
+  const imageTargets = useMemo(() => [...heroes, ...shown], [heroes, shown]);
+  const images = useHeroImages(imageTargets);
+
+  // Count label. "events" is the SAME universe the Relevant-24h tile counts
+  // (relevant events in the last 24h, here scoped to the selected tab) — so on
+  // the default All tab the number equals the tile exactly. The feed shows
+  // fewer CARDS (stories) because the hero takes a few and clustering merges
+  // same-asset duplicates; showing both reconciles the two.
+  const stories = shown.length;
+  const eventsCount = useMemo(() => {
+    const since = Date.now() - 24 * 60 * 60 * 1000;
+    return priced.filter(
+      (e) => matchesTab(e, tab) && e.release_time >= since && isRelevant(e),
+    ).length;
+  }, [priced, tab]);
+  const feedCountLabel =
+    eventsCount > stories
+      ? `${stories} stories · ${eventsCount} events`
+      : `${stories} event${stories === 1 ? "" : "s"}`;
+
   return (
     <div className="trade-terminal flex flex-col gap-4">
       {/* Header */}
@@ -214,7 +234,7 @@ export function EventStream() {
             <HeroCarousel
               heroes={heroes}
               klines={klines}
-              images={heroImages}
+              images={images}
               onOpen={setSelected}
             />
           ) : null}
@@ -224,9 +244,7 @@ export function EventStream() {
           {/* Feed */}
           <div className="flex items-center justify-between">
             <span className="text-[11px] text-fg-dim">
-              {loading && priced.length === 0
-                ? "Loading…"
-                : `${shown.length} event${shown.length === 1 ? "" : "s"}`}
+              {loading && priced.length === 0 ? "Loading…" : feedCountLabel}
             </span>
             <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-fg-muted">
               <input
@@ -251,7 +269,11 @@ export function EventStream() {
                   key={e.id}
                   className={cn(!isRelevant(e) && showAll && "opacity-55")}
                 >
-                  <EventCardCompact ev={e} onOpen={setSelected} />
+                  <EventCardCompact
+                    ev={e}
+                    image={images.get(e.id) ?? null}
+                    onOpen={setSelected}
+                  />
                 </div>
               ))
             )}

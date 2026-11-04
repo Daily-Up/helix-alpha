@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/components/ui/cn";
 import type { SodexCandle } from "@/lib/sodex/types";
+import { tradeSide } from "@/lib/events/market-map";
 import { AssetPill } from "./AssetPill";
 import { Sparkline } from "./Sparkline";
 import type { StreamEvent, HeroImage } from "@/lib/events/use-stream";
@@ -190,7 +191,13 @@ export function HeroCarousel({
               )}
             >
               {ev.tradable.slice(0, 3).map((a) => (
-                <AssetPill key={a.id} asset={a} sentiment={ev.sentiment} />
+                <AssetPill
+                  key={a.id}
+                  asset={a}
+                  sentiment={ev.sentiment}
+                  side={tradeSide(ev.sentiment, ev.confidence)}
+                  publishMs={ev.release_time}
+                />
               ))}
               <button
                 onClick={() => onOpen(ev)}

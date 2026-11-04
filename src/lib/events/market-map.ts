@@ -144,6 +144,23 @@ export function defaultSide(
   return sentiment === "negative" ? "short" : "long";
 }
 
+/**
+ * Effective trade side for an event's pill. A directional LONG/SHORT preset is
+ * only offered for a clearly positive/negative read with ≥60% confidence;
+ * otherwise "neutral" (open the terminal with the market selected, no side) so
+ * we don't push a direction we aren't confident about.
+ */
+export function tradeSide(
+  sentiment: "positive" | "negative" | "neutral" | null,
+  confidence: number | null,
+): "long" | "short" | "neutral" {
+  const c = confidence ?? 0;
+  if (c < 0.6) return "neutral";
+  if (sentiment === "positive") return "long";
+  if (sentiment === "negative") return "short";
+  return "neutral";
+}
+
 /** Perp display name convention used across the app (BTC-USD → BTC-PERP). */
 export function perpDisplay(sodexSymbol: string): string {
   return sodexSymbol.replace(/-USDC?$/i, "-PERP");

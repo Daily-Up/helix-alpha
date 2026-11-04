@@ -1,29 +1,36 @@
 "use client";
 
 /**
- * AssetPill — logo + ticker + % move since the event + a Long/Short trade
- * button that deep-links into /trade with the market selected and the side
- * preset (no auto-size, no auto-submit). Shows one button (the sentiment
- * default) in feeds/hero, or both in the detail panel. Unmapped assets show no
- * button. A star toggles the asset into the watchlist.
+ * AssetPill — logo + ticker + % move since the event (with a "$X at publish →
+ * $Y now" hover tooltip) + a trade button that deep-links into /trade with the
+ * market selected. The button is Long/Short ONLY for a confident directional
+ * read (see tradeSide); otherwise a neutral "Trade" button opens the terminal
+ * with no side preset. The detail panel shows both Long + Short. Unmapped
+ * assets show no button. A star toggles the asset into the watchlist.
  */
 
 import Link from "next/link";
 import { AssetLogo } from "@/components/ui/AssetLogo";
 import { cn } from "@/components/ui/cn";
-import { defaultSide } from "@/lib/events/market-map";
+import { defaultSide, perpDisplay } from "@/lib/events/market-map";
 import { tradeHref, useWatchlist } from "@/lib/events/watchlist";
 import type { StreamAsset } from "@/lib/events/use-stream";
 
 const pctStr = (v: number) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(1)}%`;
+const px = (v: number) =>
+  `$${v.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: v < 1 ? 6 : 2,
+  })}`;
+const timeStr = (ms: number) =>
+  new Date(ms).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 
-function TradeBtn({
-  symbol,
-  side,
-}: {
-  symbol: string;
-  side: "long" | "short";
-}) {
+function TradeBtn({ symbol, side }: { symbol: string; side: "long" | "short" }) {
   const long = side === "long";
   return (
     <Link
@@ -35,9 +42,22 @@ function TradeBtn({
           ? "bg-positive/15 text-positive hover:bg-positive/25"
           : "bg-negative/15 text-negative hover:bg-negative/25",
       )}
-      title={`Open ${symbol.replace(/-USDC?$/i, "-PERP")} in the terminal, ${side} preset`}
+      title={`Open ${perpDisplay(symbol)} in the terminal, ${side} preset`}
     >
       {long ? "Long" : "Short"}
+    </Link>
+  );
+}
+
+function TradeNeutralBtn({ symbol }: { symbol: string }) {
+  return (
+    <Link
+      href={tradeHref(symbol)}
+      onClick={(e) => e.stopPropagation()}
+      className="rounded bg-[color:var(--accent-trade)]/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--accent-trade)] transition-colors hover:bg-[color:var(--accent-trade)]/25"
+      title={`Open ${perpDisplay(symbol)} in the terminal`}
+    >
+      Trade
     </Link>
   );
 }
@@ -45,20 +65,35 @@ function TradeBtn({
 export function AssetPill({
   asset,
   sentiment,
+  side,
+  publishMs,
   both,
   star,
 }: {
   asset: StreamAsset;
   sentiment: "positive" | "negative" | "neutral" | null;
-  /** Show both Long + Short (detail panel); else just the sentiment default. */
+  /** Effective side for the single button; "neutral" → a no-preset Trade
+   *  button. Omitted → derived from sentiment (back-compat). */
+  side?: "long" | "short" | "neutral";
+  /** Event publish time (ms), for the % tooltip. */
+  publishMs?: number;
+  /** Show both Long + Short (detail panel). */
   both?: boolean;
   /** Show a watchlist star (movers/detail). */
   star?: boolean;
 }) {
-  const side = defaultSide(sentiment);
-  const pct = asset.pctSinceEvent;
+  const move = asset.move;
+  const pct = move?.pct ?? null;
   const watch = useWatchlist();
   const sym = asset.sodexSymbol;
+  const effSide = side ?? defaultSide(sentiment);
+
+  const moveTip =
+    move && sym
+      ? `${perpDisplay(sym)}: ${px(move.basePrice)} at publish${
+          publishMs ? ` (${timeStr(publishMs)})` : ""
+        } → ${px(move.lastPrice)} now`
+      : undefined;
 
   return (
     <span
@@ -71,8 +106,10 @@ export function AssetPill({
         <span
           className={cn(
             "font-[var(--font-jetbrains-mono)] text-[10px] tabular-nums",
+            moveTip && "cursor-help",
             pct >= 0 ? "text-positive" : "text-negative",
           )}
+          title={moveTip}
         >
           {pctStr(pct)}
         </span>
@@ -83,8 +120,10 @@ export function AssetPill({
             <TradeBtn symbol={sym} side="long" />
             <TradeBtn symbol={sym} side="short" />
           </>
+        ) : effSide === "neutral" ? (
+          <TradeNeutralBtn symbol={sym} />
         ) : (
-          <TradeBtn symbol={sym} side={side} />
+          <TradeBtn symbol={sym} side={effSide} />
         )
       ) : null}
       {star && sym ? (
