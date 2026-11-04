@@ -146,10 +146,23 @@ export function PortfolioDashboard({
 
   return (
     <div className="trade-terminal flex flex-col gap-4">
-      {/* Top row: equity curve (≈70%) + Overview (≈30%). */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="h-[380px] lg:h-[440px]">
-          <EquityChart address={address} live={composition} />
+      {/* Top row: equity curve (≈70%) + Overview (≈30%). The chart stretches to
+          the Overview's height (grid stretch + min-h) so neither column leaves a
+          gap; on mobile each falls back to its own height. */}
+      <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="min-h-[380px]">
+          <EquityChart
+            address={address}
+            liveTotals={
+              balances
+                ? {
+                    perps: balances.perpsEquity,
+                    spot: balances.spotEquity,
+                    total: balances.totalUsd,
+                  }
+                : null
+            }
+          />
         </div>
         <OverviewCard
           composition={composition}

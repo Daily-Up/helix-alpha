@@ -233,37 +233,28 @@ export function BalancesTable({
 }
 
 function Badges({ holding }: { holding: UnifiedHolding }) {
-  // A pure margin/earn asset (held only in Margin & Futures, e.g. soUSDC) reads
-  // as "Active as margin"; a tradable that's collateral-eligible reads as
-  // "Multi-Asset Margin". The quote stable (USDC) needs no collateral badge.
-  const pureMargin =
-    holding.activeAsMargin && !holding.venues.some((v) => v.venue === "Spot");
-  const isQuoteStable = /^USD[CT]$/i.test(holding.symbol);
   const pct =
     holding.marginRatio != null
       ? `${(holding.marginRatio * 100).toFixed(0)}%`
       : null;
-  if (pureMargin) {
+  // Consistent with the collateral-backing list: an asset with wm > 0 in perps
+  // (activeAsMargin) reads green "Active as margin"; a collateral-eligible asset
+  // still sitting in Spot reads blue "Multi-Asset Margin" with a transfer nudge.
+  if (holding.activeAsMargin) {
     return (
       <span
         className="rounded bg-positive/12 px-1.5 py-px text-[9px] font-medium text-positive"
-        title="Currently posted as margin in your perps account"
+        title="Currently backing your margin (posted in the perps account)"
       >
-        ✓ Active as margin
+        ✓ Active as margin{pct ? ` · ${pct}` : ""}
       </span>
     );
   }
-  if (holding.multiAssetMargin && !isQuoteStable) {
+  if (holding.multiAssetMargin) {
     return (
       <span
         className="rounded bg-[color:var(--accent-trade)]/12 px-1.5 py-px text-[9px] font-medium text-[color:var(--accent-trade)]"
-        title={
-          holding.activeAsMargin
-            ? `Collateral-eligible${pct ? ` (${pct} ratio)` : ""} and currently posted as margin`
-            : pct
-              ? `Eligible as margin collateral at a ${pct} ratio`
-              : "Eligible as margin collateral"
-        }
+        title="Eligible as margin collateral — transfer to Margin & Futures to use it"
       >
         Multi-Asset Margin{pct ? ` · ${pct}` : ""}
       </span>

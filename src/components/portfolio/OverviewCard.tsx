@@ -187,15 +187,14 @@ export function OverviewCard({
           </div>
           {collateral.eligibleNotActive.length > 0 ? (
             <p className="mt-0.5 text-[10px] leading-relaxed text-fg-dim">
-              {collateral.eligibleNotActive
+              {`${collateral.eligibleNotActive
                 .slice(0, 3)
                 .map((e) => e.symbol)
-                .join(", ")}{" "}
-              in Spot{" "}
-              {collateral.eligibleNotActive.length === 1 ? "is" : "are"} eligible
-              — transfer to Margin &amp; Futures to use{" "}
-              {collateral.eligibleNotActive.length === 1 ? "it" : "them"} as
-              collateral.
+                .join(", ")} in Spot ${
+                collateral.eligibleNotActive.length === 1 ? "is" : "are"
+              } eligible — transfer to Margin & Futures to use ${
+                collateral.eligibleNotActive.length === 1 ? "it" : "them"
+              } as collateral.`}
             </p>
           ) : null}
         </div>

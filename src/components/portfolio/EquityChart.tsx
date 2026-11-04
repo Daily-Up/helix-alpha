@@ -13,7 +13,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/components/ui/cn";
 import { money, signedMoney, signedPct, fmtDate } from "./fmt";
-import type { EquityComposition } from "@/lib/portfolio/fetch";
 
 interface SnapshotRow {
   ts: number;
@@ -46,11 +45,13 @@ const rgba = (hex: string, a: number) => {
 
 const two = (x: number) => String(x).padStart(2, "0");
 
-/** Axis tick label sized to the range: 1D → "14:05", 1W → "Mon 3", else "3 Nov". */
-function axisLabel(timeSec: number, range: Range): string {
+/** Axis tick label sized to the ACTUAL plotted span (not the range toggle), so a
+ *  cluster of same-day snapshots shows times instead of one repeated date:
+ *  < 2 days → "14:05", < 2 months → "Mon 3", else "3 Nov". */
+function axisLabel(timeSec: number, spanDays: number): string {
   const d = new Date(timeSec * 1000);
-  if (range === "1D") return `${two(d.getHours())}:${two(d.getMinutes())}`;
-  if (range === "1W")
+  if (spanDays < 2) return `${two(d.getHours())}:${two(d.getMinutes())}`;
+  if (spanDays < 60)
     return `${d.toLocaleDateString(undefined, { weekday: "short" })} ${d.getDate()}`;
   return `${d.getDate()} ${d.toLocaleDateString(undefined, { month: "short" })}`;
 }
@@ -63,11 +64,13 @@ function crosshairLabel(timeSec: number): string {
 
 export function EquityChart({
   address,
-  live,
+  liveTotals,
 }: {
   address: string | null;
-  /** Live computed composition (fallback for the headline before snapshots). */
-  live: EquityComposition | null;
+  /** Live equity per portfolio (from the unified balances) — appended as the
+   *  final point so the line ends at the current number and the headline equals
+   *  the Overview total. */
+  liveTotals: { perps: number; spot: number; total: number } | null;
 }) {
   const [portfolio, setPortfolio] = useState<Portfolio>("Total");
   const [metric, setMetric] = useState<Metric>("Equity");
@@ -111,22 +114,31 @@ export function EquityChart({
   }, [portfolio]);
 
   const liveEquity =
-    live == null
+    liveTotals == null
       ? null
       : portfolio === "Perpetuals"
-        ? live.perps_equity
+        ? liveTotals.perps
         : portfolio === "Spot"
-          ? live.spot_equity
-          : live.total_equity;
+          ? liveTotals.spot
+          : liveTotals.total;
 
-  // Equity points (time in seconds, deduped + ascending).
-  const equityPts = useMemo(() => {
+  // Snapshot points (time in seconds, deduped + ascending).
+  const snapPts = useMemo(() => {
     const map = new Map<number, number>();
     for (const r of rows) map.set(Math.floor(r.ts / 1000), pickEquity(r));
     return [...map.entries()]
       .sort((a, b) => a[0] - b[0])
       .map(([time, equity]) => ({ time, equity }));
   }, [rows, pickEquity]);
+
+  // Append the live value as the final point, so the line ends at the current
+  // number and the headline matches the Overview total exactly (Task: one total).
+  const equityPts = useMemo(() => {
+    if (liveEquity == null) return snapPts;
+    const lastSec = snapPts.length ? snapPts[snapPts.length - 1].time : 0;
+    const liveSec = Math.max(Math.floor(Date.now() / 1000), lastSec + 60);
+    return [...snapPts, { time: liveSec, equity: liveEquity }];
+  }, [snapPts, liveEquity]);
 
   const baseEq = equityPts[0]?.equity ?? 0;
   // Metric transform: PnL is 0-anchored at the range start.
@@ -159,10 +171,15 @@ export function EquityChart({
         ? 0
         : liveEquity;
   const sparse = equityPts.length < 2;
-  // With a handful of snapshots the line reads as sparse, so dot each point and
-  // show an honest count; a dense series needs neither.
-  const snapCount = equityPts.length;
+  // Count ACTUAL snapshots (not the appended live point) for the note; with a
+  // handful the line reads sparse, so dot each point and show the count.
+  const snapCount = snapPts.length;
   const fewPoints = snapCount >= 2 && snapCount <= 30;
+  // Axis label format follows the REAL plotted span (see axisLabel).
+  const spanDays = useMemo(() => {
+    if (equityPts.length < 2) return 0;
+    return (equityPts[equityPts.length - 1].time - equityPts[0].time) / 86400;
+  }, [equityPts]);
 
   // ── chart ──
   const containerRef = useRef<HTMLDivElement>(null);
@@ -173,9 +190,9 @@ export function EquityChart({
   const [ready, setReady] = useState(false);
   const pointsRef = useRef(points);
   pointsRef.current = points;
-  // The tick formatter is installed once but must track the live range.
-  const rangeRef = useRef(range);
-  rangeRef.current = range;
+  // The tick formatter is installed once but must track the live plotted span.
+  const spanRef = useRef(spanDays);
+  spanRef.current = spanDays;
 
   useEffect(() => {
     let disposed = false;
@@ -214,7 +231,7 @@ export function EquityChart({
           timeVisible: true,
           secondsVisible: false,
           tickMarkFormatter: (t: unknown) =>
-            typeof t === "number" ? axisLabel(t, rangeRef.current) : "",
+            typeof t === "number" ? axisLabel(t, spanRef.current) : "",
         },
         crosshair: {
           mode: LWC.CrosshairMode.Normal,

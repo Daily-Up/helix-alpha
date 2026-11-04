@@ -788,7 +788,10 @@ export async function fetchPortfolioBalances(
       if (fundShareCoins.has(up)) fundLike = true;
     }
     h.multiAssetMargin = eligibleRatio > 0;
-    h.marginRatio = eligibleRatio > 0 ? eligibleRatio : activeRatio > 0 ? activeRatio : null;
+    // Active assets show the ratio actually backing margin (perps mr); eligible
+    // ones show the config ratio.
+    h.marginRatio =
+      activeRatio > 0 ? activeRatio : eligibleRatio > 0 ? eligibleRatio : null;
     h.actions = fundLike
       ? ["Transfer", "Subscribe", "Redeem"]
       : ["Transfer", "Deposit", "Withdraw"];
