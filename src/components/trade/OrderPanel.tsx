@@ -86,6 +86,8 @@ export function OrderPanel({
   limitFill,
   account,
   sideFill,
+  source,
+  onSourceConsumed,
   onPlaced,
 }: {
   symbol: string;
@@ -98,6 +100,13 @@ export function OrderPanel({
   limitFill?: number | null;
   account: SodexPerpsAccountState | null;
   sideFill?: { side: "buy" | "sell"; seq: number } | null;
+  /** "event" when deep-linked from the Event Stream — tags only this entry's
+   *  clOrdID ("helix-evt-"). Single-use; see onSourceConsumed. */
+  source?: "event";
+  /** Called once the tag has been used (an order attempt resolved) or a manual
+   *  side switch happens, so the parent clears it and later trades aren't
+   *  tagged. */
+  onSourceConsumed?: () => void;
   /** Fired after any order attempt resolves so the parent re-syncs positions
    *  and open orders from SoDEX (an unconfirmed/partial fill must show truth,
    *  not wait for the 5s poll). */
@@ -308,6 +317,7 @@ export function OrderPanel({
         limitPrice: type === "limit" ? roundedLimit : undefined,
         timeInForce:
           type === "limit" ? (postOnly ? "POST_ONLY" : "GTC") : undefined,
+        source,
         setMsg,
         setBusy,
         setConfirming,
@@ -317,6 +327,9 @@ export function OrderPanel({
       // Always re-sync from SoDEX after an attempt — success, partial, rejected
       // or unconfirmed — so positions and open orders reflect the exchange.
       onPlaced?.();
+      // The Event Stream tag is single-use: consume it after this attempt so a
+      // later, unrelated order on this ticket is never tagged "helix-evt-".
+      onSourceConsumed?.();
     }
   }, [
     sodexSymbol,
@@ -330,13 +343,19 @@ export function OrderPanel({
     stopInput,
     targetInput,
     postOnly,
+    source,
+    onSourceConsumed,
     onPlaced,
   ]);
 
   const sideColor = isLong ? LONG : SHORT;
   const sideWord = isPerp ? (isLong ? "Long" : "Short") : isLong ? "Buy" : "Sell";
   const submitLabel = `${isLong ? "Buy" : "Sell"} / ${sideWord} ${symbol}`;
-  const pickSide = (s: "buy" | "sell") => setSide(s);
+  const pickSide = (s: "buy" | "sell") => {
+    // A real side switch is a manual change → drop the Event Stream tag.
+    if (s !== side) onSourceConsumed?.();
+    setSide(s);
+  };
 
   // ── Sub-renderers ──
   const connectCta = (

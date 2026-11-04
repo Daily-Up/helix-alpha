@@ -91,6 +91,7 @@ export function TradeTerminal({
   symbolMeta = {},
   initialAssetId,
   initialSide,
+  initialSource,
 }: {
   assets: TerminalAsset[];
   symbolMeta?: Record<string, SymbolMeta>;
@@ -98,6 +99,9 @@ export function TradeTerminal({
   initialAssetId?: string;
   /** Preset the ticket side (no auto-size, no auto-submit). */
   initialSide?: "buy" | "sell";
+  /** "event" when reached from an Event Stream deep-link — tags only the
+   *  first order's clOrdID ("helix-evt-"), then clears. */
+  initialSource?: "event";
 }) {
   const tm = useTradeMode("mainnet");
   const [assetId, setAssetId] = useState<string>(
@@ -109,6 +113,10 @@ export function TradeTerminal({
       assets[0]?.id ??
       "",
   );
+  // Event Stream attribution tag. Single-use: cleared after the first order
+  // (OrderPanel → onSourceConsumed) or a manual market/side switch, so later
+  // unrelated trades are never tagged "helix-evt-".
+  const [source, setSource] = useState<"event" | undefined>(initialSource);
   const selected = assets.find((a) => a.id === assetId) ?? null;
   const sodexSymbol = selected?.sodex_symbol ?? null;
   const market = selected?.market ?? "spot";
@@ -152,6 +160,7 @@ export function TradeTerminal({
   } | null>(() => (initialSide ? { side: initialSide, seq: 1 } : null));
   const onMobileSide = (side: "buy" | "sell") => {
     setSideFill((p) => ({ side, seq: (p?.seq ?? 0) + 1 }));
+    setSource(undefined); // manual side switch drops the Event Stream tag
     document
       .getElementById("terminal-ticket")
       ?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -333,7 +342,10 @@ export function TradeTerminal({
       const a = assets.find(
         (x) => (x.sodex_symbol ?? "").toUpperCase() === sym.toUpperCase(),
       );
-      if (a) setAssetId(a.id);
+      if (a) {
+        setAssetId(a.id);
+        setSource(undefined); // market switch drops the Event Stream tag
+      }
     },
     [assets],
   );
@@ -537,6 +549,7 @@ export function TradeTerminal({
                 onChange={(id) => {
                   setAssetId(id);
                   setSetupError(null);
+                  setSource(undefined); // market switch drops the Event Stream tag
                 }}
                 suffix={isPerp ? "-PERP" : "-SPOT"}
               />
@@ -737,6 +750,8 @@ export function TradeTerminal({
               limitFill={limitFill}
               account={account}
               sideFill={sideFill}
+              source={source}
+              onSourceConsumed={() => setSource(undefined)}
               onPlaced={() => {
                 refreshAccount();
                 refreshOpenOrders();

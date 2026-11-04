@@ -53,7 +53,7 @@ function categoryKind(base: string): string {
 export default async function TradePage({
   searchParams,
 }: {
-  searchParams: Promise<{ market?: string; side?: string }>;
+  searchParams: Promise<{ market?: string; side?: string; src?: string }>;
 }) {
   const sp = await searchParams;
   // Perps-only terminal. Build the market list from SoDEX's FULL live perp
@@ -123,6 +123,10 @@ export default async function TradePage({
     : undefined;
   const initialSide =
     sp.side === "short" ? "sell" : sp.side === "long" ? "buy" : undefined;
+  // Attribution tag: only an Event Stream deep-link carries ?src=event. It
+  // flips the entry's clOrdID prefix to "helix-evt-" (nothing else) and is
+  // cleared after the first order or a manual market/side switch.
+  const initialSource = sp.src === "event" ? "event" : undefined;
 
   return (
     <Shell bleed>
@@ -131,6 +135,7 @@ export default async function TradePage({
         symbolMeta={symbolMeta}
         initialAssetId={initialAssetId}
         initialSide={initialSide}
+        initialSource={initialSource}
       />
     </Shell>
   );

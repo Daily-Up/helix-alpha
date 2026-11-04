@@ -58,6 +58,11 @@ export interface PlaceLiveOrderArgs {
   /** Reduce-only — closes/reduces an existing position, never opens or flips.
    *  Omitted/false keeps the MARKET + LIMIT entries byte-identical. */
   reduceOnly?: boolean;
+  /** Attribution only. "event" for an order opened from an Event Stream
+   *  deep-link (/trade?…&src=event); changes ONLY the clOrdID prefix to
+   *  "helix-evt-" so the Helix strip can break it out. "helix-" otherwise.
+   *  No effect on any order field, price, size, venue, or signing. */
+  source?: "event";
   /** UI-state writers — kept as callbacks so the body stays verbatim. */
   setMsg: (m: string | null) => void;
   setBusy: (b: boolean) => void;
@@ -78,6 +83,7 @@ export async function placeLiveOrder(args: PlaceLiveOrderArgs): Promise<void> {
     limitPrice,
     timeInForce = "GTC",
     reduceOnly,
+    source,
     setMsg,
     setBusy,
     setConfirming,
@@ -150,11 +156,16 @@ export async function placeLiveOrder(args: PlaceLiveOrderArgs): Promise<void> {
         });
       }
       // clOrdID must match ^[0-9a-zA-Z_-]{1,36}$ and be unique across an
-      // account's open orders. Pack: helix-{8 of id}-{base36 ms}{4 rnd}.
+      // account's open orders. Pack: {prefix}{8 of id}-{base36 ms}{4 rnd}.
+      // prefix is "helix-evt-" for an order opened from an Event Stream
+      // deep-link (so the Helix strip can attribute it), "helix-" otherwise.
+      // Longest case "helix-evt-"(10)+8+"-"+8+4 = 31 ≤ 36; the .slice(0,36)
+      // + regex check below still guard both prefixes either way.
       const sigSlug = signal.signal_id.replace(/-/g, "").slice(0, 8);
       const tsB36 = Date.now().toString(36);
       const rnd = Math.random().toString(36).slice(2, 6);
-      const clOrdID = `helix-${sigSlug}-${tsB36}${rnd}`.slice(0, 36);
+      const prefix = source === "event" ? "helix-evt-" : "helix-";
+      const clOrdID = `${prefix}${sigSlug}-${tsB36}${rnd}`.slice(0, 36);
       if (!/^[0-9a-zA-Z_-]{1,36}$/.test(clOrdID)) {
         throw new Error(
           `Generated clOrdID "${clOrdID}" doesn't match SoDEX format. Refresh and try again.`,
