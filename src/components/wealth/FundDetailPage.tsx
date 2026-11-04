@@ -7,11 +7,13 @@
  * SoDEX. All data from /api/wealth/fund/[id] + /history. No invented numbers.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { cn } from "@/components/ui/cn";
 import { fmtPct, fmtUsd, fmtRelative } from "@/lib/format";
 import { useSodexAuth } from "@/components/sodex/auth/SodexAuthProvider";
+import { WealthInvestPanel } from "./WealthInvestPanel";
+import { wealthInvestEnabled } from "@/lib/wealth/spot-order";
 import { CATEGORY_LABEL, type WealthFundView, type WealthPosition, type WealthHistoryPoint } from "@/lib/wealth/types";
 import type { FundPageMeta } from "@/lib/wealth/catalog";
 import type { WealthNewsItem } from "@/lib/wealth/client";
@@ -44,6 +46,18 @@ export function FundDetailPage({ fundId }: { fundId: string }) {
   const [range, setRange] = useState("1Y");
   const [points, setPoints] = useState<WealthHistoryPoint[] | null>(null);
   const [tab, setTab] = useState<"news" | "about">("news");
+  const [investTab, setInvestTab] = useState<"buy" | "sell">("buy");
+
+  // A "Sell" shortcut elsewhere can deep-link with ?action=sell.
+  useEffect(() => {
+    try {
+      if (new URLSearchParams(window.location.search).get("action") === "sell") {
+        setInvestTab("sell");
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -61,6 +75,15 @@ export function FundDetailPage({ fundId }: { fundId: string }) {
     return () => {
       cancelled = true;
     };
+  }, [fundId, address]);
+
+  // Quiet refetch after a fill — updates holding/price without a loading flash.
+  const refetch = useCallback(() => {
+    const q = address ? `?address=${address}` : "";
+    fetch(`/api/wealth/fund/${encodeURIComponent(fundId)}${q}`)
+      .then((r) => r.json())
+      .then((j: FundResp) => j.ok && setData(j))
+      .catch(() => {});
   }, [fundId, address]);
 
   useEffect(() => {
@@ -197,7 +220,20 @@ export function FundDetailPage({ fundId }: { fundId: string }) {
           {/* My holding */}
           {holding && (holding.marketValue ?? 0) > 0.0001 && (
             <div className="rounded-lg border border-line bg-surface p-4">
-              <div className="text-[10px] uppercase tracking-wider text-fg-dim">My holding</div>
+              <div className="flex items-center justify-between">
+                <div className="text-[10px] uppercase tracking-wider text-fg-dim">My holding</div>
+                {fund.spotSymbol && wealthInvestEnabled() && (
+                  <button
+                    onClick={() => {
+                      setInvestTab("sell");
+                      document.getElementById("invest-panel")?.scrollIntoView({ behavior: "smooth", block: "center" });
+                    }}
+                    className="rounded border border-negative/50 px-2.5 py-1 text-[11px] font-medium text-negative transition-colors hover:bg-negative/10"
+                  >
+                    Sell
+                  </button>
+                )}
+              </div>
               <div className="mt-1 flex flex-wrap items-end gap-x-8 gap-y-2">
                 <Stat label="Value" value={fmtUsd(holding.marketValue)} />
                 <Stat label="Units" value={holding.shares != null ? holding.shares.toFixed(4) : "—"} />
@@ -262,38 +298,49 @@ export function FundDetailPage({ fundId }: { fundId: string }) {
           </div>
         </div>
 
-        {/* Right: invest panel */}
-        <div className="h-fit lg:sticky lg:top-4">
-          <div className="rounded-lg border border-line bg-surface p-4">
-            <div className="text-[10px] uppercase tracking-wider text-fg-dim">Invest</div>
-            <div className="mt-2 flex items-baseline justify-between">
-              <span className="text-[11px] text-fg-muted">{fund.headlineLabel}</span>
-              <span className={cn("font-[var(--font-jetbrains-mono)] text-[16px] font-semibold tabular-nums", sign(fund.headlineValue))}>
-                {fund.headlineValue == null ? "—" : fmtPct(fund.headlineValue)}
-              </span>
+        {/* Right: invest panel — in-app Buy/Sell for spot-tradable funds when
+            the beta flag is on, otherwise link out to SoDEX. */}
+        <div id="invest-panel" className="h-fit lg:sticky lg:top-4">
+          {fund.spotSymbol && wealthInvestEnabled() ? (
+            <WealthInvestPanel
+              fund={fund}
+              holding={holding}
+              onFilled={refetch}
+              tab={investTab}
+              onTab={setInvestTab}
+            />
+          ) : (
+            <div className="rounded-lg border border-line bg-surface p-4">
+              <div className="text-[10px] uppercase tracking-wider text-fg-dim">Invest</div>
+              <div className="mt-2 flex items-baseline justify-between">
+                <span className="text-[11px] text-fg-muted">{fund.headlineLabel}</span>
+                <span className={cn("font-[var(--font-jetbrains-mono)] text-[16px] font-semibold tabular-nums", sign(fund.headlineValue))}>
+                  {fund.headlineValue == null ? "—" : fmtPct(fund.headlineValue)}
+                </span>
+              </div>
+              <div className="mt-1 flex items-center justify-between text-[11px] text-fg-dim">
+                <span>Min subscription</span>
+                <span>{fmtUsd(meta.minSubUsd)}</span>
+              </div>
+              <div className="mt-1 flex items-center justify-between text-[11px] text-fg-dim">
+                <span>Status</span>
+                <span className={open ? "text-positive" : "text-fg-dim"}>
+                  {fund.marketStatus === "TRADING" ? "Open" : fund.marketStatus === "CLOSED" ? "Closed" : "—"}
+                </span>
+              </div>
+              <a
+                href={fund.investUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-4 block rounded-md border border-accent/50 bg-accent/15 py-2.5 text-center text-[13px] font-medium text-accent-2 transition-colors hover:bg-accent/25"
+              >
+                Invest on SoDEX ↗
+              </a>
+              <p className="mt-2 text-center text-[9.5px] text-fg-dim">
+                In-app investing is coming to Helix. Not financial advice.
+              </p>
             </div>
-            <div className="mt-1 flex items-center justify-between text-[11px] text-fg-dim">
-              <span>Min subscription</span>
-              <span>{fmtUsd(meta.minSubUsd)}</span>
-            </div>
-            <div className="mt-1 flex items-center justify-between text-[11px] text-fg-dim">
-              <span>Status</span>
-              <span className={open ? "text-positive" : "text-fg-dim"}>
-                {fund.marketStatus === "TRADING" ? "Open" : fund.marketStatus === "CLOSED" ? "Closed" : "—"}
-              </span>
-            </div>
-            <a
-              href={fund.investUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-4 block rounded-md border border-accent/50 bg-accent/15 py-2.5 text-center text-[13px] font-medium text-accent-2 transition-colors hover:bg-accent/25"
-            >
-              Invest on SoDEX ↗
-            </a>
-            <p className="mt-2 text-center text-[9.5px] text-fg-dim">
-              In-app investing is coming to Helix. Not financial advice.
-            </p>
-          </div>
+          )}
         </div>
       </div>
     </div>

@@ -16,7 +16,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Card, CardBody } from "@/components/ui/Card";
+import { wealthInvestEnabled } from "@/lib/wealth/spot-order";
 import { PanelSkeleton } from "@/components/ui/Skeleton";
 import { cn } from "@/components/ui/cn";
 import { fmtUsd, fmtRelative } from "@/lib/format";
@@ -305,14 +307,18 @@ function MyWealth({
             {held.map((p) => {
               const f = fundById.get(p.fundId);
               const up = (p.pnl24h ?? 0) >= 0;
+              const sellable = !!f?.spotSymbol && wealthInvestEnabled();
               return (
                 <div
                   key={p.fundId}
                   className="flex items-center gap-2 rounded-md border border-line bg-surface-2/40 px-2.5 py-1.5"
                 >
-                  <span className="text-[12px] font-medium text-fg">
+                  <Link
+                    href={`/wealth/${p.fundId}`}
+                    className="text-[12px] font-medium text-fg hover:text-accent-2"
+                  >
                     {f?.displayName ?? p.fundId}
-                  </span>
+                  </Link>
                   <span className="font-[var(--font-jetbrains-mono)] text-[12px] tabular-nums text-fg-muted">
                     {fmtUsd(p.marketValue)}
                   </span>
@@ -326,6 +332,14 @@ function MyWealth({
                       {up ? "+" : "−"}
                       {fmtUsd(Math.abs(p.pnl24h)).replace("$", "$")}
                     </span>
+                  )}
+                  {sellable && (
+                    <Link
+                      href={`/wealth/${p.fundId}?action=sell`}
+                      className="ml-1 rounded border border-negative/50 px-1.5 py-0.5 text-[9.5px] font-medium text-negative hover:bg-negative/10"
+                    >
+                      Sell
+                    </Link>
                   )}
                 </div>
               );
