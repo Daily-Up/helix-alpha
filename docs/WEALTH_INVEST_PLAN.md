@@ -1,120 +1,126 @@
 # Wealth Index — in-app investing plan (v2)
 
-**Status: research + plan. No code beyond the read-only per-fund page has been written for investing. Phases 3–4 wait for your explicit OK. Real money is gated: research → plan → DRY_RUN → testnet (chain 138565) → your OK → one min-size mainnet test → enable.**
+**Status: research + plan, now reconciled against the official SoDEX Wealth docs (docs.sodex.com). No investing code written. Phases A/B wait for your OK. Real money gated: research → plan → DRY_RUN → testnet (138565) → your OK → one min-size mainnet test → enable.**
 
-Two independent tracks, because the fund types use two different rails:
+## Fund → rail (corrected)
 
-| Track | Funds (fundType) | Rail | Builder fee earned on |
+| Fund(s) | fundType | Rail | Builder fee earned on |
 |---|---|---|---|
-| **A. Spot** | Curated ETFs + vBOXX + vSTRC (`clob`) | SoDEX spot order book (off-chain signed, like perps) | **Sells only** |
-| **B. Vaults** | CXMT, Unitree (`escrow_vault`); USDC Earn (`bridged_vault`) | On-chain ValueChain contract txs (master wallet) | **Redemptions** |
+| vQQQ, vVOO, vVGT, vSCHD, vVYM, **vSMH**, **vSTRC**, **vBOXX** (US Cash Yield) | `clob` | **CLOB spot order book** (API-key signed) | **sells only** |
+| CXMT, Unitree | `escrow_vault` | **on-chain vault txs** (master wallet) — channel `subscription` / `rfq` / `batch` | **redeems/sells only** |
+| USDC Earn (Morpho-Earn) | `bridged_vault` | **none — link out to SoDEX** | n/a |
 
-Across both, **the builder fee is earned on exits, not entries** (buys/deposits earn nothing — see §A2). So the fee-bearing work is routing sells/redemptions through Helix's builder code.
-
----
-
-## Builder config (constants to add)
-
-```
-WEALTH_BUILDER_ADDRESS = <YOUR PAYOUT ADDRESS>   # ⚠ you must supply this — left blank on purpose
-WEALTH_BUILDER_ID      = 8409                     # Helix's existing SoDEX builder id (same as perps)
-WEALTH_FEE_RATE        = 10                        # 0.01% on redeems/sells (precision 100_000 → 10/100000)
-WEALTH_MAX_FEE_RATE    = 10                        # approval cap; spot/vault hard cap is 2000 (2%)
-```
-
-`feeRate`/`maxFeeRate` use **precision 100_000** (so 10 = 0.01%, 2000 = 2%). The hard cap is **2000 (2%)** on both spot and the wealth vaults (matches Helix's existing note: spot ≤ 2000, perps ≤ 200).
+**Changes from the first draft (per your corrections, all confirmed in the docs):**
+- **USDC Earn removed from the on-chain rail.** Quickstart: *"bridged_vault: The bridge isn't ready, so no action is possible."* Its Invest button stays **"on SoDEX ↗"**.
+- **Only `escrow_vault` uses `requestDeposit`/`requestRedeem`.** The Wealth overview says for `clob`: *"Do not call `requestDeposit` / `requestRedeem`."* ETFs trade on the order book only.
+- **ETFs do NOT use RFQ.** RFQ (TigrisRFQ) is a route for **escrow vaults** when their channel is `rfq`; the docs never apply it to `clob` funds (quickstart: *"clob, live: Place an order on the order book"*).
 
 ---
 
-## A. Curated ETFs via SoDEX spot orders
+## Builder config (constants)
 
-### A1. Endpoint, payload, signing
-- These funds are **CLOB spot pairs**, quote `vUSDC` (6 dp), share token 8 dp. Symbol IDs (from `GET /wealth/funds`):
-
-  | Fund | Pair | symbolId | share token | dp |
-  |---|---|---|---|---|
-  | US 500 (vVOO) | vVOO_vUSDC | 39 | 0x9bd2…042b | 8 |
-  | US Tech 100 (vQQQ) | vQQQ_vUSDC | 41 | 0x09e0…1ee5 | 8 |
-  | US Broad Tech (vVGT) | vVGT_vUSDC | 42 | 0xd484…9fbd | 8 |
-  | US Selected Dividend (vSCHD) | vSCHD_vUSDC | 37 | 0x58d8…6d1b | 8 |
-  | US Broad Dividend (vVYM) | vVYM_vUSDC | 38 | 0x6b3d…6623 | 8 |
-  | US Semis 25 (vSMH) | vSMH_vUSDC | 40 | 0x8921…d6d9 | 8 |
-  | Strategy Preferred (vSTRC) | vSTRC_vUSDC | 43 | 0x7c6d…b799 | 8 |
-  | US Cash Yield (vBOXX) | vBOXX_vUSDC | 36 | 0x9066…c1ab | 8 |
-
-- **Order shape** is exactly what Helix already builds for spot today (`SodexNewOrderEntry`): `{ symbolID, clOrdID, side: BUY|SELL, type: MARKET|LIMIT, timeInForce, …}` where **BUY passes `funds` (vUSDC), SELL passes `quantity` (share units)** — spot MARKET accepts exactly one of the two. This goes through `placeOrderBatch`, which **already injects the builder code type-agnostically**.
-- **Signing:** the existing **Helix trading key signs spot orders** — Helix already routes spot via `resolveSymbol` + `placeOrderBatch`; no new key or master-wallet signature is needed for the order itself.
-- **Sizing rules** (min size / tick / step) come from the spot markets rules Helix already reads (`pricePrecision`, `stepSize`, `minQuantity`, `minNotional`); min notional ≈ $10 (`SODEX_MIN_NOTIONAL_USD`). The invest panel must round size to `stepSize` and reject below `minNotional`.
-- **Where funds must sit:** in the **SoDEX spot account** (vUSDC balance on the spot appchain), same place spot trades already draw from. If the user's USDC is in their ValueChain wallet instead, it must be deposited to the SoDEX spot account first (same deposit the terminal assumes today).
-
-### A2. Does the spot builder fee apply to BUYS or only SELLS?
-- **Very likely sells only.** SoDEX's spot/perps run on separate appchains and builder approvals are tracked per engine (`GET /user/{addr}/builders` → `{ spot:[…], perps:[…] }`). SoDEX is Hyperliquid-derived, and Hyperliquid's rule is explicit: **"builder codes do not apply to the buying side of spot trades."** So Helix would earn the fee only when a user **sells** an ETF back to vUSDC.
-- **OPEN Q (confirm vs SoDEX's own spot docs/SDK — not web-indexed):** verify the buy-side exclusion verbatim before relying on it.
-
-### A3. Separate spot builder approval?
-- The `/builders` response splits `spot` and `perps`, and the approval POST (`/user/{addr}/builders`, body `{accountID, builderID, maxFeeRate}`) is **per account**. Perps and spot have distinct account ids per appchain, so **a separate spot approval is almost certainly required** — Helix's existing `approveBuilderFee` can be reused, called with the **spot accountID** and `maxFeeRate = WEALTH_MAX_FEE_RATE`.
-- **OPEN Q:** confirm whether one approval covers both engines or the spot accountID is needed (expected: separate).
+```
+WEALTH_BUILDER_ADDRESS = <YOUR PAYOUT ADDRESS>   # ⚠ still needed from you
+WEALTH_BUILDER_ID      = 8409                     # Helix's existing SoDEX builder id
+WEALTH_FEE_RATE        = 10                        # 0.01% (precision 100_000)
+WEALTH_MAX_FEE_RATE    = 10                        # standing cap; hard max 2000 (2%)
+```
+`fee = amount * rate / 100_000`, rounded down. Hard cap **2000 (2%)** on spot and vaults.
 
 ---
 
-## B. Vaults / Stable Earn via ValueChain contracts
+## A. ETFs via CLOB spot orders  ← **recommended Phase A route**
 
-These are **on-chain contract interactions signed by the master wallet** (gas in SOSO) — a different path from Helix's off-chain order signing.
+### Endpoint / payload / signing (from Spot Trading docs)
+- `POST {gw}/api/v1/spot/trade/orders/batch` (testnet `https://testnet-gw.sodex.dev`).
+- Body: `{ accountID, orders: [{ symbolID, clOrdID, side, type, timeInForce, price, quantity }] }`.
+  - `accountID` = spot `data.aid` from `/api/v1/spot/accounts/{addr}/state`.
+  - `symbolID` = market id from `/api/v1/spot/markets/symbols` (we already have: vQQQ_vUSDC 41, vVOO 39, vVGT 42, vSCHD 37, vVYM 38, vSMH 40, vSTRC 43, vBOXX 36).
+  - `side 1=BUY`, `type 1=LIMIT`, `timeInForce 1=GTC`; `price`/`quantity` decimal strings. (Helix already builds this; MARKET + `funds` for buys is our existing spot path.)
+- **Signer = the trading API key** (NOT the master wallet): EIP-712 domain `{name:"spot", version:"1", chainId:138565 (testnet)}`, primaryType `ExchangeAction`, signed payload `{type:"batchNewOrder", params}`, HTTP body = `params`; headers `X-API-Key`, `X-API-Nonce`, `X-API-Sign` (`0x01`-prefixed). **No master-wallet tx, no SOSO gas for the order.**
+- **Sizing**: satisfy the market's price / lot-size / notional filters (from `/spot/markets/symbols` — Helix already reads `pricePrecision/stepSize/minQuantity/minNotional`; min notional ≈ $10).
 
-### B1. Fund → contract map (to resolve from the Fund Information API + Wealth Contracts page)
-Share tokens are known from `GET /wealth/funds`; the **deposit/redeem vault contract** and **underlying token** per fund must be pulled from SoDEX's Fund Information API / Wealth Contracts page (I don't have those addresses yet):
+### Funds location
+- Spot orders spend the **SoDEX Spot account** (vUSDC) — *"Trading APIs move balances that are already in a Spot or Perps account."* Same place the terminal already trades from. No wallet/bridge step for ETFs.
 
-| Fund | fundType | share token (known) | dp | needs: vault contract, underlying, min deposit |
-|---|---|---|---|---|
-| CXMT | escrow_vault | aCXMT 0x9876…0629 | 18 | ← Fund Information API |
-| Unitree | escrow_vault | aUNITREE 0x6753…ecbe | 18 | ← Fund Information API |
-| USDC Earn | bridged_vault | vsoUSDC 0xdb40…eefc | 18 | Morpho-backed (api.morpho.org) + bridge |
+### Builder fee (from Builder Codes in Trading)
+- **Charged on SELLS only**: *"builder codes … do not apply to the buying side of spot trades; they apply to both sides of perp trades."* So Helix earns on ETF **sells**, nothing on buys.
+- Attached per order via `"builder": {"id": 8409, "fee": <tenths-bp>}` (must be in the payload **before** the hash) — `placeOrderBatch` already injects the builder type-agnostically.
+- **Approval is one call for both engines**: *"Approval succeeds when both engines accept the request."* So **Helix's existing builder approval already covers spot** — likely no new approval needed (confirm via the `spot` array of `GET /user/{addr}/builders`; raise `maxFeeRate` only if we want >0.01%). Max spot fee 2% (2000).
 
-### B2. Tx sequences
-- **Escrow vault deposit:** `ERC20.approve(underlying, vault, assets)` → `vault.requestDeposit(assets, builderFeeData, referral)` → async settlement → `vault.claim()` when shares are mintable.
-- **Escrow vault redeem:** `vault.requestRedeem(shares, builderFeeData)` → async settlement → `vault.claim()` to receive the underlying. **The builder fee (up to 2%) is charged here, on redemption.**
-- **USDC Earn (bridged_vault):** Morpho-backed via a bridge — deposit USDC → vsoUSDC, redeem vsoUSDC → USDC. **OPEN Q:** confirm whether it uses the same `requestDeposit/requestRedeem` interface or a Morpho/bridge-specific path.
-- **Settlement is NOT instant** — the UI must show step state (requested → settling → claimable) from the user's fund history (`claimable`, `delayedPending`), and that gas is paid in SOSO.
-
-### B3. `builderFeeData` packing
-Single `uint256`, little-endian bit fields:
-```
-bits   0–159  builder address (160 bits)
-bits 160–175  feeRate       (16 bits, precision 100_000)
-bits 176–191  maxFeeRate    (16 bits, precision 100_000, cap 2000)
-
-builderFeeData = (maxFeeRate << 176) | (feeRate << 160) | uint160(WEALTH_BUILDER_ADDRESS)
-```
-With the config above: `feeRate = 10` (0.01%), `maxFeeRate = 10`, builder = `WEALTH_BUILDER_ADDRESS`.
-
-### B4. `approveBuilder` on BuilderRegistry
-- Contract: **`0x638c784760FD1eE465F1bDaF721268ACA24D5A22`**.
-- It's an **on-chain, per-user** approval: the master wallet calls `approveBuilder(builder, maxFeeRate)` (signed via `eth_sendTransaction`, gas in SOSO), authorising the builder up to a max rate before any `requestDeposit/requestRedeem` with a `builderFeeData` naming that builder will be honoured.
-- **OPEN Q:** confirm the exact function signature + whether it's one approval for all wealth vaults or per-vault.
-
-### B5. Where funds must sit
-- Escrow-vault deposits pull the **underlying ERC-20 from the ValueChain wallet** (after `approve`), **not** the SoDEX spot account. So vault investing needs the underlying token in the wallet; if it's in the spot account, a withdraw-to-wallet step is required first. **OPEN Q:** confirm the spot-account ↔ wallet transfer mechanism and whether a bridge step applies.
-
-### B6. Testnet
-- End-to-end on **ValueChain testnet (chain 138565)** first: approve → requestDeposit → settle → claim → requestRedeem (with builderFeeData) → claim, verifying the builder fee lands at `WEALTH_BUILDER_ADDRESS`. **OPEN Q:** confirm testnet has the wealth vaults deployed + a faucet.
+### Why CLOB over RFQ for ETFs
+RFQ doesn't apply to `clob`. CLOB also reuses our API-key signing (no master-wallet prompt, no SOSO gas), and draws from the spot account the user already funds. **Recommendation: Phase A = CLOB spot Buy/Sell for the ETFs** (vQQQ, vVOO, vVGT, vSCHD, vVYM, vSMH, vSTRC, vBOXX). Fee capture is on sells.
 
 ---
 
-## Open questions to close before building (the gating list)
-1. Spot builder fee — buy-side excluded? (high-confidence yes; confirm in SoDEX spot docs).
-2. One builder approval for both engines, or a separate **spot** approval (spot accountID)?
-3. Vault **contract addresses + ABI** (`requestDeposit`/`requestRedeem`/`claim` signatures) per fund — from the Fund Information API / Wealth Contracts page.
-4. **USDC Earn (bridged_vault)** deposit/redeem path — Morpho vault + bridge specifics.
-5. `approveBuilder` exact signature; one-time vs per-vault.
-6. Per-vault **min deposit** + settlement timing.
-7. Whether funds must move **spot account ↔ ValueChain wallet**, and how.
-8. **Testnet (138565)** wealth-vault availability + faucet.
+## B. Escrow vaults (CXMT, Unitree) — Phase B
 
-## Phased build (each after your OK)
-- **Phase A — ETF buy/sell inside Helix.** Invest panel on ETF fund pages (Buy/Sell tabs, amount in USDC or units, est. units/price/fees, min-size check). A **new spot order path, separate from `placeLiveOrder` (perps code untouched)**, with the same per-order error handling + toasts + re-fetch. Spot builder approval (spot accountID). DRY_RUN payloads + byte-identical proof for any shared/perps code; one min-size test by you before enable.
-- **Phase B — vault deposit/redeem inside Helix.** Invest panel on vault / Stable Earn pages (Deposit / Redeem / Claim, step list, live status from fund history). On-chain tx path via the master wallet (approve → request → settlement → claim) with `builderFeeData` = `WEALTH_BUILDER_ADDRESS`. Clear copy on non-instant settlement, SOSO gas, and the redemption builder fee. **Testnet end-to-end first**, then a min-size mainnet test by you.
+Route depends on the fund's live **channel** (from trading-status): `subscription` (pre-live, use the subscription contract), `rfq` (TigrisRFQ), or `batch` (vault request/claim). Helix must branch on it.
+
+### Vault ABI (batch) — from the Wealth API reference
+```solidity
+requestDeposit(uint256 assets, address receiver, bytes32 builderFeeData, bytes32 referral)   // approve underlying first; wallet pays SOSO gas
+requestRedeem (uint256 shares, address receiver, bytes32 builderFeeData, bytes32 referral)   // no approval; spends shares
+claimDeposit(address receiver, uint256 requestId)
+claimRedeem (address receiver, uint256 requestId)
+claimDelayedRedeem(address receiver, uint256 requestId)
+getAsset() / getMinDepositAmount() / getMinRedeemShares() / getUserDepositIds(address) / balanceOf(address)
+// relayed (no builder fee): requestDepositOnBehalf(...), requestRedeemOnBehalf(...)
+```
+- Deposit: `approve(underlying, vault)` → `requestDeposit(...)` → settle → `claimDeposit` if not auto-delivered. `assets ≥ getMinDepositAmount()`.
+- Redeem: `requestRedeem(...)` → settle → `claimRedeem` (immediate) / `claimDelayedRedeem` (delayed leg). `shares ≥ getMinRedeemShares()`.
+- Status via **User Fund History** (`claimable`, `delayedPending`; "flag omitted = unknown, not false"). Settlement is async/batched — **no schedule published** (open item).
+
+### RFQ ABI (TigrisRFQ) — when channel = `rfq`
+```solidity
+buy (address vault, uint256 payAmount, uint256 receiveAmount, uint256 deadline, bytes quoteSig[, bytes32 builderFeeData])
+sell(address vault, uint256 payAmount, uint256 receiveAmount, uint256 deadline, bytes quoteSig[, bytes32 builderFeeData])
+claimBuy/claimSell(address vault, uint256 orderId); claimDelayedBuy/claimDelayedSell(...)
+```
+- Owner wallet calls directly (`msg.sender == owner`, SOSO gas). 5-arg = no fee; 6-arg adds builderFeeData. **Fee on sells only**: *"A sell claim deducts a builder fee … A buy claim does not."*
+
+### `builderFeeData` + `approveBuilder`
+- `builderFeeData` = `bytes32`: bits 0–159 builder addr, 160–175 `feeRate`, 176–191 `maxFeeRate`. `(maxFeeRate<<176)|(feeRate<<160)|uint160(addr)`. `bytes32(0)` = none.
+- `BuilderRegistry.approveBuilder(address builder, uint256 maxFeeRate)` — **per user, per builder (not per vault)**, a **standing cap** (`getMaxFeeRate(user,builder)`; `revokeBuilder` clears). **Takes no signature — the user sends it as a tx from their own wallet** (SOSO gas). A non-zero `maxFeeRate` inside `builderFeeData` can also set the cap in the same tx. Fee is **only taken on redeem/sell claims**, paid in the vault underlying (`getAsset()`).
+
+### Funding (answers #4)
+- A vault deposit **spends the underlying on the ValueChain wallet (EOA)**, not the spot account.
+- **wallet → spot/perps** is documented + automatable: `ClobGateway.depositERC20(token, amount)` at `0x0101…0101` (viem scripts provided; EOA signs, approve ERC-20 first).
+- **spot → wallet** (what vault funding needs, since the user's idle USDC sits in the spot account) is **not** on the transfers page — it routes through **Withdrawals** ("To move funds back to EVM … use Withdrawals"). **Open item**: confirm the Withdrawals API and whether Helix can automate spot→wallet, or must hand the user off to SoDEX for that step. This is the Phase B UX fork.
+
+---
+
+## Contract addresses (mainnet)
+
+| Contract | Address |
+|---|---|
+| BuilderRegistry | `0x638c784760FD1eE465F1bDaF721268ACA24D5A22` |
+| TigrisRFQ | `0x4Aa5E39956aCADd68bE0B6720a030Be3C14a6239` |
+| ClobGateway (wallet→account) | `0x0101010101010101010101010101010101010101` |
+| VaultFactory / MarketFactory | `0x0ec2…54D6` / `0x75ee…16C8` |
+| CXMT vault / underlying asset | `0x9876…0629` / `0xcb7f80df…e2c6` |
+| Unitree vault / underlying asset | `0x6753…ecbe` / `0xcb7f80df…e2c6` (same underlying) |
+
+Per-fund vault/market/asset/subscription addresses **change per deployment** — load at runtime from `GET /wealth/funds/{id}` → `.data.contracts`. **No npm SDK exists** (raw HTTP + viem; ABI JSON not published inline — pull from the vault ABI / `llms.txt` / `sitemap.md`).
+
+---
+
+## Answers to your 5 questions
+1. **USDC Earn (`bridged_vault`)** — ✅ removed from the on-chain rail (bridge not ready); Invest stays link-out.
+2. **`requestDeposit/redeem`** — ✅ `escrow_vault` only; `clob` must not call them.
+3. **ETF route** — **CLOB spot**, not RFQ (RFQ is vault-only). CLOB: funds from the **spot account**, **API-key** signer, builder via per-order field, **fee on sells**. RFQ (for vaults): funds from the **wallet**, **master-wallet** signer + SOSO gas, 6-arg builderFeeData, fee on sells. **Recommend CLOB for Phase A.**
+4. **Vault funding** — vault spends the **wallet** balance. wallet→account is automatable (`ClobGateway.depositERC20`); **account→wallet goes through Withdrawals** (open item — confirm automation vs. SoDEX-UI hand-off).
+5. **Contracts/ABIs/SDK** — addresses + vault/RFQ/registry signatures above; **no SDK package**.
+
+## Remaining open items
+- a) Confirm Helix's existing builder approval already shows in the `spot` array (so no new spot approval is needed).
+- b) Withdrawals API for **spot→wallet** automation (gates Phase B funding UX).
+- c) Escrow-vault **settlement timing** + which channel CXMT/Unitree are in right now (subscription vs rfq vs batch).
+- d) Full vault **ABI JSON** (return types) — from the ABI file / `sitemap.md`.
+
+## Phase plan (each after your OK)
+- **Phase A — ETF Buy/Sell via CLOB spot.** Invest panel (Buy/Sell, USDC or units, est. units/price/exchange+builder fees, min-size check). New spot order path, **separate from `placeLiveOrder` (perps untouched)**, same error handling/toasts/re-fetch. Reuse the existing builder approval (confirm spot array). **DRY_RUN** payloads first; one min-size mainnet test by you before enable. Fee capture on sells.
+- **Phase B — vault Deposit/Redeem/Claim (CXMT, Unitree).** Channel-aware (subscription/rfq/batch). On-chain master-wallet txs with `builderFeeData` = `WEALTH_BUILDER_ADDRESS`; `approveBuilder` once. Step UI (approve → request → settle → claim) from User Fund History; copy on async settlement + SOSO gas + the sell-side builder fee. Resolve spot→wallet funding first. **Testnet (138565) end-to-end**, then a min-size mainnet test by you.
 
 ## Rules
-- Never send a real transaction or place a real order autonomously — **DRY_RUN / testnet only**; mainnet min-size tests are done by you.
-- Perps signing code (`placeLiveOrder`, order/cancel signing) stays untouched; the spot path is additive and separate.
-- `tsc` + build green per commit; ship Phase 1 (read-only) now, Phases A/B each wait for your OK.
+Never place a real order / send a real tx autonomously (DRY_RUN / testnet only; mainnet min-size tests by you). Perps signing untouched; the spot path is additive. `tsc` + build green per commit.
