@@ -19,6 +19,7 @@ import { injected } from "wagmi/connectors";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RainbowKitProvider, darkTheme } from "@rainbow-me/rainbowkit";
 import "@rainbow-me/rainbowkit/styles.css";
+import { SodexAuthProvider } from "@/components/sodex/auth/SodexAuthProvider";
 
 /**
  * Wagmi + RainbowKit provider.
@@ -66,7 +67,7 @@ export function Web3Provider({ children }: { children: React.ReactNode }) {
           })}
           modalSize="compact"
         >
-          {children}
+          <SodexAuthProvider>{children}</SodexAuthProvider>
         </RainbowKitProvider>
       </QueryClientProvider>
     </WagmiProvider>

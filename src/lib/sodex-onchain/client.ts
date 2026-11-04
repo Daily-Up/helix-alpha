@@ -441,7 +441,7 @@ export async function addApiKey(opts: {
  * doesn't recognise it. Best-effort: if the provider can't report or switch
  * chains we let signing proceed (it may still work, or fail clearly).
  */
-async function ensureWalletOnSodexChain(
+export async function ensureWalletOnSodexChain(
   provider: Eip1193Provider,
   network: SodexNetwork,
 ): Promise<void> {
@@ -546,6 +546,39 @@ export async function approveBuilderFee(opts: {
     },
   );
   await handle<unknown>(res);
+}
+
+/**
+ * Read the builder-fee approval status for an address (read-only, public).
+ * GET {gatewayRoot}/api/v1/user/{address}/builders →
+ *   { data: { spot: [{builderID, feeRate}], perps: [{builderID, feeRate}] } }
+ * Returns whether Helix's builder code is approved at a high-enough rate.
+ */
+export async function getBuilderApproval(
+  network: SodexNetwork,
+  address: `0x${string}`,
+): Promise<{ approved: boolean; feeRate: number | null }> {
+  const builder = getBuilderCode(network);
+  if (!builder) return { approved: false, feeRate: null };
+  const { spotEndpoint } = SODEX_NETWORKS[network];
+  const gatewayRoot = spotEndpoint.replace(/\/api\/v1\/spot\/?$/, "");
+  try {
+    const res = await fetch(`${gatewayRoot}/api/v1/user/${address}/builders`);
+    if (!res.ok) return { approved: false, feeRate: null };
+    const j = (await res.json()) as {
+      data?: {
+        spot?: Array<{ builderID: number; feeRate: number }>;
+        perps?: Array<{ builderID: number; feeRate: number }>;
+      };
+    };
+    const rows = [...(j.data?.perps ?? []), ...(j.data?.spot ?? [])];
+    const match = rows.find((r) => Number(r.builderID) === builder.id);
+    if (!match) return { approved: false, feeRate: null };
+    const feeRate = Number(match.feeRate);
+    return { approved: feeRate >= builder.fee, feeRate };
+  } catch {
+    return { approved: false, feeRate: null };
+  }
 }
 
 /** DELETE /accounts/api-keys — signed by master wallet. */

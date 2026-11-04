@@ -10,8 +10,8 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import { useTradeMode } from "@/lib/sodex-onchain/useTradeMode";
+import { useSodexAuth } from "@/components/sodex/auth/SodexAuthProvider";
 import { getPerpsAccountState } from "@/lib/sodex-onchain/client";
 import type { SodexPerpsAccountState } from "@/lib/sodex-onchain/types";
 import type { SymbolMeta } from "@/lib/sodex-onchain/useSodexTradeActions";
@@ -202,6 +202,7 @@ export function PortfolioDashboard({
 }
 
 function ConnectPrompt() {
+  const auth = useSodexAuth();
   return (
     <div className="trade-terminal">
       <div className="rounded-lg border border-line bg-surface px-6 py-14 text-center">
@@ -216,12 +217,12 @@ function ConnectPrompt() {
           positions and Helix-routed activity then appear here, scoped to your
           account. Helix never holds your keys.
         </p>
-        <Link
-          href="/settings/connect-sodex"
+        <button
+          onClick={() => auth.openSetup()}
           className="mt-6 inline-flex items-center gap-2 rounded-md border border-[color:var(--accent-trade)]/50 bg-[color:var(--accent-trade)]/15 px-4 py-2 text-sm font-medium text-[color:var(--accent-trade)] transition-colors hover:bg-[color:var(--accent-trade)]/25"
         >
-          Connect SoDEX <span aria-hidden>→</span>
-        </Link>
+          {auth.step === "wallet" ? "Connect" : "Finish setup"} <span aria-hidden>→</span>
+        </button>
       </div>
     </div>
   );

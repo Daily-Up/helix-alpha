@@ -29,7 +29,6 @@ import type { Hex } from "viem";
 import type { SodexNetwork } from "./chains";
 
 const IDENTITY_PREFIX = "helix.sodex.identity";
-const LIMITS_PREFIX = "helix.sodex.limits";
 
 export interface StoredApiKey {
   /** SoDEX-registered API-key name, or "" for a burner wallet. */
@@ -170,86 +169,37 @@ export function formatExpiry(e: KeyExpiry): string {
   return `expires in ${m}m`;
 }
 
-// ─── Safety limits (per-network) ────────────────────────────────────
-
-export interface SafetyLimits {
-  maxPositionUsd: number;
-  maxDailyTrades: number;
-  acceptedDisclaimer: boolean;
-}
-
-// The live order size IS the per-trade max (there's a single size knob,
-// not a separate cap). Default $11 keeps live orders as small real-money
-// sanity trades that clear SoDEX's ~$10 minimum notional with margin.
-const DEFAULT_LIMITS: SafetyLimits = {
-  maxPositionUsd: 11,
-  maxDailyTrades: 3,
-  acceptedDisclaimer: false,
-};
-
+// ─── SoDEX minimum notional ──────────────────────────────────────────
 /** SoDEX's minimum notional is ~$10 across pairs; orders below this are
  *  rejected at the gateway, so we refuse client-side with a clear msg. */
 export const SODEX_MIN_NOTIONAL_USD = 10;
 
-function limitsKey(network: SodexNetwork): string {
-  return `${LIMITS_PREFIX}.${network}`;
-}
+// ─── Risk-acceptance (one-time, per browser) ────────────────────────
+// The SodexAuth setup modal's final step. Stored per network so the
+// "ready" state can be re-derived without re-prompting each visit.
 
-export function readSafetyLimits(network: SodexNetwork): SafetyLimits {
-  if (typeof window === "undefined") return DEFAULT_LIMITS;
-  const raw = window.localStorage.getItem(limitsKey(network));
-  if (!raw) return DEFAULT_LIMITS;
+const DISCLAIMER_PREFIX = "helix.sodex.disclaimer";
+
+export function readDisclaimerAccepted(network: SodexNetwork): boolean {
+  if (typeof window === "undefined") return false;
   try {
-    return { ...DEFAULT_LIMITS, ...(JSON.parse(raw) as Partial<SafetyLimits>) };
+    return window.localStorage.getItem(`${DISCLAIMER_PREFIX}.${network}`) === "1";
   } catch {
-    return DEFAULT_LIMITS;
+    return false;
   }
 }
 
-export function writeSafetyLimits(
+export function writeDisclaimerAccepted(
   network: SodexNetwork,
-  limits: SafetyLimits,
+  accepted: boolean,
 ): void {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(limitsKey(network), JSON.stringify(limits));
-}
-
-// ─── Daily-trade counter — enforces SafetyLimits.maxDailyTrades ──────
-// The Connect page tells users "Helix enforces them before signing", so
-// maxDailyTrades must be real, not decorative. We keep a per-network,
-// per-day counter in localStorage (a client-side guard — the honest cap
-// for a browser-signed flow; it is not a server-enforced limit).
-
-const TRADES_PREFIX = "helix.sodex.trades";
-
-function tradesKey(network: SodexNetwork): string {
-  return `${TRADES_PREFIX}.${network}`;
-}
-
-function utcDayStamp(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-/** How many live orders were submitted from this browser today (UTC). */
-export function readTradesToday(network: SodexNetwork): number {
-  if (typeof window === "undefined") return 0;
-  const raw = window.localStorage.getItem(tradesKey(network));
-  if (!raw) return 0;
   try {
-    const { date, count } = JSON.parse(raw) as { date: string; count: number };
-    return date === utcDayStamp() ? Number(count) || 0 : 0;
+    const k = `${DISCLAIMER_PREFIX}.${network}`;
+    if (accepted) window.localStorage.setItem(k, "1");
+    else window.localStorage.removeItem(k);
   } catch {
-    return 0;
+    /* ignore */
   }
 }
 
-/** Increment today's counter after a successful submit. Returns new total. */
-export function recordTradeToday(network: SodexNetwork): number {
-  if (typeof window === "undefined") return 0;
-  const next = readTradesToday(network) + 1;
-  window.localStorage.setItem(
-    tradesKey(network),
-    JSON.stringify({ date: utcDayStamp(), count: next }),
-  );
-  return next;
-}

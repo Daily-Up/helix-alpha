@@ -305,7 +305,6 @@ export function useSodexTradeActions({
         },
         setBusy: () => {},
         setConfirming: () => {},
-        setTradesToday: () => {},
       });
       refreshAccount();
       refreshOpenOrders();
@@ -358,7 +357,6 @@ export function useSodexTradeActions({
             setMsg: () => {},
             setBusy: () => {},
             setConfirming: () => {},
-            setTradesToday: () => {},
           });
         }
       } finally {

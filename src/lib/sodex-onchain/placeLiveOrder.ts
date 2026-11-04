@@ -19,7 +19,6 @@ import {
 import {
   readLocalKey,
   writeLocalKey,
-  recordTradeToday,
   SODEX_MIN_NOTIONAL_USD,
 } from "./local-keys";
 import { fmtSodexSymbol } from "@/lib/format";
@@ -67,7 +66,6 @@ export interface PlaceLiveOrderArgs {
   setMsg: (m: string | null) => void;
   setBusy: (b: boolean) => void;
   setConfirming: (c: boolean) => void;
-  setTradesToday: (n: number) => void;
 }
 
 export async function placeLiveOrder(args: PlaceLiveOrderArgs): Promise<void> {
@@ -87,7 +85,6 @@ export async function placeLiveOrder(args: PlaceLiveOrderArgs): Promise<void> {
     setMsg,
     setBusy,
     setConfirming,
-    setTradesToday,
   } = args;
   const isLimit = orderType === "LIMIT";
     const key = readLocalKey(network);
@@ -288,10 +285,6 @@ export async function placeLiveOrder(args: PlaceLiveOrderArgs): Promise<void> {
 
       const sodexOrderId =
         (sodexResp as { orderID?: string })?.orderID ?? clOrdID;
-
-      // Count the successful submit against the daily cap.
-      const nowCount = recordTradeToday(network);
-      setTradesToday(nowCount);
 
       await fetch("/api/sodex/record-trade", {
         method: "POST",

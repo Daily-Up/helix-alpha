@@ -29,10 +29,10 @@ import {
 } from "@/lib/sodex-onchain/client";
 import {
   readLocalKey,
-  readSafetyLimits,
   writeLocalKey,
   SODEX_MIN_NOTIONAL_USD,
 } from "@/lib/sodex-onchain/local-keys";
+import { useSodexAuth } from "@/components/sodex/auth/SodexAuthProvider";
 import { fmtSodexSymbol } from "@/lib/format";
 import {
   SodexOrderType,
@@ -69,29 +69,22 @@ export function ExecuteIndexButton({ legs }: { legs: IndexLeg[] }) {
   const network: SodexNetwork = "mainnet"; // mainnet only
 
   const { address: connectedMaster } = useAccount();
+  const auth = useSodexAuth();
 
-  const [ready, setReady] = useState(false);
-  const [identityAddress, setIdentityAddress] = useState<
-    `0x${string}` | null
-  >(null);
   const [budget, setBudget] = useState<number | null>(null);
+  const [deployInput, setDeployInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
-  const refresh = useCallback(() => {
+  // Self-heal the stored key's master address (the SodexAuth provider owns
+  // readiness; here we only keep the key usable for the batch signing).
+  useEffect(() => {
     const key = readLocalKey(network);
     if (key && !key.masterAddress && connectedMaster) {
       writeLocalKey(network, { ...key, masterAddress: connectedMaster });
     }
-    const limits = readSafetyLimits(network);
-    setReady(!!key && limits.acceptedDisclaimer);
-    setIdentityAddress(key?.address ?? null);
   }, [network, connectedMaster]);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
 
   // Assets that carry a meaningful weight — used for the confirm summary.
   const weighted = legs
@@ -119,6 +112,7 @@ export function ExecuteIndexButton({ legs }: { legs: IndexLeg[] }) {
         );
       }
       setBudget(avail);
+      setDeployInput(String(Math.floor(avail)));
       setConfirming(true);
     } catch (err) {
       setMsg(`✗ ${(err as Error).message}`);
@@ -141,9 +135,11 @@ export function ExecuteIndexButton({ legs }: { legs: IndexLeg[] }) {
       const state = await getAccountState(network, lookup);
       if (!state.aid) throw new Error("SoDEX account not found for this wallet.");
 
-      // Deploy AVAILABLE usdc (re-read so we never over-spend a stale figure).
+      // Deploy the user-chosen amount, never more than what's actually
+      // available (re-read so we never over-spend a stale figure).
       const avail = usdcAvailable(state.B ?? []);
-      const deployable = Math.min(budget, avail);
+      const want = Number(deployInput) || 0;
+      const deployable = Math.min(want > 0 ? want : budget, avail);
 
       // Resolve symbolIDs in parallel, then keep only legs whose slice clears
       // the exchange minimum — accept the small tracking error on tiny weights.
@@ -212,50 +208,63 @@ export function ExecuteIndexButton({ legs }: { legs: IndexLeg[] }) {
       setBusy(false);
       setConfirming(false);
     }
-  }, [network, budget, weighted, connectedMaster]);
+  }, [network, budget, deployInput, weighted, connectedMaster]);
 
-  if (!ready) {
-    const hasKey = identityAddress != null;
+  if (!auth.ready) {
     return (
-      <a
-        href="/settings/connect-sodex"
-        className="inline-flex items-center gap-2 rounded border border-accent/40 bg-accent/10 px-2.5 py-1 text-xs text-accent-2 transition-colors hover:border-accent/60 hover:bg-accent/20"
-        title={
-          hasKey
-            ? "You have a key but haven't accepted the safety-limits disclaimer — click to finish."
-            : "Connect your wallet on SoDEX and create a Helix-scoped API key (one signature). Then deploy the index in one click."
-        }
+      <button
+        onClick={() => auth.openSetup()}
+        className="inline-flex items-center gap-2 rounded border border-[color:var(--accent-trade)]/40 bg-[color:var(--accent-trade)]/15 px-2.5 py-1 text-xs font-medium text-[color:var(--accent-trade)] transition-colors hover:bg-[color:var(--accent-trade)]/25"
+        title="Set up SoDEX to deploy the index live"
       >
-        {hasKey
-          ? "Accept disclaimer to deploy live →"
-          : "→ Connect SoDEX to deploy the index live"}
-      </a>
+        {auth.step === "wallet" ? "Connect to deploy" : "Finish setup"}
+      </button>
     );
   }
 
   return (
     <div className="flex flex-col gap-1.5">
       {confirming && budget != null ? (
-        <div className="rounded border border-accent/40 bg-accent/10 p-2.5 text-xs">
+        <div className="rounded border border-[color:var(--accent-trade)]/40 bg-[color:var(--accent-trade)]/10 p-2.5 text-xs">
           <div className="font-medium text-fg">Deploy AlphaIndex live?</div>
           <div className="mt-1 text-fg-muted">
-            Splits <span className="font-medium text-fg">${budget.toFixed(0)}</span>{" "}
-            available USDC across the live index weights —{" "}
+            Splits the amount you choose across the live index weights —{" "}
             <span className="text-fg">real funds</span> on{" "}
             {SODEX_NETWORKS[network].label}. One signed batch, no wallet popup.
           </div>
+          <label className="mt-2 flex items-center gap-2">
+            <span className="font-[var(--font-jetbrains-mono)] text-[9px] uppercase tracking-wider text-fg-dim">
+              Deploy $
+            </span>
+            <input
+              value={deployInput}
+              onChange={(e) =>
+                setDeployInput(e.target.value.replace(/[^0-9.]/g, ""))
+              }
+              inputMode="decimal"
+              disabled={busy}
+              className="w-24 rounded border border-line bg-surface px-1.5 py-1 text-xs tabular-nums text-fg outline-none focus:border-[color:var(--accent-trade)]/50"
+            />
+            <button
+              type="button"
+              onClick={() => setDeployInput(String(Math.floor(budget)))}
+              className="text-[10px] text-fg-dim hover:text-fg"
+            >
+              max ${budget.toFixed(0)}
+            </button>
+          </label>
           <div className="mt-2 flex items-center gap-2">
             <button
               onClick={execute}
-              disabled={busy}
+              disabled={busy || !(Number(deployInput) > 0)}
               className={cn(
                 "rounded border px-2.5 py-1 text-xs font-medium transition-colors",
-                busy
-                  ? "cursor-wait border-line bg-surface-2 text-fg-dim"
-                  : "border-accent bg-accent text-[#0b0b0e] hover:bg-accent-2",
+                busy || !(Number(deployInput) > 0)
+                  ? "cursor-not-allowed border-line bg-surface-2 text-fg-dim"
+                  : "border-[color:var(--accent-trade)] bg-[color:var(--accent-trade)] text-[#0b0e11] hover:brightness-110",
               )}
             >
-              {busy ? "Signing…" : `Confirm · $${budget.toFixed(0)}`}
+              {busy ? "Signing…" : `Confirm · $${(Number(deployInput) || 0).toFixed(0)}`}
             </button>
             <button
               onClick={() => setConfirming(false)}

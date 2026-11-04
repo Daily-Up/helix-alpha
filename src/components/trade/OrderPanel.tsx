@@ -19,12 +19,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { cn } from "@/components/ui/cn";
 import { useTradeMode } from "@/lib/sodex-onchain/useTradeMode";
+import { useSodexAuth } from "@/components/sodex/auth/SodexAuthProvider";
 import { placeLiveOrder } from "@/lib/sodex-onchain/placeLiveOrder";
 import { getBuilderCode } from "@/lib/sodex-onchain/chains";
 import type { SodexPerpsAccountState } from "@/lib/sodex-onchain/types";
 import {
   readLocalKey,
-  readTradesToday,
   localKeyExpiry,
   SODEX_MIN_NOTIONAL_USD,
   type KeyExpiry,
@@ -113,6 +113,7 @@ export function OrderPanel({
   onPlaced?: () => void;
 }) {
   const tm = useTradeMode(NETWORK);
+  const auth = useSodexAuth();
   const { address: connectedMaster } = useAccount();
   const isPerp = market === "perp";
   const digits = markPrice != null && markPrice < 10 ? 4 : 2;
@@ -132,7 +133,6 @@ export function OrderPanel({
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
-  const [, setTradesToday] = useState(() => readTradesToday(NETWORK));
 
   // Book click → switch to Limit + prefill that price.
   useEffect(() => {
@@ -321,7 +321,6 @@ export function OrderPanel({
         setMsg,
         setBusy,
         setConfirming,
-        setTradesToday,
       });
     } finally {
       // Always re-sync from SoDEX after an attempt — success, partial, rejected
@@ -359,12 +358,12 @@ export function OrderPanel({
 
   // ── Sub-renderers ──
   const connectCta = (
-    <Link
-      href="/settings/connect-sodex"
-      className="flex items-center justify-center rounded-md border border-accent/50 bg-accent/15 py-2.5 text-[13px] font-semibold text-accent-2 transition-colors hover:bg-accent/25"
+    <button
+      onClick={() => auth.openSetup()}
+      className="flex w-full items-center justify-center rounded-md border border-[color:var(--accent-trade)]/50 bg-[color:var(--accent-trade)]/15 py-2.5 text-[13px] font-semibold text-[color:var(--accent-trade)] transition-colors hover:bg-[color:var(--accent-trade)]/25"
     >
-      Connect SoDEX
-    </Link>
+      {auth.step === "wallet" ? "Connect to trade" : "Finish setup"}
+    </button>
   );
 
   return (
@@ -615,17 +614,10 @@ export function OrderPanel({
 
       {/* Submit / confirm */}
       <div>
-        {tm.loading ? (
+        {auth.loading ? (
           <div className="h-[42px] animate-pulse rounded-md bg-surface-2" />
-        ) : !tm.ready ? (
+        ) : !auth.ready ? (
           connectCta
-        ) : keyExpiry?.state === "expired" ? (
-          <Link
-            href="/settings/connect-sodex"
-            className="flex items-center justify-center rounded-md border border-negative/50 bg-negative/10 py-2.5 text-[13px] font-semibold text-negative hover:bg-negative/20"
-          >
-            ⚠ Trading key expired — re-authorize
-          </Link>
         ) : confirming && sizeUsd > 0 ? (
           <ConfirmStep
             side={side}
@@ -665,14 +657,14 @@ export function OrderPanel({
             {submitLabel}
           </button>
         )}
-        {keyExpiry?.state === "expiring" && tm.ready ? (
-          <Link
-            href="/settings/connect-sodex"
-            className="mt-1.5 block text-center text-[10px] hover:underline"
+        {keyExpiry?.state === "expiring" && auth.ready ? (
+          <button
+            onClick={() => auth.generateKey()}
+            className="mt-1.5 block w-full text-center text-[10px] hover:underline"
             style={{ color: "#e0a53f" }}
           >
-            ⚠ Trading key expiring — re-authorize soon
-          </Link>
+            ⚠ Trading key expiring — renew
+          </button>
         ) : null}
         {msg ? (
           <p

@@ -15,7 +15,6 @@ import {
   ArrowLeftRight,
   Landmark,
   Globe,
-  Plug,
   Shapes,
   GraduationCap,
   Gauge,
@@ -63,10 +62,6 @@ const NAV: Array<{ section: string; items: NavItem[] }> = [
       { href: "/treasuries", label: "Treasury Watch", icon: Landmark },
       { href: "/macro", label: "Macro Bridge", icon: Globe },
     ],
-  },
-  {
-    section: "Live Trading",
-    items: [{ href: "/settings/connect-sodex", label: "Connect SoDEX", icon: Plug }],
   },
   {
     section: "Internal",

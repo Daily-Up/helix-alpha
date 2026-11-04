@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { TradeModeBadge } from "./TradeModeBadge";
+import { AccountButton } from "@/components/sodex/auth/AccountButton";
 import { MobileNav } from "./MobileNav";
 
 /**
@@ -37,7 +37,7 @@ export function Topbar() {
           </span>
           <span className="text-fg-dim">UTC</span>
         </div>
-        <TradeModeBadge />
+        <AccountButton />
       </div>
     </header>
   );

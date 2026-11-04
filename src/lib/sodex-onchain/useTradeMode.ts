@@ -17,7 +17,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { readLocalKey, readSafetyLimits } from "./local-keys";
+import { readLocalKey, readDisclaimerAccepted } from "./local-keys";
 import type { SodexNetwork } from "./chains";
 
 export interface TradeModeState {
@@ -52,9 +52,8 @@ export function useTradeMode(
 
   const refresh = useCallback(() => {
     const key = readLocalKey(network);
-    const limits = readSafetyLimits(network);
     const hasKey = !!key;
-    const acceptedDisclaimer = limits.acceptedDisclaimer;
+    const acceptedDisclaimer = readDisclaimerAccepted(network);
     const ready = hasKey && acceptedDisclaimer;
     setState({
       mode: ready ? "live" : "demo",
