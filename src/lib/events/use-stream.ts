@@ -319,6 +319,11 @@ export function useKlines(symbols: string[]): Map<string, SodexCandle[]> {
               { symbol, interval: "15m", limit: 96 },
               "perp",
             );
+            // SoDEX returns klines NEWEST-FIRST (descending). Every consumer
+            // here — pctSince (baseline = candle at event time), the Sparkline
+            // (drawn left→right = old→new) and its event marker — assumes
+            // ascending. Normalise once, at the fetch boundary.
+            candles.sort((a, b) => a.openTime - b.openTime);
             klineCache.set(symbol, { at: Date.now(), candles });
           } catch {
             klineCache.set(symbol, { at: Date.now(), candles: [] });

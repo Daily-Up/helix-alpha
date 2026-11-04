@@ -1,11 +1,16 @@
 "use client";
 
 /**
- * EventStream — the news → trade hub. Center: For You / Equities / Crypto /
- * Macro tabs, a stats row, the "Trending now" hero carousel, classifier topic
- * tabs, and a filtered feed of clustered cards. Right rail (sticky): SoDEX
- * movers, the watchlist, and ingest status. A detail slide-over opens on any
- * card. All read-only; trade buttons deep-link into /trade with a side preset.
+ * EventStream — the news → trade hub. Center: All / Equities / Crypto / Macro
+ * tabs, a stats row, the "Trending now" hero carousel, classifier topic tabs,
+ * and a filtered feed of clustered cards. Right rail (sticky): SoDEX movers,
+ * the watchlist, and ingest status. A detail slide-over opens on any card. All
+ * read-only; trade buttons deep-link into /trade with a side preset.
+ *
+ * Every filter stays consistent with what is shown: the hero, the topic-chip
+ * counts and the feed are all computed from the SAME pool — the selected tab,
+ * with the relevance toggle applied — so a chip always returns exactly its
+ * count and a tab with no hero-worthy events simply has no hero.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -14,11 +19,9 @@ import {
   usePerpMarkets,
   useStreamEvents,
   useKlines,
-  useOpenPositionBases,
   pctSince,
   type StreamEvent,
 } from "@/lib/events/use-stream";
-import { useWatchlist } from "@/lib/events/watchlist";
 import type { MarketCategory } from "@/lib/events/market-map";
 import { StatsRow } from "./StatsRow";
 import { HeroCarousel } from "./HeroCarousel";
@@ -29,18 +32,28 @@ import { WatchlistRail } from "./WatchlistRail";
 import { IngestStatus } from "./IngestStatus";
 import { DetailPanel } from "./DetailPanel";
 
-type CenterTab = "For You" | "Equities" | "Crypto" | "Macro";
-const CENTER_TABS: CenterTab[] = ["For You", "Equities", "Crypto", "Macro"];
+type CenterTab = "All" | "Equities" | "Crypto" | "Macro";
+const CENTER_TABS: CenterTab[] = ["All", "Equities", "Crypto", "Macro"];
 
 const MACRO_CATS = new Set<MarketCategory>(["macro", "index", "commodity"]);
+
+/** Which center tab an event belongs to (by its dominant market category). */
+function matchesTab(e: StreamEvent, tab: CenterTab): boolean {
+  if (tab === "All") return true;
+  if (tab === "Equities") return e.category === "equity";
+  if (tab === "Crypto") return e.category === "crypto";
+  return MACRO_CATS.has(e.category); // Macro
+}
+
+/** Feed-worthy: maps to at least one asset and the classifier is ≥50% sure. */
+const isRelevant = (e: StreamEvent) =>
+  e.assets.length > 0 && (e.confidence ?? 0) >= 0.5;
 
 export function EventStream() {
   const { perpSet, tickers, movers } = usePerpMarkets();
   const { events, loading } = useStreamEvents(perpSet);
-  const { list: watchlist } = useWatchlist();
-  const posBases = useOpenPositionBases();
 
-  const [tab, setTab] = useState<CenterTab>("For You");
+  const [tab, setTab] = useState<CenterTab>("All");
   const [topic, setTopic] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
   const [selected, setSelected] = useState<StreamEvent | null>(null);
@@ -87,7 +100,8 @@ export function EventStream() {
     [events, klines],
   );
 
-  // Hero: high-severity, ≥70% confidence, tradable — newest 5.
+  // Hero: high-severity, ≥70% confidence, tradable — newest 5 WITHIN the tab,
+  // so Equities shows only equity heroes, etc. An empty list hides the hero.
   const heroes = useMemo(
     () =>
       priced
@@ -95,47 +109,62 @@ export function EventStream() {
           (e) =>
             e.severity === "high" &&
             (e.confidence ?? 0) >= 0.7 &&
-            e.tradable.length > 0,
+            e.tradable.length > 0 &&
+            matchesTab(e, tab),
         )
         .slice(0, 5),
-    [priced],
+    [priced, tab],
   );
   const heroIds = useMemo(() => new Set(heroes.map((h) => h.id)), [heroes]);
 
-  // Feed: center tab + topic + relevance filter, heroes excluded. "For You"
-  // keeps events I have a position in, a watchlist asset, or high severity —
-  // then ranks them in that priority (positions first), newest within a rank.
-  const feed = useMemo(() => {
-    const watchSet = new Set(watchlist);
-    const baseOf = (s: string) => s.toUpperCase().replace(/-USDC?$/, "");
-    const onPos = (e: StreamEvent) =>
-      e.tradable.some((a) => a.sodexSymbol && posBases.has(baseOf(a.sodexSymbol)));
-    const onWatch = (e: StreamEvent) =>
-      e.tradable.some((a) => a.sodexSymbol && watchSet.has(a.sodexSymbol));
+  // The single pool everything downstream reads: the selected tab, heroes
+  // removed, relevance toggle applied — but NOT the topic filter. Topic-chip
+  // counts and the feed both derive from this, so a chip always returns
+  // exactly its count.
+  const viewPool = useMemo(
+    () =>
+      priced.filter(
+        (e) =>
+          !heroIds.has(e.id) &&
+          matchesTab(e, tab) &&
+          (showAll || isRelevant(e)),
+      ),
+    [priced, tab, showAll, heroIds],
+  );
 
-    const filtered = priced.filter((e) => {
-      if (heroIds.has(e.id)) return false;
-      if (topic && e.event_type !== topic) return false;
-      if (tab === "Equities" && e.category !== "equity") return false;
-      if (tab === "Crypto" && e.category !== "crypto") return false;
-      if (tab === "Macro" && !MACRO_CATS.has(e.category)) return false;
-      if (tab === "For You" && !onPos(e) && !onWatch(e) && e.severity !== "high")
-        return false;
-      return true;
-    });
+  // Topic-chip counts over the current view (0-count topics are dropped in
+  // TopicTabs, which only renders keys present here).
+  const topicCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const e of viewPool)
+      if (e.event_type) m.set(e.event_type, (m.get(e.event_type) ?? 0) + 1);
+    return m;
+  }, [viewPool]);
 
-    if (tab !== "For You") return filtered;
-    // positions (0) → watchlist (1) → high severity (2); stable sort keeps the
-    // newest-first order within each rank.
-    const rank = (e: StreamEvent) =>
-      onPos(e) ? 0 : onWatch(e) ? 1 : e.severity === "high" ? 2 : 3;
-    return [...filtered].sort((a, b) => rank(a) - rank(b));
-  }, [priced, tab, topic, heroIds, watchlist, posBases]);
+  // Selected topic no longer present in this view (e.g. after a tab switch) →
+  // clear it so the feed doesn't go silently empty.
+  useEffect(() => {
+    if (topic && !topicCounts.has(topic)) setTopic(null);
+  }, [topic, topicCounts]);
 
-  const isRelevant = (e: StreamEvent) =>
-    e.assets.length > 0 && (e.confidence ?? 0) >= 0.5;
-  const shown = showAll ? feed : feed.filter(isRelevant);
-  const hiddenCount = feed.length - feed.filter(isRelevant).length;
+  // Feed = the view pool, narrowed to the selected topic. shown.length when a
+  // topic is active == that chip's count, by construction.
+  const shown = useMemo(
+    () => (topic ? viewPool.filter((e) => e.event_type === topic) : viewPool),
+    [viewPool, topic],
+  );
+
+  // How many low-relevance events the toggle is hiding in this exact view.
+  const hiddenCount = useMemo(() => {
+    if (showAll) return 0;
+    return priced.filter(
+      (e) =>
+        !heroIds.has(e.id) &&
+        matchesTab(e, tab) &&
+        (!topic || e.event_type === topic) &&
+        !isRelevant(e),
+    ).length;
+  }, [priced, tab, topic, heroIds, showAll]);
 
   return (
     <div className="trade-terminal flex flex-col gap-4">
@@ -183,7 +212,7 @@ export function EventStream() {
             <HeroCarousel heroes={heroes} klines={klines} onOpen={setSelected} />
           ) : null}
 
-          <TopicTabs events={priced} value={topic} onChange={setTopic} />
+          <TopicTabs counts={topicCounts} value={topic} onChange={setTopic} />
 
           {/* Feed */}
           <div className="flex items-center justify-between">

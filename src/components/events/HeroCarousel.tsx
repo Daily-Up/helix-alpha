@@ -101,7 +101,8 @@ export function HeroCarousel({
           }}
         />
 
-        <div className="relative flex h-full flex-col p-5">
+        {/* Content insets left/right so the edge arrows never sit under it. */}
+        <div className="relative flex h-full flex-col px-12 py-5">
           <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider">
             <span className="grid h-6 w-6 place-items-center rounded-md bg-surface-2/70 text-[color:var(--accent-trade)]">
               <Glyph size={13} />
@@ -122,11 +123,11 @@ export function HeroCarousel({
           </div>
 
           <div className="mt-auto">
-            <h2 className="mb-1.5 max-w-[34ch] text-[19px] font-semibold leading-tight text-white">
+            <h2 className="mb-1.5 line-clamp-3 max-w-[55%] text-[19px] font-semibold leading-tight text-white">
               {ev.title}
             </h2>
             {ev.takeaway && ev.takeaway !== ev.title ? (
-              <p className="mb-3 line-clamp-1 max-w-[52ch] text-[12.5px] text-fg-muted">
+              <p className="mb-3 line-clamp-2 max-w-[55%] text-[12.5px] text-fg-muted">
                 {ev.takeaway}
               </p>
             ) : null}
@@ -149,14 +150,14 @@ export function HeroCarousel({
           <>
             <button
               onClick={() => setI((p) => (p - 1 + count) % count)}
-              className="absolute left-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full bg-surface-2/70 text-fg-muted transition-colors hover:text-fg"
+              className="absolute left-2 top-1/2 z-20 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full bg-surface-2/80 text-fg-muted shadow-md ring-1 ring-black/20 backdrop-blur-sm transition-colors hover:text-fg"
               aria-label="Previous"
             >
               <ChevronLeft size={16} />
             </button>
             <button
               onClick={() => setI((p) => (p + 1) % count)}
-              className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full bg-surface-2/70 text-fg-muted transition-colors hover:text-fg"
+              className="absolute right-2 top-1/2 z-20 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full bg-surface-2/80 text-fg-muted shadow-md ring-1 ring-black/20 backdrop-blur-sm transition-colors hover:text-fg"
               aria-label="Next"
             >
               <ChevronRight size={16} />

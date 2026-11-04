@@ -1,32 +1,26 @@
 "use client";
 
 /**
- * TopicTabs — classifier event-type tags that have events in the last 24h,
- * as a horizontal pill row under the hero. Clicking filters the feed; "All"
- * clears it.
+ * TopicTabs — classifier event-type tags as a horizontal pill row under the
+ * hero. Counts come pre-computed from the CURRENT view (selected tab +
+ * relevance toggle) so a chip always matches the feed; 0-count topics are
+ * dropped. Clicking filters the feed; "All" clears it.
  */
 
 import { cn } from "@/components/ui/cn";
-import type { StreamEvent } from "@/lib/events/use-stream";
-
-const DAY = 24 * 60 * 60 * 1000;
 
 export function TopicTabs({
-  events,
+  counts,
   value,
   onChange,
 }: {
-  events: StreamEvent[];
+  counts: Map<string, number>;
   value: string | null;
   onChange: (v: string | null) => void;
 }) {
-  const since = Date.now() - DAY;
-  const counts = new Map<string, number>();
-  for (const e of events) {
-    if (e.release_time < since || !e.event_type) continue;
-    counts.set(e.event_type, (counts.get(e.event_type) ?? 0) + 1);
-  }
-  const topics = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  const topics = [...counts.entries()]
+    .filter(([, n]) => n > 0)
+    .sort((a, b) => b[1] - a[1]);
   if (topics.length === 0) return null;
 
   return (
