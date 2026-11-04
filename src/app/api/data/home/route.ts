@@ -5,15 +5,8 @@
  */
 
 import { NextResponse } from "next/server";
-import {
-  Assets,
-  Briefings,
-  IndexFund,
-  Postmortem,
-  all,
-  get,
-} from "@/lib/db";
-import { Market } from "@/lib/sodex";
+import { Briefings, Postmortem, all, get } from "@/lib/db";
+import { fetchCatalog } from "@/lib/wealth/client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -63,77 +56,47 @@ export async function GET() {
      LIMIT 3`,
   );
 
-  // ── AlphaIndex snapshot ───────────────────────────────────────
-  const idx = await IndexFund.getIndex("alphacore");
-  const positions = await IndexFund.listPositions("alphacore");
-  let tickers = new Map<string, { lastPx: string }>();
+  // ── SoDEX Wealth snapshot ─────────────────────────────────────
+  // Catalog-level (not wallet-specific) highlights for the dashboard tile:
+  // the top Stable Earn APY + the highest-return products. All read from the
+  // live SoDEX Wealth API; optional (the home page renders without it).
+  let wealthSnapshot: {
+    product_count: number;
+    top_yield: { name: string; apy: number } | null;
+    highlights: Array<{
+      fund_id: string;
+      name: string;
+      category: string;
+      metric_label: string;
+      metric_value: number | null;
+      change_pct: number | null;
+    }>;
+  } = { product_count: 0, top_yield: null, highlights: [] };
   try {
-    tickers = (await Market.getAllTickersBySymbol()) as unknown as Map<
-      string,
-      { lastPx: string }
-    >;
+    const funds = await fetchCatalog();
+    const yields = funds
+      .filter((f) => f.category === "stable_earn" && f.apy7d != null)
+      .sort((a, b) => (b.apy7d ?? 0) - (a.apy7d ?? 0));
+    const byReturn = [...funds]
+      .filter((f) => f.headlineValue != null)
+      .sort((a, b) => (b.headlineValue ?? 0) - (a.headlineValue ?? 0));
+    wealthSnapshot = {
+      product_count: funds.length,
+      top_yield: yields[0]
+        ? { name: yields[0].displayName, apy: yields[0].apy7d ?? 0 }
+        : null,
+      highlights: byReturn.slice(0, 5).map((f) => ({
+        fund_id: f.fundId,
+        name: f.displayName,
+        category: f.category,
+        metric_label: f.headlineLabel,
+        metric_value: f.headlineValue,
+        change_pct: f.changePct,
+      })),
+    };
   } catch {
-    /* live prices optional */
+    /* wealth snapshot optional */
   }
-  const livePrice = (sym: string): number | null => {
-    const t = tickers.get(sym);
-    if (!t) return null;
-    const n = Number(t.lastPx);
-    return Number.isFinite(n) && n > 0 ? n : null;
-  };
-
-  let invested = 0;
-  const positionViews: Array<{
-    symbol: string;
-    kind: string;
-    weight_pct: number;
-    pnl_pct: number | null;
-    rationale: string | null;
-    value: number;
-  }> = [];
-  for (const p of positions) {
-    const a = await Assets.getAssetById(p.asset_id);
-    if (!a) continue;
-    const sym = a.tradable?.symbol ?? "";
-    const px = sym ? livePrice(sym) : null;
-    const value = px != null ? p.quantity * px : p.current_value_usd;
-    invested += value;
-    const pnl_pct =
-      px != null && p.avg_entry_price != null && p.avg_entry_price > 0
-        ? ((px - p.avg_entry_price) / p.avg_entry_price) * 100
-        : null;
-    positionViews.push({
-      symbol: a.symbol,
-      kind: a.kind,
-      weight_pct: 0,
-      pnl_pct,
-      rationale: p.rationale,
-      value,
-    });
-  }
-  const lastNav = (await IndexFund.listNavHistory("alphacore", 1))[0];
-  const navTotal = lastNav?.nav_usd ?? idx?.starting_nav ?? 0;
-  const cash = Math.max(0, navTotal - invested);
-  const totalNav = invested + cash;
-  for (const p of positionViews) {
-    p.weight_pct = totalNav > 0 ? (p.value / totalNav) * 100 : 0;
-  }
-  positionViews.sort((a, b) => b.value - a.value);
-  const indexSnapshot = {
-    nav: totalNav,
-    starting_nav: idx?.starting_nav ?? 0,
-    pnl_pct:
-      idx && idx.starting_nav > 0
-        ? ((totalNav - idx.starting_nav) / idx.starting_nav) * 100
-        : 0,
-    top_positions: positionViews.slice(0, 5).map((p) => ({
-      symbol: p.symbol,
-      kind: p.kind,
-      weight_pct: p.weight_pct,
-      pnl_pct: p.pnl_pct,
-      rationale: p.rationale,
-    })),
-  };
 
   const briefing = await Briefings.getLatestBriefing();
 
@@ -169,7 +132,7 @@ export async function GET() {
     counts,
     signal_stats: sigStats,
     top_signals: topSignals,
-    index: indexSnapshot,
+    wealth: wealthSnapshot,
     briefing: briefing
       ? {
           date: briefing.date,

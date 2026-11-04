@@ -49,7 +49,7 @@ const NAV: Array<{ section: string; items: NavItem[] }> = [
     section: "Portfolio",
     items: [
       { href: "/portfolio", label: "Portfolio", icon: Wallet },
-      { href: "/index-fund", label: "AlphaIndex", icon: LineChart },
+      { href: "/wealth-index", label: "Wealth Index", icon: LineChart },
     ],
   },
   {

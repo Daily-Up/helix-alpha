@@ -16,7 +16,7 @@ import { Timestamp } from "@/components/ui/Timestamp";
 import { AssetLogo } from "@/components/ui/AssetLogo";
 import { cn } from "@/components/ui/cn";
 import { LiveTradeCta } from "@/components/sodex/LiveTradeCta";
-import { fmtAssetSymbol, fmtRelative, fmtUsd } from "@/lib/format";
+import { fmtAssetSymbol, fmtRelative } from "@/lib/format";
 
 interface HomeData {
   counts: {
@@ -44,16 +44,16 @@ interface HomeData {
     event_title: string | null;
     event_type: string | null;
   }>;
-  index: {
-    nav: number;
-    starting_nav: number;
-    pnl_pct: number;
-    top_positions: Array<{
-      symbol: string;
-      kind?: string;
-      weight_pct: number;
-      pnl_pct: number | null;
-      rationale: string | null;
+  wealth: {
+    product_count: number;
+    top_yield: { name: string; apy: number } | null;
+    highlights: Array<{
+      fund_id: string;
+      name: string;
+      category: string;
+      metric_label: string;
+      metric_value: number | null;
+      change_pct: number | null;
     }>;
   };
   briefing: {
@@ -185,16 +185,18 @@ export function HomePage() {
                 tone={data.signal_stats.total_pending > 0 ? "accent" : "default"}
               />
               <Stat
-                label="AlphaIndex NAV"
-                value={fmtUsd(data.index.nav)}
-                sub={`${data.index.pnl_pct >= 0 ? "+" : ""}${data.index.pnl_pct.toFixed(2)}% all-time`}
-                tone={
-                  data.index.pnl_pct > 0
-                    ? "positive"
-                    : data.index.pnl_pct < 0
-                      ? "negative"
-                      : "default"
+                label={
+                  data.wealth.top_yield
+                    ? `${data.wealth.top_yield.name} · 7D APY`
+                    : "Wealth Index"
                 }
+                value={
+                  data.wealth.top_yield
+                    ? `${data.wealth.top_yield.apy.toFixed(2)}%`
+                    : `${data.wealth.product_count}`
+                }
+                sub={`${data.wealth.product_count} live products · SoDEX Wealth`}
+                tone="accent"
               />
               <Stat
                 label="3d hit rate"
@@ -392,54 +394,57 @@ export function HomePage() {
               </CardBody>
             </Card>
 
-            {/* Top index positions */}
+            {/* Wealth highlights */}
             <Card>
               <CardHeader>
-                <CardTitle>AlphaIndex top positions</CardTitle>
+                <CardTitle>Wealth highlights</CardTitle>
                 <Link
-                  href="/index-fund"
+                  href="/wealth-index"
                   className="text-[11px] text-accent-2 hover:underline"
                 >
-                  Full portfolio →
+                  Wealth Index →
                 </Link>
               </CardHeader>
               <CardBody className="!p-0">
-                {data.index.top_positions.length === 0 ? (
+                {data.wealth.highlights.length === 0 ? (
                   <div className="px-4 py-6 text-sm text-fg-dim">
-                    No positions yet — run a rebalance from /index-fund.
+                    Couldn&apos;t load SoDEX Wealth right now.
                   </div>
                 ) : (
                   <ul className="divide-y divide-line">
-                    {data.index.top_positions.map((p) => (
+                    {data.wealth.highlights.map((h) => (
                       <li
-                        key={p.symbol}
-                        className="flex flex-col gap-1 px-4 py-3 text-xs"
+                        key={h.fund_id}
+                        className="flex items-center justify-between gap-2 px-4 py-3 text-xs"
                       >
-                        <div className="flex flex-wrap items-center gap-2">
-                          <AssetLogo symbol={p.symbol} size={18} />
-                          <span className="font-mono text-sm font-semibold text-fg">
-                            {fmtAssetSymbol(p.symbol, p.kind)}
-                          </span>
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-medium text-fg">
+                            {h.name}
+                          </div>
+                          <div className="text-[10px] uppercase tracking-wider text-fg-dim">
+                            {h.metric_label}
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-3">
                           <Num
-                            value={p.weight_pct}
-                            unit="%"
-                            dp={2}
-                            tier="secondary"
-                          />
-                          <Num
-                            value={p.pnl_pct}
+                            value={h.metric_value}
                             unit="%"
                             sign
                             dp={2}
                             tone="auto"
-                            tier="context"
+                            tier="secondary"
                           />
+                          {h.change_pct != null && (
+                            <Num
+                              value={h.change_pct}
+                              unit="%"
+                              sign
+                              dp={2}
+                              tone="auto"
+                              tier="context"
+                            />
+                          )}
                         </div>
-                        {p.rationale ? (
-                          <div className="text-[11px] text-fg-muted">
-                            {p.rationale}
-                          </div>
-                        ) : null}
                       </li>
                     ))}
                   </ul>
@@ -471,8 +476,8 @@ export function HomePage() {
               />
               <PipelineStep
                 n={4}
-                title="Allocate"
-                body="AlphaIndex anchored portfolio rebalances on signals + momentum, reviewed by Claude."
+                title="Act"
+                body="Execute signals live on SoDEX from the trade terminal; browse on-chain yield + RWA products in the Wealth Index."
               />
               <PipelineStep
                 n={5}
