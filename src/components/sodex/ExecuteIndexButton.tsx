@@ -123,6 +123,16 @@ export function ExecuteIndexButton({ legs }: { legs: IndexLeg[] }) {
 
   // Step 2 — build the basket + submit as ONE signed batch.
   const execute = useCallback(async () => {
+    // ARCHIVED — AlphaIndex live deploy is permanently disabled. The index is
+    // no longer a user-facing product (replaced by the Wealth Index). This hard
+    // guard ensures NO code path can place real AlphaIndex orders on SoDEX; the
+    // /index-fund route also redirects to the Wealth Index. Default-off env
+    // flag so it can never be re-enabled accidentally.
+    if (process.env.NEXT_PUBLIC_ALPHAINDEX_LIVE !== "1") {
+      setConfirming(false);
+      setMsg("AlphaIndex live deploy has been archived — use the Wealth Index.");
+      return;
+    }
     const key = readLocalKey(network);
     if (!key || budget == null) {
       setConfirming(false);

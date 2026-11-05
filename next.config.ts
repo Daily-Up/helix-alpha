@@ -74,6 +74,16 @@ const nextConfig: NextConfig = {
     if (process.env.NODE_ENV !== "production") return [];
     return [{ source: "/:path*", headers: securityHeaders }];
   },
+  async redirects() {
+    // AlphaIndex is archived — its page and any legacy /alphaindex links go to
+    // the Wealth Index. (The live-deploy code path is hard-disabled too.)
+    return [
+      { source: "/index-fund", destination: "/wealth-index", permanent: true },
+      { source: "/index-fund/:path*", destination: "/wealth-index", permanent: true },
+      { source: "/alphaindex", destination: "/wealth-index", permanent: true },
+      { source: "/alphaindex/:path*", destination: "/wealth-index", permanent: true },
+    ];
+  },
 };
 
 export default nextConfig;
