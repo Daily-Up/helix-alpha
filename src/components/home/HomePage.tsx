@@ -1,22 +1,26 @@
 "use client";
 
 /**
- * Marketing + glance homepage. First impression for judges, users,
- * future grant reviewers. Designed to communicate the product's thesis
- * in 10 seconds, then prove it works in another 30.
+ * Dashboard (/app). The hero masthead leads (identity + live status); below it,
+ * a redesigned glance surface built from the same raised-panel design system as
+ * the Terminal / Portfolio / Event Stream: a connect banner (or account strip
+ * when live), four clickable stat tiles, the Daily Briefing, a two-column
+ * signals + wealth row, and a slim "how it works" strip for new visitors.
  */
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
+import { cn } from "@/components/ui/cn";
 import { Badge } from "@/components/ui/Badge";
-import { Stat } from "@/components/ui/Stat";
 import { Num } from "@/components/ui/Num";
 import { Timestamp } from "@/components/ui/Timestamp";
 import { AssetLogo } from "@/components/ui/AssetLogo";
-import { cn } from "@/components/ui/cn";
-import { LiveTradeCta } from "@/components/sodex/LiveTradeCta";
-import { fmtAssetSymbol, fmtRelative } from "@/lib/format";
+import { WealthSparkline } from "@/components/wealth/WealthSparkline";
+import { useSodexAuth } from "@/components/sodex/auth/SodexAuthProvider";
+import { getPerpsAccountState } from "@/lib/sodex-onchain/client";
+import { fmtAssetSymbol } from "@/lib/format";
+
+const NETWORK = "mainnet" as const;
 
 interface HomeData {
   counts: {
@@ -58,18 +62,22 @@ interface HomeData {
   wealth: {
     product_count: number;
     top_yield: { name: string; apy: number } | null;
+    usdc_earn: { name: string; apy: number; fund_id: string } | null;
     highlights: Array<{
       fund_id: string;
       name: string;
+      symbol: string | null;
       category: string;
       metric_label: string;
       metric_value: number | null;
+      roi_1y: number | null;
       change_pct: number | null;
     }>;
   };
   briefing: {
     date: string;
     headline: string;
+    summary: string;
     regime: "risk_on" | "risk_off" | "mixed" | "neutral";
     top_pick: {
       asset_id: string;
@@ -78,62 +86,49 @@ interface HomeData {
       thesis: string;
       conviction: number;
     } | null;
+    top_pick_sodex: string | null;
     generated_at: number;
   } | null;
   calibration: {
-    /** Resolved outcomes (target_hit | stop_hit | flat) in the window. */
     graded: number;
-    /** wins / graded, or null when nothing is graded yet. */
     hit_rate: number | null;
-    /** When graded === 0: ms epoch the first pending outcome becomes gradable. */
     first_grade_at: number | null;
   };
 }
 
-const REGIME_TONE: Record<
-  HomeData["briefing"] extends infer B
-    ? B extends { regime: infer R }
-      ? R extends string
-        ? R
-        : never
-      : never
-    : never,
-  "positive" | "negative" | "warning" | "default"
-> = {
-  risk_on: "positive",
-  risk_off: "negative",
-  mixed: "warning",
-  neutral: "default",
-};
+type Regime = "risk_on" | "risk_off" | "mixed" | "neutral";
 
-const REGIME_DOT: Record<
-  "risk_on" | "risk_off" | "mixed" | "neutral",
-  string
-> = {
+const REGIME_DOT: Record<Regime, string> = {
   risk_on: "bg-positive",
   risk_off: "bg-negative",
   mixed: "bg-accent",
   neutral: "bg-fg-dim",
 };
 
-const OUTCOME_META: Record<
-  "target_hit" | "stop_hit" | "flat",
-  { label: string; tone: "positive" | "negative" | "default" }
-> = {
-  target_hit: { label: "TARGET HIT", tone: "positive" },
-  stop_hit: { label: "STOP HIT", tone: "negative" },
-  flat: { label: "FLAT", tone: "default" },
+const REGIME_CHIP: Record<Regime, { label: string; cls: string }> = {
+  risk_on: { label: "Risk-on", cls: "bg-positive/15 text-positive" },
+  risk_off: { label: "Risk-off", cls: "bg-negative/15 text-negative" },
+  mixed: { label: "Mixed", cls: "bg-accent/15 text-accent-2" },
+  neutral: { label: "Neutral", cls: "bg-surface-2 text-fg-dim" },
 };
 
-/** Short date for "first grades <date>" — "today"/"imminently" near term. */
-function fmtGradeDate(ms: number): string {
-  if (ms <= Date.now()) return "imminently";
-  const d = new Date(ms);
-  if (d.toDateString() === new Date().toDateString()) return "today";
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
+const CATEGORY_LABEL: Record<string, string> = {
+  stable_earn: "Stable Earn",
+  curated_etf: "Curated ETF",
+  specialty: "Specialty",
+};
+
+const OUTCOME_META: Record<
+  "target_hit" | "stop_hit" | "flat",
+  { label: string; tone: "positive" | "negative" | "default"; mark: string }
+> = {
+  target_hit: { label: "Target hit", tone: "positive", mark: "✓" },
+  stop_hit: { label: "Stop hit", tone: "negative", mark: "✗" },
+  flat: { label: "Flat", tone: "default", mark: "—" },
+};
 
 export function HomePage() {
+  const auth = useSodexAuth();
   const [data, setData] = useState<HomeData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -197,445 +192,718 @@ export function HomePage() {
         ) : null}
       </header>
 
-      {/* Convert demo visitors into live (fee-generating) SoDEX users —
-          hidden automatically once the browser is connected. */}
-      <LiveTradeCta context="dashboard" />
-
       {loading && !data ? (
         <div className="text-sm text-fg-dim">Loading live snapshot…</div>
       ) : null}
 
       {data ? (
         <>
-          {/* ── Live snapshot stats ────────────────────────────── */}
-          <section>
-            <h2 className="mb-3 text-xs font-medium uppercase tracking-wider text-fg-dim">
-              Live snapshot
-            </h2>
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-              <Stat
-                label="Pending signals"
-                value={data.signal_stats.total_pending}
-                sub={`${data.signal_stats.auto} auto · ${data.signal_stats.review} review · ${data.signal_stats.info} info`}
-                tone={data.signal_stats.total_pending > 0 ? "accent" : "default"}
-              />
-              <Stat
-                label={
-                  data.wealth.top_yield
-                    ? `${data.wealth.top_yield.name} · 7D APY`
-                    : "Wealth Index"
-                }
-                value={
-                  data.wealth.top_yield
-                    ? `${data.wealth.top_yield.apy.toFixed(2)}%`
-                    : `${data.wealth.product_count}`
-                }
-                sub={`${data.wealth.product_count} live products · SoDEX Wealth`}
-                tone="accent"
-              />
-              <Stat
-                label="Signal hit rate"
-                value={
-                  data.calibration.hit_rate != null
-                    ? `${Math.round(data.calibration.hit_rate * 100)}%`
-                    : "—"
-                }
-                sub={
-                  data.calibration.graded > 0
-                    ? `${data.calibration.graded} graded`
-                    : data.calibration.first_grade_at
-                      ? `first grades ${fmtGradeDate(data.calibration.first_grade_at)}`
-                      : "awaiting first grades"
-                }
-                tone={
-                  data.calibration.graded >= 5 && data.calibration.hit_rate != null
-                    ? data.calibration.hit_rate >= 0.55
-                      ? "positive"
-                      : data.calibration.hit_rate <= 0.45
-                        ? "negative"
-                        : "default"
-                    : "default"
-                }
-              />
-              <Stat
-                label="Events processed"
-                value={data.counts.total_events.toLocaleString()}
-                sub={`${data.counts.total_classified.toLocaleString()} AI-classified`}
-              />
-            </div>
+          {/* 1 · Connect banner (demo) / account strip (live) */}
+          <AccountBar />
+
+          {/* 2 · Clickable stat tiles */}
+          <StatTiles data={data} />
+
+          {/* 3 · Daily briefing */}
+          <BriefingPanel data={data} stale={briefingStale} />
+
+          {/* 4 · Signals + Wealth */}
+          <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <TopSignalsPanel data={data} />
+            <WealthHighlightsPanel data={data} />
           </section>
 
-          {/* ── Today's briefing (if any) ──────────────────────── */}
-          {data.briefing ? (
-            <section>
-              <Card
-                className={cn(
-                  "overflow-hidden",
-                  briefingStale ? "border-warning/40" : "border-accent/30",
-                )}
-              >
-                <CardHeader>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge tone="accent">DAILY BRIEFING</Badge>
-                    <Badge tone={REGIME_TONE[data.briefing.regime]}>
-                      {data.briefing.regime.toUpperCase().replace("_", "-")}
-                    </Badge>
-                    {briefingStale ? (
-                      <Badge tone="warning">BRIEFING DELAYED</Badge>
-                    ) : null}
-                    <span
-                      className={cn(
-                        "ml-auto text-[11px]",
-                        briefingStale ? "text-warning" : "text-fg-dim",
-                      )}
-                    >
-                      {data.briefing.date} · generated{" "}
-                      <Timestamp
-                        ms={data.briefing.generated_at}
-                        mode="relative"
-                      />
-                    </span>
-                  </div>
-                </CardHeader>
-                <CardBody className="flex flex-col gap-3">
-                  <h3 className="text-base font-semibold text-fg md:text-lg">
-                    {data.briefing.headline}
-                  </h3>
-                  {data.briefing.top_pick ? (
-                    <div className="rounded border border-accent/30 bg-accent/5 p-3">
-                      <div className="mb-1 flex items-center gap-2">
-                        <span className="text-[10px] font-medium uppercase tracking-wider text-accent-2">
-                          Top pick today
-                        </span>
-                        <Badge
-                          tone={
-                            data.briefing.top_pick.direction === "long"
-                              ? "positive"
-                              : data.briefing.top_pick.direction === "short"
-                                ? "negative"
-                                : "warning"
-                          }
-                          mono
-                        >
-                          {data.briefing.top_pick.direction.toUpperCase()}
-                        </Badge>
-                        <span className="font-mono text-sm font-semibold text-fg">
-                          {fmtAssetSymbol(data.briefing.top_pick.asset_symbol)}
-                        </span>
-                        <span className="ml-auto text-xs text-fg-muted">
-                          <Num
-                            value={data.briefing.top_pick.conviction * 100}
-                            unit="%"
-                            dp={0}
-                            tier="context"
-                          />{" "}
-                          conviction
-                        </span>
-                      </div>
-                      <p className="text-xs text-fg-muted">
-                        {data.briefing.top_pick.thesis}
-                      </p>
-                    </div>
-                  ) : null}
-                  <Link
-                    href="/briefing"
-                    className="self-start text-xs text-accent-2 hover:underline"
-                  >
-                    Read the full briefing →
-                  </Link>
-                </CardBody>
-              </Card>
-            </section>
-          ) : (
-            <section>
-              <Card className="border-dashed border-line-2">
-                <CardBody className="flex items-center justify-between gap-3 py-4">
-                  <div>
-                    <div className="text-sm text-fg">
-                      No briefing for today yet.
-                    </div>
-                    <div className="text-xs text-fg-dim">
-                      Generate one — Claude reads everything and produces a
-                      3-paragraph market read in ~25 seconds.
-                    </div>
-                  </div>
-                  <Link
-                    href="/briefing"
-                    className="rounded-md border border-accent bg-accent/15 px-3 py-1.5 text-xs font-medium text-accent-2 hover:bg-accent/25"
-                  >
-                    Generate briefing →
-                  </Link>
-                </CardBody>
-              </Card>
-            </section>
-          )}
+          {/* 5 · How it works — slim, and only for visitors not yet live */}
+          {!auth.ready ? <HowItWorks /> : null}
 
-          {/* ── Two-column: signals + index ────────────────────── */}
-          <section className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            {/* Top signals — fresh pending; falls back to recently graded */}
-            <Card>
-              <CardHeader>
-                <CardTitle>
-                  {data.top_signals.length === 0 &&
-                  data.recent_graded.length > 0
-                    ? "Recently graded"
-                    : "Top pending signals"}
-                </CardTitle>
-                <Link
-                  href="/signals"
-                  className="text-[11px] text-accent-2 hover:underline"
-                >
-                  All signals →
-                </Link>
-              </CardHeader>
-              <CardBody className="!p-0">
-                {data.top_signals.length > 0 ? (
-                  <ul className="divide-y divide-line">
-                    {data.top_signals.map((s) => (
-                      <li
-                        key={s.id}
-                        className="flex flex-col gap-1 px-4 py-3 text-xs"
-                      >
-                        <div className="flex flex-wrap items-center gap-2">
-                          <AssetLogo symbol={s.asset_symbol} size={18} />
-                          <Badge
-                            tone={
-                              s.tier === "auto"
-                                ? "accent"
-                                : s.tier === "review"
-                                  ? "info"
-                                  : "default"
-                            }
-                          >
-                            {s.tier}
-                          </Badge>
-                          <Badge
-                            tone={
-                              s.direction === "long" ? "positive" : "negative"
-                            }
-                            mono
-                          >
-                            {s.direction.toUpperCase()}
-                          </Badge>
-                          <span className="font-mono text-sm font-semibold text-fg">
-                            {fmtAssetSymbol(s.asset_symbol, s.asset_kind)}
-                          </span>
-                          {s.event_type ? (
-                            <Badge tone="default">{s.event_type}</Badge>
-                          ) : null}
-                          <Num
-                            value={s.confidence * 100}
-                            unit="%"
-                            dp={0}
-                            tier="secondary"
-                            className="ml-auto"
-                          />
-                        </div>
-                        {s.event_title ? (
-                          <div className="text-fg-muted">
-                            {s.event_title.slice(0, 110)}
-                            {s.event_title.length > 110 ? "…" : ""}
-                          </div>
-                        ) : null}
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-[10px] text-fg-dim">
-                            fired <Timestamp ms={s.fired_at} mode="relative" />
-                          </span>
-                          {s.sodex_symbol ? (
-                            <TradeLink
-                              sodexSymbol={s.sodex_symbol}
-                              side={s.direction}
-                            />
-                          ) : null}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                ) : data.recent_graded.length > 0 ? (
-                  <ul className="divide-y divide-line">
-                    <li className="px-4 pt-3 text-[10px] text-fg-dim">
-                      No live signals right now — here are the latest graded
-                      calls.
-                    </li>
-                    {data.recent_graded.map((g) => (
-                      <li
-                        key={g.signal_id}
-                        className="flex flex-col gap-1 px-4 py-3 text-xs"
-                      >
-                        <div className="flex flex-wrap items-center gap-2">
-                          <AssetLogo symbol={g.asset_symbol} size={18} />
-                          <Badge
-                            tone={
-                              g.direction === "long" ? "positive" : "negative"
-                            }
-                            mono
-                          >
-                            {g.direction.toUpperCase()}
-                          </Badge>
-                          <span className="font-mono text-sm font-semibold text-fg">
-                            {fmtAssetSymbol(g.asset_symbol, g.asset_kind)}
-                          </span>
-                          <Badge tone={OUTCOME_META[g.outcome].tone}>
-                            {OUTCOME_META[g.outcome].label}
-                          </Badge>
-                          {g.realized_pct != null ? (
-                            <Num
-                              value={g.realized_pct}
-                              unit="%"
-                              sign
-                              dp={2}
-                              tone="auto"
-                              tier="secondary"
-                              className="ml-auto"
-                            />
-                          ) : null}
-                        </div>
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-[10px] text-fg-dim">
-                            graded{" "}
-                            {g.outcome_at ? (
-                              <Timestamp ms={g.outcome_at} mode="relative" />
-                            ) : (
-                              "—"
-                            )}
-                          </span>
-                          {g.sodex_symbol ? (
-                            <TradeLink
-                              sodexSymbol={g.sodex_symbol}
-                              side={g.direction}
-                            />
-                          ) : null}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div className="px-4 py-6 text-sm text-fg-dim">
-                    No pending signals right now.
-                  </div>
-                )}
-              </CardBody>
-            </Card>
-
-            {/* Wealth highlights */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Wealth highlights</CardTitle>
-                <Link
-                  href="/wealth-index"
-                  className="text-[11px] text-accent-2 hover:underline"
-                >
-                  Wealth Index →
-                </Link>
-              </CardHeader>
-              <CardBody className="!p-0">
-                {data.wealth.highlights.length === 0 ? (
-                  <div className="px-4 py-6 text-sm text-fg-dim">
-                    Couldn&apos;t load SoDEX Wealth right now.
-                  </div>
-                ) : (
-                  <ul className="divide-y divide-line">
-                    {data.wealth.highlights.map((h) => (
-                      <li key={h.fund_id}>
-                        <Link
-                          href={`/wealth/${encodeURIComponent(h.fund_id)}`}
-                          className="flex items-center justify-between gap-2 px-4 py-3 text-xs transition-colors hover:bg-surface-2/40"
-                        >
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-medium text-fg">
-                              {h.name}
-                            </div>
-                            <div className="text-[10px] uppercase tracking-wider text-fg-dim">
-                              {h.metric_label}
-                            </div>
-                          </div>
-                          <div className="flex shrink-0 items-center gap-3">
-                            <Num
-                              value={h.metric_value}
-                              unit="%"
-                              sign
-                              dp={2}
-                              tone="auto"
-                              tier="secondary"
-                            />
-                            {h.change_pct != null && (
-                              <Num
-                                value={h.change_pct}
-                                unit="%"
-                                sign
-                                dp={2}
-                                tone="auto"
-                                tier="context"
-                              />
-                            )}
-                            <span className="text-fg-dim">→</span>
-                          </div>
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </CardBody>
-            </Card>
-          </section>
-
-          {/* ── How it works ──────────────────────────────────── */}
-          <section>
-            <h2 className="mb-3 text-xs font-medium uppercase tracking-wider text-fg-dim">
-              How it works
-            </h2>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
-              <PipelineStep
-                n={1}
-                title="Ingest"
-                body="SoSoValue news feed + KOL stream + ETF flows + sector rotation pulled every cron tick."
-              />
-              <PipelineStep
-                n={2}
-                title="Classify"
-                body="Claude tags each event with type / sentiment / severity / actionable / affected assets."
-              />
-              <PipelineStep
-                n={3}
-                title="Signal"
-                body="Conviction = confidence × tradability × severity. Tiered into auto / review / info."
-              />
-              <PipelineStep
-                n={4}
-                title="Act"
-                body="Execute signals live on SoDEX from the trade terminal; browse on-chain yield + RWA products in the Wealth Index."
-              />
-              <PipelineStep
-                n={5}
-                title="Calibrate"
-                body="Every signal graded against measured T+1d/3d/7d outcomes. Hit rate fed back."
-              />
-            </div>
-          </section>
-
-          {/* ── Footer / data sources ────────────────────────── */}
-          <section className="rounded-md border border-line bg-surface px-4 py-3 text-xs text-fg-dim">
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-              <span>
-                <span className="text-fg-muted">News + sectors + ETF + macro:</span>{" "}
-                SoSoValue OpenAPI
+          {/* Data sources — quiet footer */}
+          <footer className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-line bg-surface px-4 py-3 text-[11px] text-fg-dim">
+            <span>
+              <span className="text-fg-muted">News · sectors · ETF · macro:</span>{" "}
+              SoSoValue
+            </span>
+            <span>
+              <span className="text-fg-muted">Venue:</span> SoDEX (perps + spot)
+            </span>
+            <span>
+              <span className="text-fg-muted">Intelligence:</span> Anthropic Claude
+            </span>
+            {data.counts.last_event_at ? (
+              <span className="ml-auto">
+                last event{" "}
+                <Timestamp ms={data.counts.last_event_at} mode="relative" />
               </span>
-              <span>
-                <span className="text-fg-muted">Trading venue:</span> SoDEX (perps + spot)
-              </span>
-              <span>
-                <span className="text-fg-muted">Intelligence:</span> Anthropic Claude
-              </span>
-              {data.counts.last_event_at ? (
-                <span className="ml-auto">
-                  last event ingested {fmtRelative(data.counts.last_event_at)}
-                </span>
-              ) : null}
-            </div>
-          </section>
+            ) : null}
+          </footer>
         </>
       ) : null}
     </div>
+  );
+}
+
+/* ─────────────────────────── 1 · Account bar ─────────────────────────── */
+
+function AccountBar() {
+  const auth = useSodexAuth();
+  const [acct, setAcct] = useState<{
+    equity: number;
+    upnl: number;
+    positions: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!auth.ready || !auth.address) {
+      setAcct(null);
+      return;
+    }
+    let cancelled = false;
+    getPerpsAccountState(NETWORK, auth.address as `0x${string}`)
+      .then((s) => {
+        if (cancelled) return;
+        const equity = Number(s.av) || 0;
+        const upnl = (s.P ?? []).reduce(
+          (t, p) => t + (p.ur != null ? Number(p.ur) || 0 : 0),
+          0,
+        );
+        const positions = (s.P ?? []).filter((p) => Number(p.sz) !== 0).length;
+        setAcct({ equity, upnl, positions });
+      })
+      .catch(() => !cancelled && setAcct(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [auth.ready, auth.address]);
+
+  if (auth.loading) return null;
+
+  // Not live — slim one-row connect banner (no AlphaIndex wording).
+  if (!auth.ready) {
+    return (
+      <div className="flex flex-col gap-3 rounded-xl border border-line bg-surface px-4 py-3 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-4">
+          <span className="text-[13px] text-fg">
+            Trade signals, news and Wealth products on SoDEX from Helix.
+          </span>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[11px] text-fg-muted">
+            <ConnectStep n={1} label="Connect wallet" />
+            <span className="text-fg-dim">·</span>
+            <ConnectStep n={2} label="Approve 1 bp builder fee" />
+            <span className="text-fg-dim">·</span>
+            <ConnectStep n={3} label="Trade" />
+          </div>
+        </div>
+        {/* .trade-terminal so --accent-trade (primary blue) resolves, matching
+            the header Connect button exactly. */}
+        <span className="trade-terminal shrink-0">
+          <button
+            onClick={() => auth.openSetup()}
+            className="w-full rounded-full bg-[color:var(--accent-trade)] px-4 py-1.5 text-[12px] font-semibold text-[#0b0e11] transition-all hover:brightness-110 md:w-auto"
+          >
+            {auth.step === "wallet" ? "Connect" : "Finish setup"}
+          </button>
+        </span>
+      </div>
+    );
+  }
+
+  // Live — compact account strip.
+  const money = (n: number) =>
+    `$${Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const signed = (n: number) => `${n >= 0 ? "+" : "−"}${money(n)}`;
+  return (
+    <div className="flex flex-wrap items-center gap-x-8 gap-y-3 rounded-xl border border-positive/25 bg-positive/[0.04] px-4 py-3">
+      <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-positive">
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-positive" />
+        Connected
+        {auth.address ? (
+          <span className="font-[var(--font-jetbrains-mono)] text-fg-dim">
+            · {auth.address.slice(0, 6)}…{auth.address.slice(-4)}
+          </span>
+        ) : null}
+      </span>
+      <AcctStat label="Equity" value={acct ? money(acct.equity) : "…"} />
+      <AcctStat
+        label="uPnL today"
+        value={acct ? signed(acct.upnl) : "…"}
+        tone={
+          acct ? (acct.upnl > 0 ? "pos" : acct.upnl < 0 ? "neg" : "def") : "def"
+        }
+      />
+      <AcctStat
+        label="Open positions"
+        value={acct ? String(acct.positions) : "…"}
+      />
+      <Link
+        href="/trade"
+        className="ml-auto shrink-0 rounded-md border border-positive/40 bg-positive/10 px-3 py-1.5 text-[12px] font-medium text-positive transition-colors hover:bg-positive/20"
+      >
+        Open terminal →
+      </Link>
+    </div>
+  );
+}
+
+function ConnectStep({ n, label }: { n: number; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="flex h-4 w-4 items-center justify-center rounded-full border border-accent/40 bg-accent/15 text-[9px] font-semibold text-accent-2">
+        {n}
+      </span>
+      {label}
+    </span>
+  );
+}
+
+function AcctStat({
+  label,
+  value,
+  tone = "def",
+}: {
+  label: string;
+  value: string;
+  tone?: "pos" | "neg" | "def";
+}) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[9px] font-medium uppercase tracking-wider text-fg-dim">
+        {label}
+      </span>
+      <span
+        className={cn(
+          "font-[var(--font-jetbrains-mono)] text-[15px] font-semibold tabular-nums",
+          tone === "pos"
+            ? "text-positive"
+            : tone === "neg"
+              ? "text-negative"
+              : "text-fg",
+        )}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+/* ─────────────────────────── 2 · Stat tiles ──────────────────────────── */
+
+function StatTiles({ data }: { data: HomeData }) {
+  const c = data.calibration;
+  const rateReady = c.graded >= 10 && c.hit_rate != null;
+  const wealthHref = data.wealth.usdc_earn
+    ? `/wealth/${encodeURIComponent(data.wealth.usdc_earn.fund_id)}`
+    : "/wealth-index";
+  return (
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <TileLink
+        href="/signals"
+        label="Pending signals"
+        value={String(data.signal_stats.total_pending)}
+        sub={`${data.signal_stats.auto} auto · ${data.signal_stats.review} review`}
+        tone="accent"
+      />
+      <TileLink
+        href={wealthHref}
+        label={data.wealth.usdc_earn ? `${data.wealth.usdc_earn.name} · APY` : "USDC Earn APY"}
+        value={data.wealth.usdc_earn ? `${data.wealth.usdc_earn.apy.toFixed(2)}%` : "—"}
+        sub={`${data.wealth.product_count} Wealth products`}
+        tone="accent"
+      />
+      <TileLink
+        href="/signals?tab=graded"
+        label="Signal hit rate"
+        value={rateReady ? `${Math.round((c.hit_rate ?? 0) * 100)}%` : "—"}
+        sub={
+          rateReady
+            ? `${c.graded} graded`
+            : `${c.graded} graded · rate after 10`
+        }
+        tone={
+          rateReady
+            ? (c.hit_rate ?? 0) >= 0.55
+              ? "positive"
+              : (c.hit_rate ?? 0) <= 0.45
+                ? "negative"
+                : "default"
+            : "default"
+        }
+      />
+      <TileLink
+        href="/events"
+        label="Events processed"
+        value={data.counts.total_events.toLocaleString()}
+        sub={`${data.counts.total_classified.toLocaleString()} AI-classified`}
+      />
+    </div>
+  );
+}
+
+function TileLink({
+  href,
+  label,
+  value,
+  sub,
+  tone = "default",
+}: {
+  href: string;
+  label: string;
+  value: string;
+  sub: string;
+  tone?: "default" | "positive" | "negative" | "accent";
+}) {
+  const valCls =
+    tone === "positive"
+      ? "text-positive"
+      : tone === "negative"
+        ? "text-negative"
+        : tone === "accent"
+          ? "text-accent-2"
+          : "text-fg";
+  return (
+    <Link
+      href={href}
+      className="group flex min-w-0 flex-col gap-1 rounded-xl border border-line bg-surface px-4 py-3 transition-colors hover:border-line-2 hover:bg-surface-2/30"
+    >
+      <span className="truncate text-[9px] font-medium uppercase tracking-wider text-fg-dim">
+        {label}
+      </span>
+      <span
+        className={cn(
+          "font-[var(--font-jetbrains-mono)] text-[20px] font-semibold tabular-nums",
+          valCls,
+        )}
+      >
+        {value}
+      </span>
+      <span className="truncate text-[10px] text-fg-dim">{sub}</span>
+    </Link>
+  );
+}
+
+/* ─────────────────────────── 3 · Briefing ────────────────────────────── */
+
+function BriefingPanel({ data, stale }: { data: HomeData; stale: boolean }) {
+  const b = data.briefing;
+  if (!b) {
+    return (
+      <Panel>
+        <PanelHead title="Daily briefing" href="/briefing" action="Briefing" />
+        <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="text-[13px] text-fg">No briefing for today yet.</div>
+            <div className="text-[11px] text-fg-dim">
+              Claude reads everything and writes a 3-paragraph market read in
+              ~25s.
+            </div>
+          </div>
+          <Link
+            href="/briefing"
+            className="shrink-0 rounded-md border border-accent/50 bg-accent/15 px-3 py-1.5 text-[12px] font-medium text-accent-2 hover:bg-accent/25"
+          >
+            Generate briefing →
+          </Link>
+        </div>
+      </Panel>
+    );
+  }
+  const chip = REGIME_CHIP[b.regime];
+  const tp = b.top_pick;
+  return (
+    <Panel className={stale ? "border-warning/40" : undefined}>
+      <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3">
+        <h2 className="font-[var(--font-jetbrains-mono)] text-[10px] font-semibold uppercase tracking-[0.18em] text-fg-dim">
+          Daily briefing
+        </h2>
+        <span className="text-[11px] text-fg-dim">{b.date}</span>
+        <span
+          className={cn(
+            "rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide",
+            chip.cls,
+          )}
+        >
+          {chip.label}
+        </span>
+        {stale ? (
+          <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-warning">
+            Briefing delayed
+          </span>
+        ) : null}
+        <span
+          className={cn(
+            "ml-auto text-[11px]",
+            stale ? "text-warning" : "text-fg-dim",
+          )}
+        >
+          generated <Timestamp ms={b.generated_at} mode="relative" />
+        </span>
+      </div>
+      <div className="flex flex-col gap-3 px-4 py-4">
+        <h3 className="font-[var(--font-fraunces)] text-[20px] font-light leading-snug text-fg md:text-[22px]">
+          {b.headline}
+        </h3>
+        {b.summary ? (
+          <p className="line-clamp-2 max-w-3xl text-[12.5px] leading-relaxed text-fg-muted">
+            {b.summary}
+          </p>
+        ) : null}
+        {tp ? (
+          <div className="rounded-lg border border-line bg-surface-2/40 p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[9.5px] font-medium uppercase tracking-wider text-accent-2">
+                Top pick today
+              </span>
+              <AssetLogo symbol={tp.asset_symbol} size={18} />
+              <span className="font-mono text-sm font-semibold text-fg">
+                {fmtAssetSymbol(tp.asset_symbol)}
+              </span>
+              <Badge
+                tone={
+                  tp.direction === "long"
+                    ? "positive"
+                    : tp.direction === "short"
+                      ? "negative"
+                      : "warning"
+                }
+                mono
+              >
+                {tp.direction.toUpperCase()}
+              </Badge>
+              <span className="ml-auto font-[var(--font-jetbrains-mono)] text-[11px] tabular-nums text-fg-muted">
+                {Math.round(tp.conviction * 100)}% conviction
+              </span>
+            </div>
+            <div className="mt-2">
+              <ConvictionBar pct={tp.conviction * 100} />
+            </div>
+            <p className="mt-2 text-[12px] leading-relaxed text-fg-muted">
+              {tp.thesis}
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              {b.top_pick_sodex &&
+              (tp.direction === "long" || tp.direction === "short") ? (
+                <TradeLink sodexSymbol={b.top_pick_sodex} side={tp.direction} />
+              ) : null}
+              <Link
+                href="/briefing"
+                className="text-[11px] text-accent-2 hover:underline"
+              >
+                Read the full briefing →
+              </Link>
+            </div>
+          </div>
+        ) : (
+          <Link
+            href="/briefing"
+            className="self-start text-[11px] text-accent-2 hover:underline"
+          >
+            Read the full briefing →
+          </Link>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+/* ─────────────────────────── 4a · Top signals ────────────────────────── */
+
+function TopSignalsPanel({ data }: { data: HomeData }) {
+  const sigs = data.top_signals;
+  const graded = data.recent_graded;
+  const showGraded = sigs.length === 0 && graded.length > 0;
+  return (
+    <Panel>
+      <PanelHead
+        title={showGraded ? "Recently graded" : "Top signals"}
+        href="/signals"
+        action="All signals"
+      />
+      {sigs.length > 0 ? (
+        <ul className="divide-y divide-line">
+          {sigs.map((s) => (
+            <li key={s.id} className="flex items-start gap-3 px-4 py-3">
+              <AssetLogo symbol={s.asset_symbol} size={22} />
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="font-mono text-[13px] font-semibold text-fg">
+                    {fmtAssetSymbol(s.asset_symbol, s.asset_kind)}
+                  </span>
+                  <Badge
+                    tone={s.direction === "long" ? "positive" : "negative"}
+                    mono
+                  >
+                    {s.direction.toUpperCase()}
+                  </Badge>
+                  <Badge
+                    tone={
+                      s.tier === "auto"
+                        ? "accent"
+                        : s.tier === "review"
+                          ? "info"
+                          : "default"
+                    }
+                  >
+                    {s.tier}
+                  </Badge>
+                  {s.event_type ? (
+                    <Badge tone="default">{s.event_type}</Badge>
+                  ) : null}
+                  <span className="ml-auto font-[var(--font-jetbrains-mono)] text-[11px] tabular-nums text-fg-muted">
+                    {Math.round(s.confidence * 100)}%
+                  </span>
+                </div>
+                {s.event_title ? (
+                  <div className="mt-1 line-clamp-1 text-[12px] text-fg-muted">
+                    {s.event_title}
+                  </div>
+                ) : null}
+                <div className="mt-1.5">
+                  <ConvictionBar pct={s.confidence * 100} />
+                </div>
+                <div className="mt-1.5 flex items-center justify-between gap-2">
+                  <span className="text-[10px] text-fg-dim">
+                    fired <Timestamp ms={s.fired_at} mode="relative" />
+                  </span>
+                  {s.sodex_symbol ? (
+                    <TradeLink sodexSymbol={s.sodex_symbol} side={s.direction} />
+                  ) : null}
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : showGraded ? (
+        <ul className="divide-y divide-line">
+          <li className="px-4 pt-3 text-[11px] text-fg-dim">
+            No fresh signals — latest graded calls:
+          </li>
+          {graded.map((g) => {
+            const m = OUTCOME_META[g.outcome];
+            return (
+              <li
+                key={g.signal_id}
+                className="flex items-center gap-3 px-4 py-3"
+              >
+                <AssetLogo symbol={g.asset_symbol} size={22} />
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="font-mono text-[13px] font-semibold text-fg">
+                    {fmtAssetSymbol(g.asset_symbol, g.asset_kind)}
+                  </span>
+                  <Badge
+                    tone={g.direction === "long" ? "positive" : "negative"}
+                    mono
+                  >
+                    {g.direction.toUpperCase()}
+                  </Badge>
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1 text-[11px] font-semibold",
+                      m.tone === "positive"
+                        ? "text-positive"
+                        : m.tone === "negative"
+                          ? "text-negative"
+                          : "text-fg-dim",
+                    )}
+                  >
+                    {m.mark} {m.label}
+                  </span>
+                </div>
+                {g.realized_pct != null ? (
+                  <span className="ml-auto">
+                    <Num
+                      value={g.realized_pct}
+                      unit="%"
+                      sign
+                      dp={2}
+                      tone="auto"
+                      tier="secondary"
+                    />
+                  </span>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <div className="px-4 py-10 text-center text-[13px] text-fg-dim">
+          No fresh signals right now.
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+/* ─────────────────────────── 4b · Wealth ─────────────────────────────── */
+
+function WealthHighlightsPanel({ data }: { data: HomeData }) {
+  const hs = data.wealth.highlights;
+  return (
+    <Panel>
+      <PanelHead
+        title="Wealth highlights"
+        href="/wealth-index"
+        action="Wealth Index"
+      />
+      {hs.length === 0 ? (
+        <div className="px-4 py-10 text-center text-[13px] text-fg-dim">
+          Couldn&apos;t load SoDEX Wealth right now.
+        </div>
+      ) : (
+        <ul className="divide-y divide-line">
+          {hs.map((h) => (
+            <li key={h.fund_id}>
+              <Link
+                href={`/wealth/${encodeURIComponent(h.fund_id)}`}
+                className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-2/30"
+              >
+                <Monogram symbol={h.symbol} name={h.name} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate text-[13px] font-medium text-fg">
+                      {h.name}
+                    </span>
+                    <span className="shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-fg-dim">
+                      {CATEGORY_LABEL[h.category] ?? h.category}
+                    </span>
+                  </div>
+                  <div className="mt-1 w-full max-w-[160px]">
+                    <WealthSparkline fundId={h.fund_id} />
+                  </div>
+                </div>
+                <div className="flex shrink-0 flex-col items-end gap-0.5">
+                  <span className="text-[9px] uppercase tracking-wider text-fg-dim">
+                    1Y
+                  </span>
+                  <Num
+                    value={h.roi_1y ?? h.metric_value}
+                    unit="%"
+                    sign
+                    dp={1}
+                    tone="auto"
+                    tier="secondary"
+                  />
+                  {h.change_pct != null ? (
+                    <span className="inline-flex items-center gap-1 text-[10px] text-fg-dim">
+                      24h
+                      <Num
+                        value={h.change_pct}
+                        unit="%"
+                        sign
+                        dp={2}
+                        tone="auto"
+                        tier="context"
+                      />
+                    </span>
+                  ) : null}
+                </div>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Panel>
+  );
+}
+
+/* ─────────────────────────── 5 · How it works ────────────────────────── */
+
+const STEPS = ["Ingest", "Classify", "Signal", "Act", "Calibrate"];
+
+function HowItWorks() {
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-2 rounded-xl border border-line bg-surface px-4 py-3">
+      <span className="font-[var(--font-jetbrains-mono)] text-[9px] font-semibold uppercase tracking-wider text-fg-dim">
+        How it works
+      </span>
+      {STEPS.map((s, i) => (
+        <span
+          key={s}
+          className="inline-flex items-center gap-2 text-[11px] text-fg-muted"
+        >
+          <span className="inline-flex items-center gap-1.5">
+            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-accent/20 text-[9px] font-bold text-accent-2">
+              {i + 1}
+            </span>
+            {s}
+          </span>
+          {i < STEPS.length - 1 ? <span className="text-fg-dim">→</span> : null}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/* ─────────────────────────── shared bits ─────────────────────────────── */
+
+function Panel({
+  className,
+  children,
+}: {
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section
+      className={cn(
+        "overflow-hidden rounded-xl border border-line bg-surface",
+        className,
+      )}
+    >
+      {children}
+    </section>
+  );
+}
+
+function PanelHead({
+  title,
+  href,
+  action = "View all",
+}: {
+  title: string;
+  href?: string;
+  action?: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
+      <h2 className="font-[var(--font-jetbrains-mono)] text-[10px] font-semibold uppercase tracking-[0.18em] text-fg-dim">
+        {title}
+      </h2>
+      {href ? (
+        <Link
+          href={href}
+          className="shrink-0 text-[11px] text-accent-2 hover:underline"
+        >
+          {action} →
+        </Link>
+      ) : null}
+    </div>
+  );
+}
+
+function ConvictionBar({ pct }: { pct: number }) {
+  const p = Math.max(0, Math.min(100, pct));
+  return (
+    <div className="h-1 w-full overflow-hidden rounded-full bg-surface-2">
+      <div
+        className="h-full rounded-full bg-accent transition-all"
+        style={{ width: `${p}%` }}
+      />
+    </div>
+  );
+}
+
+function Monogram({
+  symbol,
+  name,
+}: {
+  symbol: string | null;
+  name: string;
+}) {
+  const txt =
+    (symbol || name).replace(/[^a-zA-Z0-9]/g, "").slice(0, 2).toUpperCase() ||
+    "?";
+  return (
+    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-line bg-surface-2 font-[var(--font-jetbrains-mono)] text-[10px] font-semibold text-fg-muted">
+      {txt}
+    </span>
   );
 }
 
@@ -662,27 +930,5 @@ function TradeLink({
     >
       ▶ Trade {side.toUpperCase()}
     </Link>
-  );
-}
-
-function PipelineStep({
-  n,
-  title,
-  body,
-}: {
-  n: number;
-  title: string;
-  body: string;
-}) {
-  return (
-    <div className="rounded-md border border-line bg-surface p-3">
-      <div className="mb-1 flex items-center gap-2">
-        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent/20 text-[10px] font-bold text-accent-2">
-          {n}
-        </span>
-        <span className="text-xs font-semibold text-fg">{title}</span>
-      </div>
-      <p className="text-[11px] leading-snug text-fg-muted">{body}</p>
-    </div>
   );
 }

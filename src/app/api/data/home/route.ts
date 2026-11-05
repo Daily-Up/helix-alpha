@@ -11,6 +11,24 @@ import { fetchCatalog } from "@/lib/wealth/client";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/** First paragraph of the briefing body, markdown stripped, for a 2-line
+ *  dashboard summary. Never fabricates — returns "" if the body is empty. */
+function briefingSummary(body: string): string {
+  const firstPara = (body ?? "")
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .find((p) => p.length > 0);
+  if (!firstPara) return "";
+  const plain = firstPara
+    .replace(/^#+\s*/gm, "")
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/\*(.+?)\*/g, "$1")
+    .replace(/`(.+?)`/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+  return plain.length > 240 ? plain.slice(0, 237).trimEnd() + "…" : plain;
+}
+
 export async function GET() {
   interface SigStats {
     total_pending: number;
@@ -44,10 +62,15 @@ export async function GET() {
     event_title: string | null;
     event_type: string | null;
   }
-  // Only FRESH pending signals — within their own horizon (expires_at in the
-  // future, or legacy rows with none). The tick sweeper flips past-horizon
-  // signals to 'expired', but we filter here too so a momentary sweep lag never
-  // surfaces a stale signal as "pending" on the homepage.
+  // Only FRESH pending signals. Two freshness gates:
+  //   • within their own horizon (expires_at in the future), AND
+  //   • event-driven signals must have fired within the last 48h — a catalyst
+  //     older than that is stale news even if its horizon runs longer. This is
+  //     why 3d/2d-old event signals used to linger: the horizon (expires_at)
+  //     was still open. Pattern-driven signals (no triggering event) keep the
+  //     horizon-only rule.
+  const now = Date.now();
+  const fresh48 = now - 48 * 60 * 60 * 1000;
   const topSignals = await all<TopSig>(
     `SELECT s.id, a.symbol AS asset_symbol, a.kind AS asset_kind,
             s.sodex_symbol AS sodex_symbol,
@@ -59,9 +82,10 @@ export async function GET() {
      LEFT JOIN classifications c ON c.event_id = s.triggered_by_event_id
      WHERE s.status = 'pending'
        AND (s.expires_at IS NULL OR s.expires_at > ?)
+       AND (s.triggered_by_event_id IS NULL OR s.fired_at >= ?)
      ORDER BY s.confidence DESC, s.fired_at DESC
-     LIMIT 3`,
-    [Date.now()],
+     LIMIT 5`,
+    [now, fresh48],
   );
 
   // Fallback for the "Top pending signals" card: when nothing is live, show the
@@ -77,20 +101,32 @@ export async function GET() {
   let wealthSnapshot: {
     product_count: number;
     top_yield: { name: string; apy: number } | null;
+    usdc_earn: { name: string; apy: number; fund_id: string } | null;
     highlights: Array<{
       fund_id: string;
       name: string;
+      symbol: string | null;
       category: string;
       metric_label: string;
       metric_value: number | null;
+      roi_1y: number | null;
       change_pct: number | null;
     }>;
-  } = { product_count: 0, top_yield: null, highlights: [] };
+  } = { product_count: 0, top_yield: null, usdc_earn: null, highlights: [] };
   try {
     const funds = await fetchCatalog();
     const yields = funds
       .filter((f) => f.category === "stable_earn" && f.apy7d != null)
       .sort((a, b) => (b.apy7d ?? 0) - (a.apy7d ?? 0));
+    // The specific USDC Earn product for the stat tile; fall back to the top
+    // Stable Earn yield if it isn't in the catalog.
+    const usdcEarnFund =
+      funds.find(
+        (f) =>
+          f.category === "stable_earn" &&
+          /usdc/i.test(`${f.displayName} ${f.symbol ?? ""}`) &&
+          /earn/i.test(`${f.displayName} ${f.symbol ?? ""}`),
+      ) ?? yields[0];
     const byReturn = [...funds]
       .filter((f) => f.headlineValue != null)
       .sort((a, b) => (b.headlineValue ?? 0) - (a.headlineValue ?? 0));
@@ -99,12 +135,22 @@ export async function GET() {
       top_yield: yields[0]
         ? { name: yields[0].displayName, apy: yields[0].apy7d ?? 0 }
         : null,
+      usdc_earn:
+        usdcEarnFund && usdcEarnFund.apy7d != null
+          ? {
+              name: usdcEarnFund.displayName,
+              apy: usdcEarnFund.apy7d,
+              fund_id: usdcEarnFund.fundId,
+            }
+          : null,
       highlights: byReturn.slice(0, 5).map((f) => ({
         fund_id: f.fundId,
         name: f.displayName,
+        symbol: f.symbol ?? null,
         category: f.category,
         metric_label: f.headlineLabel,
         metric_value: f.headlineValue,
+        roi_1y: f.roi1Y,
         change_pct: f.changePct,
       })),
     };
@@ -113,6 +159,23 @@ export async function GET() {
   }
 
   const briefing = await Briefings.getLatestBriefing();
+
+  // Resolve the briefing top pick's SoDEX market so the card's Trade button can
+  // deep-link the terminal. Only for directional (long/short) picks that map to
+  // a perp market; "watch" picks and unmapped assets get no button.
+  let topPickSodex: string | null = null;
+  if (
+    briefing?.top_pick &&
+    (briefing.top_pick.direction === "long" ||
+      briefing.top_pick.direction === "short")
+  ) {
+    const tp = briefing.top_pick;
+    const row = await get<{ sodex_symbol: string | null }>(
+      `SELECT sodex_symbol FROM assets WHERE id = ? OR symbol = ? LIMIT 1`,
+      [tp.asset_id ?? "", tp.asset_symbol ?? ""],
+    );
+    topPickSodex = row?.sodex_symbol ?? null;
+  }
 
   // Calibration reads the LIVE grader (signal_outcomes), written by the
   // resolution job every tick — not impact_metrics, which depends on the
@@ -148,8 +211,10 @@ export async function GET() {
       ? {
           date: briefing.date,
           headline: briefing.headline,
+          summary: briefingSummary(briefing.body),
           regime: briefing.regime,
           top_pick: briefing.top_pick,
+          top_pick_sodex: topPickSodex,
           generated_at: briefing.generated_at,
         }
       : null,
