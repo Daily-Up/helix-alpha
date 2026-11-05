@@ -52,18 +52,36 @@ function fmtSurprise(s: HistoryRow): string {
     suffix = "";
   } else {
     // Unit is set by the INDICATOR, not the magnitude. SoSoValue sends bare
-    // numbers (unit is null), but the shape is reliable: rate / index prints
-    // (unemployment, CPI, Core CPI, PPI, retail sales, PMI) are DECIMALS and
-    // the surprise is in percentage/index points → "pp"; headcount prints
-    // (NFP, initial jobless claims) are INTEGERS reported in thousands → "k".
-    // Guessing by magnitude mislabeled NFP's "-60" as "-60pp" (it's -60k jobs).
+    // numbers (unit is null), so resolve per indicator:
+    //   • genuine rates/percentages (CPI, PPI, PCE, retail sales, unemployment,
+    //     GDP, wages) → "pp". They carry a "%" in the raw print, or match a
+    //     known rate name.
+    //   • diffusion indices (ISM / PMI) move in index POINTS → "pt", never pp.
+    //   • headcount prints (NFP, initial jobless claims) are integers reported
+    //     in thousands → "k". (Guessing by magnitude once mislabeled NFP's
+    //     "-60" as "-60pp"; it is -60k jobs.)
+    //   • anything else (e.g. existing home sales, in millions of units) is a
+    //     level, not a percentage → bare number, no "pp".
     const raw = `${s.actual_raw ?? ""}${s.forecast_raw ?? ""}`;
-    if (/%/.test(raw) || raw.includes(".")) {
+    const name = (s.event ?? "").toLowerCase();
+    const isPct =
+      /%/.test(raw) ||
+      /\b(cpi|ppi|pce|inflation|unemployment|gdp|retail sales|earnings|wage)\b/.test(
+        name,
+      );
+    const isIndex = /pmi|ism/.test(name);
+    if (isPct) {
       body = s.surprise.toFixed(2);
       suffix = "pp";
-    } else {
+    } else if (isIndex) {
+      body = s.surprise.toFixed(2);
+      suffix = "pt";
+    } else if (!raw.includes(".")) {
       body = s.surprise.toFixed(0);
       suffix = "k";
+    } else {
+      body = s.surprise.toFixed(2);
+      suffix = "";
     }
   }
   return `${sign}${body}${suffix}`;
