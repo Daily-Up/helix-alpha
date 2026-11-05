@@ -657,6 +657,15 @@ export function OrderPanel({
             {submitLabel}
           </button>
         )}
+        {/* Quiet real-funds reminder — orders on this ticket execute on SoDEX
+            mainnet with real capital (the Confirm step is still required). */}
+        <div className="mt-2 flex items-center justify-center gap-1.5 text-[10px] text-fg-dim">
+          <span
+            className="inline-block h-1.5 w-1.5 rounded-full"
+            style={{ backgroundColor: "var(--accent-trade)" }}
+          />
+          SoDEX mainnet · real funds
+        </div>
         {keyExpiry?.state === "expiring" && auth.ready ? (
           <button
             onClick={() => auth.generateKey()}
