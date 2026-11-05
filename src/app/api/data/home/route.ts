@@ -170,11 +170,20 @@ export async function GET() {
       briefing.top_pick.direction === "short")
   ) {
     const tp = briefing.top_pick;
-    const row = await get<{ sodex_symbol: string | null }>(
-      `SELECT sodex_symbol FROM assets WHERE id = ? OR symbol = ? LIMIT 1`,
+    // assets.tradable is a JSON SodexTradable ({symbol, market, …}) or NULL —
+    // there is no sodex_symbol column on assets.
+    const row = await get<{ tradable: string | null }>(
+      `SELECT tradable FROM assets WHERE id = ? OR symbol = ? LIMIT 1`,
       [tp.asset_id ?? "", tp.asset_symbol ?? ""],
     );
-    topPickSodex = row?.sodex_symbol ?? null;
+    if (row?.tradable) {
+      try {
+        const t = JSON.parse(row.tradable) as { symbol?: string };
+        topPickSodex = t.symbol ?? null;
+      } catch {
+        topPickSodex = null;
+      }
+    }
   }
 
   // Calibration reads the LIVE grader (signal_outcomes), written by the
