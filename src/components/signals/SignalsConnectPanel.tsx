@@ -26,6 +26,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount } from "wagmi";
+import { primaryButtonClass } from "@/components/ui/Button";
 import { getAccountState } from "@/lib/sodex-onchain/client";
 import { useTradeMode } from "@/lib/sodex-onchain/useTradeMode";
 import { useSodexAuth } from "@/components/sodex/auth/SodexAuthProvider";
@@ -137,11 +138,17 @@ export function SignalsConnectPanel() {
             from this browser. Revoke any time.
           </p>
           <div className="flex flex-wrap items-center gap-2">
-            <ConnectButton
-              accountStatus="address"
-              chainStatus="none"
-              showBalance={false}
-            />
+            <ConnectButton.Custom>
+              {({ account, mounted, openConnectModal, openAccountModal }) => (
+                <button
+                  onClick={account ? openAccountModal : openConnectModal}
+                  disabled={!mounted}
+                  className={primaryButtonClass}
+                >
+                  {account ? account.displayName : "Connect wallet"}
+                </button>
+              )}
+            </ConnectButton.Custom>
             <button
               onClick={() => auth.openSetup()}
               className="text-[11px] text-fg-dim underline decoration-dotted underline-offset-4 hover:text-fg"
