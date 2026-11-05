@@ -13,6 +13,7 @@ import { fmtRelative } from "@/lib/format";
 import { safeHref } from "@/lib/safe-url";
 import { cn } from "@/components/ui/cn";
 import { AssetLogo } from "@/components/ui/AssetLogo";
+import { NotFinancialAdvice } from "@/components/ui/NotFinancialAdvice";
 import { perpDisplay } from "@/lib/events/market-map";
 import { priceMove, type StreamEvent } from "@/lib/events/use-stream";
 import type { SodexCandle } from "@/lib/sodex/types";
@@ -206,6 +207,10 @@ export function DetailPanel({
               ))}
             </div>
           ) : null}
+
+          <div className="border-t border-line pt-3">
+            <NotFinancialAdvice />
+          </div>
         </div>
       </div>
     </div>

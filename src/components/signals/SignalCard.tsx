@@ -13,6 +13,7 @@ import { cn } from "@/components/ui/cn";
 import { Num } from "@/components/ui/Num";
 import { AssetLogo } from "@/components/ui/AssetLogo";
 import { ExecuteLiveButton } from "@/components/sodex/ExecuteLiveButton";
+import { NotFinancialAdvice } from "@/components/ui/NotFinancialAdvice";
 import { isPublicMode } from "@/lib/public-mode";
 
 const TEXT_BRAND = "#ede4d3";
@@ -555,6 +556,9 @@ export function SignalCard({
         ) : null}
       </div>
 
+      <div className="mt-3">
+        <NotFinancialAdvice />
+      </div>
 
       {/* Actions */}
       {isPending && !isInfoOnly && !building ? (

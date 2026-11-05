@@ -18,6 +18,7 @@ import { Timestamp } from "@/components/ui/Timestamp";
 import { AssetLogo } from "@/components/ui/AssetLogo";
 import { WealthSparkline } from "@/components/wealth/WealthSparkline";
 import { useSodexAuth } from "@/components/sodex/auth/SodexAuthProvider";
+import { NotFinancialAdvice } from "@/components/ui/NotFinancialAdvice";
 import { getPerpsAccountState } from "@/lib/sodex-onchain/client";
 import { fmtAssetSymbol } from "@/lib/format";
 
@@ -558,6 +559,9 @@ function BriefingCard({ data, stale }: { data: HomeData; stale: boolean }) {
             >
               Read the full briefing →
             </Link>
+          </div>
+          <div className="mt-2">
+            <NotFinancialAdvice />
           </div>
         </div>
       ) : (

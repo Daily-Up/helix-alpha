@@ -9,6 +9,7 @@
  */
 
 import { cn } from "@/components/ui/cn";
+import { NotFinancialAdvice } from "@/components/ui/NotFinancialAdvice";
 import { fmtRelative } from "@/lib/format";
 import type { WealthFundView, WealthSuggestion } from "@/lib/wealth/types";
 
@@ -105,7 +106,7 @@ export function SuggestionCard({
       )}
 
       <div className="mt-3 flex items-center justify-between border-t border-line pt-2.5">
-        <span className="text-[9.5px] text-fg-dim">Not financial advice</span>
+        <NotFinancialAdvice />
         <div className="flex items-center gap-2">
           {fund && (
             <button

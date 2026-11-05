@@ -11,6 +11,7 @@
 
 import { useEffect, useState } from "react";
 import { PanelSkeleton } from "@/components/ui/Skeleton";
+import { NotFinancialAdvice } from "@/components/ui/NotFinancialAdvice";
 import { useBulkMountReveal } from "@/hooks/useMountReveal";
 import { isPublicMode } from "@/lib/public-mode";
 import {
@@ -563,6 +564,10 @@ function BriefingHero({
           >
             {briefing.top_pick.thesis}
           </p>
+
+          <div style={{ marginBottom: "16px" }}>
+            <NotFinancialAdvice />
+          </div>
 
           {/* Trade levels — entry / stop / target / size */}
           {topPickTrade ? (
