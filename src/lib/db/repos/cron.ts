@@ -16,6 +16,7 @@ export type JobName =
   | "ingest_etf_aggregate"
   | "ingest_etf_funds"
   | "snapshot_sectors"
+  | "snapshot_sector_indices"
   | "ingest_macro"
   | "compute_impact"
   | "compute_patterns"

@@ -1008,3 +1008,14 @@ CREATE TABLE IF NOT EXISTS event_images (
   query             TEXT,                     -- the search query used (forensics)
   created_at        INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
 );
+
+-- ── Generic key/value cache ──────────────────────────────────────────────
+-- Small JSON cache for data that is too slow to compute on the request path
+-- (e.g. the Sector Rotation index-momentum snapshot, which needs ~16
+-- rate-limited SoSoValue calls). A cron refreshes the value; API routes read
+-- it instantly and report an "as of" time.
+CREATE TABLE IF NOT EXISTS kv_cache (
+  key         TEXT PRIMARY KEY,
+  value       TEXT NOT NULL,          -- JSON payload
+  updated_at  INTEGER NOT NULL        -- ms epoch of last refresh
+);

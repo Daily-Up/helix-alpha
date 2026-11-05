@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { fmtRelative } from "@/lib/format";
 import { DataTable, type Column } from "@/components/ui/DataTable";
@@ -28,23 +28,51 @@ interface IndexRow {
 interface Response {
   sectors: SectorRow[];
   indices: IndexRow[];
+  as_of?: number | null;
+  stale?: boolean;
+  pending?: boolean;
 }
 
 export function SectorDashboard() {
   const [data, setData] = useState<Response | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
-  useEffect(() => {
+  const load = useCallback(() => {
+    setLoading(true);
+    setError(false);
     fetch("/api/data/sectors")
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
       .then((d: Response) => setData(d))
+      .catch(() => setError(true))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   if (loading) {
     return (
       <div className="rounded border border-line bg-surface p-6 text-center text-sm text-fg-muted">
         Loading sectors…
+      </div>
+    );
+  }
+
+  if (error || !data) {
+    return (
+      <div className="flex flex-col items-center gap-3 rounded-lg border border-line bg-surface p-8 text-center">
+        <p className="text-sm text-fg-muted">Couldn&apos;t load sector data.</p>
+        <button
+          onClick={load}
+          className="rounded-md border border-accent/50 bg-accent/15 px-4 py-1.5 text-[12px] font-medium text-accent-2 transition-colors hover:bg-accent/25"
+        >
+          Retry
+        </button>
       </div>
     );
   }
@@ -69,11 +97,18 @@ export function SectorDashboard() {
         <CardHeader>
           <CardTitle>Narrative Cycle · SSI Index Momentum</CardTitle>
           <span className="text-xs text-fg-muted">
-            {data?.indices.length ?? 0} sector indexes · live
+            {data.pending
+              ? "momentum refreshing…"
+              : `${data.indices.length} sector indexes · as of ${
+                  data.as_of ? fmtRelative(data.as_of) : "—"
+                }${data.stale ? " · stale" : ""}`}
           </span>
         </CardHeader>
         <CardBody className="p-0">
-          <IndexMomentumTable indices={data?.indices ?? []} />
+          <IndexMomentumTable
+            indices={data.indices ?? []}
+            pending={!!data.pending}
+          />
         </CardBody>
       </Card>
     </div>
@@ -135,11 +170,19 @@ function SectorDominance({ sectors }: { sectors: SectorRow[] }) {
 }
 
 /** SSI sector indexes ranked by recent momentum. */
-function IndexMomentumTable({ indices }: { indices: IndexRow[] }) {
+function IndexMomentumTable({
+  indices,
+  pending,
+}: {
+  indices: IndexRow[];
+  pending: boolean;
+}) {
   if (indices.length === 0) {
     return (
       <div className="p-6 text-center text-sm text-fg-muted">
-        No indices loaded.
+        {pending
+          ? "Momentum is refreshing — check back in a moment."
+          : "No index momentum available right now."}
       </div>
     );
   }
