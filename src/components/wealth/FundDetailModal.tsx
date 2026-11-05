@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/components/ui/cn";
+import { buttonClass } from "@/components/ui/Button";
 import { fmtPct, fmtUsd } from "@/lib/format";
 import type { WealthFundView, WealthHistoryPoint } from "@/lib/wealth/types";
 
@@ -173,7 +174,7 @@ export function FundDetailModal({
             href={fund.investUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="rounded-md border border-accent/50 bg-accent/15 px-4 py-2 text-[12px] font-medium text-accent-2 transition-colors hover:bg-accent/25"
+            className={buttonClass("primary", "px-4 py-2 text-[12px]")}
           >
             Invest on SoDEX ↗
           </a>

@@ -13,6 +13,7 @@
 
 import { useState } from "react";
 import { cn } from "@/components/ui/cn";
+import { buttonClass } from "@/components/ui/Button";
 import { LiveAgentTrace } from "./LiveAgentTrace";
 
 interface Props {
@@ -96,12 +97,11 @@ export function RunLiveAgentButton({
         type="button"
         onClick={go}
         disabled={running}
-        className={cn(
-          "inline-flex w-fit items-center justify-center gap-2 rounded-md border px-3 py-2 text-xs font-medium transition-colors",
+        className={
           running
-            ? "cursor-wait border-line bg-surface-2 text-fg-dim"
-            : "border-accent/40 bg-accent/15 text-accent-2 hover:bg-accent/25",
-        )}
+            ? "inline-flex w-fit cursor-wait items-center justify-center gap-2 rounded-md border border-line bg-surface-2 px-3 py-2 text-xs font-medium text-fg-dim transition-colors"
+            : buttonClass("primary", "w-fit gap-2 px-3 py-2 text-xs")
+        }
       >
         {running ? (
           <>

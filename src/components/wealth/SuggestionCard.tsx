@@ -9,6 +9,7 @@
  */
 
 import { cn } from "@/components/ui/cn";
+import { buttonClass } from "@/components/ui/Button";
 import { NotFinancialAdvice } from "@/components/ui/NotFinancialAdvice";
 import { fmtRelative } from "@/lib/format";
 import type { WealthFundView, WealthSuggestion } from "@/lib/wealth/types";
@@ -111,7 +112,7 @@ export function SuggestionCard({
           {fund && (
             <button
               onClick={() => onOpenFund(fund)}
-              className="rounded border border-line px-2.5 py-1 text-[11px] text-fg-muted transition-colors hover:border-line-2 hover:text-fg"
+              className={buttonClass("ghost", "rounded px-2.5 py-1 text-[11px]")}
             >
               Details
             </button>
@@ -121,7 +122,7 @@ export function SuggestionCard({
               href={s.ctaHref}
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded border border-accent/40 bg-accent/10 px-2.5 py-1 text-[11px] font-medium text-accent-2 transition-colors hover:bg-accent/20"
+              className={buttonClass("primary", "rounded px-2.5 py-1 text-[11px]")}
             >
               {s.ctaLabel ?? "View on SoDEX"} ↗
             </a>

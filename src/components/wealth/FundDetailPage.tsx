@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { cn } from "@/components/ui/cn";
+import { buttonClass } from "@/components/ui/Button";
 import { fmtPct, fmtUsd, fmtRelative } from "@/lib/format";
 import { useSodexAuth } from "@/components/sodex/auth/SodexAuthProvider";
 import { WealthInvestPanel } from "./WealthInvestPanel";
@@ -335,7 +336,7 @@ export function FundDetailPage({ fundId }: { fundId: string }) {
                 href={fund.investUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="mt-4 block rounded-md border border-accent/50 bg-accent/15 py-2.5 text-center text-[13px] font-medium text-accent-2 transition-colors hover:bg-accent/25"
+                className={buttonClass("primary", "mt-4 block w-full py-2.5 text-center text-[13px]")}
               >
                 Invest on SoDEX ↗
               </a>

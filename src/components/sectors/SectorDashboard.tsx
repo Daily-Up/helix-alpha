@@ -5,6 +5,7 @@ import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { fmtRelative } from "@/lib/format";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { AssetCell } from "@/components/ui/AssetLogo";
+import { buttonClass } from "@/components/ui/Button";
 
 interface SectorRow {
   snapshot_at: number;
@@ -69,7 +70,7 @@ export function SectorDashboard() {
         <p className="text-sm text-fg-muted">Couldn&apos;t load sector data.</p>
         <button
           onClick={load}
-          className="rounded-md border border-accent/50 bg-accent/15 px-4 py-1.5 text-[12px] font-medium text-accent-2 transition-colors hover:bg-accent/25"
+          className={buttonClass("primary", "px-4 py-1.5 text-[12px]")}
         >
           Retry
         </button>

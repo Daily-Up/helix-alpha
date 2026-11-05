@@ -18,6 +18,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Card, CardBody } from "@/components/ui/Card";
+import { buttonClass } from "@/components/ui/Button";
 import { wealthInvestEnabled } from "@/lib/wealth/spot-order";
 import { PanelSkeleton } from "@/components/ui/Skeleton";
 import { cn } from "@/components/ui/cn";
@@ -250,7 +251,7 @@ function MyWealth({
             </div>
             <button
               onClick={onConnect}
-              className="shrink-0 rounded-md border border-accent/50 bg-accent/15 px-4 py-2 text-[13px] font-medium text-accent-2 transition-colors hover:bg-accent/25"
+              className={buttonClass("primary", "shrink-0 px-4 py-2 text-[13px]")}
             >
               Connect wallet →
             </button>

@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/components/ui/cn";
-import { PrimaryButton } from "@/components/ui/Button";
+import { Button } from "@/components/ui/Button";
 import { listApiKeys } from "@/lib/sodex-onchain/client";
 import { getBuilderCode } from "@/lib/sodex-onchain/chains";
 import {
@@ -63,9 +63,9 @@ export function SodexSettingsPage() {
           <p className="text-[13px] text-fg-muted">
             Connect your wallet to manage keys.
           </p>
-          <PrimaryButton onClick={() => a.openSetup()} className="mt-3">
+          <Button onClick={() => a.openSetup()} className="mt-3">
             Connect
-          </PrimaryButton>
+          </Button>
         </Card>
       ) : (
         <>

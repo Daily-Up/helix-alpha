@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { cn } from "@/components/ui/cn";
+import { buttonClass } from "@/components/ui/Button";
 import { fmtUsd } from "@/lib/format";
 import { useSodexAuth } from "@/components/sodex/auth/SodexAuthProvider";
 import { fetchFeeRate, type FeeRate } from "@/lib/portfolio/fetch";
@@ -182,7 +183,7 @@ export function WealthInvestPanel({
         </p>
         <button
           onClick={() => auth.openSetup()}
-          className="mt-3 w-full rounded-md border border-accent/50 bg-accent/15 py-2 text-[12px] font-medium text-accent-2 hover:bg-accent/25"
+          className={buttonClass("primary", "mt-3 w-full py-2 text-[12px]")}
         >
           {auth.step === "wallet" ? "Connect" : "Finish setup"}
         </button>

@@ -8,6 +8,7 @@
  */
 
 import { cn } from "@/components/ui/cn";
+import { buttonClass } from "@/components/ui/Button";
 import type { SodexPerpsAccountState } from "@/lib/sodex-onchain/types";
 import { useSodexAuth } from "@/components/sodex/auth/SodexAuthProvider";
 
@@ -68,7 +69,7 @@ export function AccountPanel({
           </p>
           <button
             onClick={() => auth.openSetup()}
-            className="rounded-md border border-accent/50 bg-accent/15 px-4 py-2 text-[12px] font-semibold text-accent-2 transition-colors hover:bg-accent/25"
+            className={buttonClass("primary", "px-4 py-2 text-[12px] font-semibold")}
           >
             {auth.step === "wallet" ? "Connect SoDEX" : "Finish setup"}
           </button>

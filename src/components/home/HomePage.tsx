@@ -13,6 +13,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { cn } from "@/components/ui/cn";
+import { buttonClass } from "@/components/ui/Button";
 import { Num } from "@/components/ui/Num";
 import { Timestamp } from "@/components/ui/Timestamp";
 import { AssetLogo } from "@/components/ui/AssetLogo";
@@ -30,9 +31,8 @@ const NETWORK = "mainnet" as const;
 // low-opacity orange hairline, ~12px radius, ~20px padding.
 const CARD =
   "relative overflow-hidden rounded-xl border border-accent/30 bg-gradient-to-br from-accent/10 via-surface to-surface p-5";
-// Outlined Helix-orange button (faint tint fill, orange text) — "Connect SoDEX →".
-const BTN =
-  "inline-flex items-center justify-center gap-1.5 rounded-md border border-accent/50 bg-accent/20 px-4 py-2.5 text-[13px] font-medium text-accent-2 transition-colors hover:bg-accent/30";
+// Outlined Helix-orange primary button — the one shared "Connect SoDEX →" style.
+const BTN = buttonClass("primary");
 // Light large figure, matching the Fraunces title weight.
 const FIG = "font-[var(--font-fraunces)] font-light leading-none text-fg tabular-nums";
 
@@ -875,12 +875,7 @@ function TradeLink({
   return (
     <Link
       href={`/trade?market=${encodeURIComponent(sodexSymbol)}&side=${side}&src=event`}
-      className={cn(
-        "inline-flex shrink-0 items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors",
-        side === "long"
-          ? "border-positive/40 bg-positive/10 text-positive hover:bg-positive/20"
-          : "border-negative/40 bg-negative/10 text-negative hover:bg-negative/20",
-      )}
+      className={buttonClass(side, "shrink-0 gap-1 px-2.5 py-1 text-[11px]")}
       title={`Open ${sodexSymbol} in the terminal, ${side} preset`}
     >
       ▶ Trade {side.toUpperCase()}

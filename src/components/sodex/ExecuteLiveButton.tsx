@@ -11,7 +11,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { cn } from "@/components/ui/cn";
+import { buttonClass } from "@/components/ui/Button";
 import { fmtSodexSymbol } from "@/lib/format";
 import { useSodexAuth } from "@/components/sodex/auth/SodexAuthProvider";
 
@@ -44,17 +44,15 @@ export function ExecuteLiveButton({ signal }: { signal: ExecuteLiveSignal }) {
   const symLabel = fmtSodexSymbol(signal.symbol);
   const href = tradeUrl(signal.symbol, signal.side);
 
-  const base =
-    "inline-flex items-center gap-2 rounded border px-2.5 py-1 text-xs font-medium transition-colors";
+  // Directional action → long/short variant; pre-setup CTA is a non-directional
+  // primary action → primary variant. Size is the compact signal-card size.
+  const size = "gap-2 rounded px-2.5 py-1 text-xs";
 
   if (!auth.ready) {
     return (
       <button
         onClick={() => auth.openSetup(() => router.push(href))}
-        className={cn(
-          base,
-          "border-[color:var(--accent-trade)]/40 bg-[color:var(--accent-trade)]/15 text-[color:var(--accent-trade)] hover:bg-[color:var(--accent-trade)]/25",
-        )}
+        className={buttonClass("primary", size)}
         title="Set up SoDEX to trade, then continue to the terminal"
       >
         {auth.step === "wallet" ? "Connect to trade" : "Finish setup"}
@@ -65,12 +63,7 @@ export function ExecuteLiveButton({ signal }: { signal: ExecuteLiveSignal }) {
   return (
     <Link
       href={href}
-      className={cn(
-        base,
-        side === "long"
-          ? "border-positive/40 bg-positive/15 text-positive hover:bg-positive/25"
-          : "border-negative/40 bg-negative/15 text-negative hover:bg-negative/25",
-      )}
+      className={buttonClass(side === "long" ? "long" : "short", size)}
       title={`Open ${symLabel} in the terminal, ${side} preset — set your size there`}
     >
       ▶ Trade {side.toUpperCase()} {symLabel} →

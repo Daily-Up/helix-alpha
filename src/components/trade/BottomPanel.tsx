@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/components/ui/cn";
+import { buttonClass } from "@/components/ui/Button";
 import { useSodexAuth } from "@/components/sodex/auth/SodexAuthProvider";
 import { AssetLogo } from "@/components/ui/AssetLogo";
 import { TpSlModal, type TpSlMeta } from "./TpSlModal";
@@ -438,7 +439,7 @@ function Empty({ children, cta }: { children: React.ReactNode; cta?: boolean }) 
       {cta ? (
         <button
           onClick={() => auth.openSetup()}
-          className="rounded-md border border-accent/50 bg-accent/15 px-3 py-1.5 text-[12px] font-medium text-accent-2 transition-colors hover:bg-accent/25"
+          className={buttonClass("primary", "px-3 py-1.5 text-[12px]")}
         >
           {auth.step === "wallet" ? "Connect SoDEX" : "Finish setup"}
         </button>

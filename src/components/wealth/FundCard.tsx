@@ -9,6 +9,7 @@
  */
 
 import { cn } from "@/components/ui/cn";
+import { buttonClass } from "@/components/ui/Button";
 import { fmtPct } from "@/lib/format";
 import type { WealthFundView } from "@/lib/wealth/types";
 import { WealthSparkline } from "./WealthSparkline";
@@ -126,7 +127,7 @@ export function FundCard({
             target="_blank"
             rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}
-            className="rounded border border-accent/40 bg-accent/10 px-2.5 py-1 text-[11px] font-medium text-accent-2 transition-colors hover:bg-accent/20"
+            className={buttonClass("primary", "rounded px-2.5 py-1 text-[11px]")}
           >
             Invest ↗
           </a>

@@ -26,7 +26,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount } from "wagmi";
-import { primaryButtonClass } from "@/components/ui/Button";
+import { buttonClass } from "@/components/ui/Button";
 import { getAccountState } from "@/lib/sodex-onchain/client";
 import { useTradeMode } from "@/lib/sodex-onchain/useTradeMode";
 import { useSodexAuth } from "@/components/sodex/auth/SodexAuthProvider";
@@ -143,7 +143,7 @@ export function SignalsConnectPanel() {
                 <button
                   onClick={account ? openAccountModal : openConnectModal}
                   disabled={!mounted}
-                  className={primaryButtonClass}
+                  className={buttonClass("primary")}
                 >
                   {account ? account.displayName : "Connect wallet"}
                 </button>
@@ -176,7 +176,7 @@ export function SignalsConnectPanel() {
               href="https://sodex.com"
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 rounded border border-accent/50 bg-accent/15 px-3 py-1.5 text-xs font-medium text-accent-2 hover:bg-accent/25"
+              className={buttonClass("primary", "gap-2 rounded px-3 py-1.5 text-xs")}
             >
               Open SoDEX ↗
             </a>
@@ -206,7 +206,7 @@ export function SignalsConnectPanel() {
           </p>
           <button
             onClick={() => auth.openSetup()}
-            className="inline-flex items-center justify-center gap-2 rounded border border-accent/50 bg-accent/15 px-3 py-1.5 text-xs font-medium text-accent-2 transition-colors hover:border-accent/70 hover:bg-accent/25"
+            className={buttonClass("primary", "gap-2 rounded px-3 py-1.5 text-xs")}
           >
             + Create API key →
           </button>
@@ -223,7 +223,7 @@ export function SignalsConnectPanel() {
           </p>
           <button
             onClick={() => auth.openSetup()}
-            className="inline-flex items-center justify-center gap-2 rounded border border-accent/40 bg-accent/10 px-3 py-1.5 text-xs font-medium text-accent-2 hover:bg-accent/20"
+            className={buttonClass("primary", "gap-2 rounded px-3 py-1.5 text-xs")}
           >
             Finish setup →
           </button>
