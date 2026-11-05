@@ -18,7 +18,9 @@
   /* Text */
   --fg:        #e6e9ef;
   --fg-muted:  #8a93a6;
-  --fg-dim:    #5a6378;
+  /* WCAG AA ≥4.5:1 on our panel backgrounds (~4.9:1), while staying dimmer
+     than --fg-muted so the text hierarchy is preserved. */
+  --fg-dim:    #7a8498;
 
   /* Brand text — warm cream for page titles only */
   --fg-brand:  #ede4d3;

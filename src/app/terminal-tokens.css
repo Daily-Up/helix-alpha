@@ -20,7 +20,8 @@
   /* Text: primary / secondary / muted. */
   --fg: #e6e8eb;
   --fg-muted: #9aa4b2;
-  --fg-dim: #5f6b7a;
+  /* WCAG AA ≥4.5:1 on the terminal panels, still dimmer than --fg-muted. */
+  --fg-dim: #7a8498;
   --positive: #0ecb81;
   --negative: #f6465d;
   /* Primary trade action = Helix orange (brand accent), matching the rest of
@@ -35,7 +36,7 @@
   --color-line-2: #2a3340;
   --color-fg: #e6e8eb;
   --color-fg-muted: #9aa4b2;
-  --color-fg-dim: #5f6b7a;
+  --color-fg-dim: #7a8498;
   --color-positive: #0ecb81;
   --color-negative: #f6465d;
 
