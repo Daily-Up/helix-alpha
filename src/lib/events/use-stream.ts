@@ -78,6 +78,7 @@ export interface Mover {
   category: MarketCategory;
   last: number;
   changePct: number;
+  quoteVolume: number; // 24h volume in USDC (for the illiquid filter)
 }
 
 // ── perp markets (tickers) ────────────────────────────────────────────────────
@@ -122,6 +123,7 @@ export function usePerpMarkets(): PerpMarkets {
             category: baseCategory(base),
             last,
             changePct,
+            quoteVolume: n(t.quoteVolume),
           });
         }
         const movers = all

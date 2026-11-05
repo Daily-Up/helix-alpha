@@ -27,6 +27,7 @@ export function WatchlistRail({
       category: baseCategory(base),
       last: t?.last ?? 0,
       changePct: t?.changePct ?? 0,
+      quoteVolume: 0, // not used here (watchlist rows aren't volume-filtered)
     };
   });
 
