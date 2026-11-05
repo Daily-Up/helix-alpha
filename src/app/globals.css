@@ -67,6 +67,11 @@ html, body {
   color: var(--fg);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Never fake a bold/italic — only real loaded weights render, so a weight
+     the font didn't ship (e.g. 600 on JetBrains Mono) falls back cleanly
+     instead of smearing. Inherited by every element. */
+  font-synthesis: none;
   touch-action: manipulation;
   scroll-behavior: smooth;
 }

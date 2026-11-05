@@ -7,8 +7,8 @@
    the raw tokens (used by a few inline var() styles) and the Tailwind
    color tokens (used by the bg, text and border utilities) are overridden.
 
-   The accent (Helix orange) is intentionally NOT overridden — it stays
-   brand-only (logo, active nav), never a trade action.
+   The primary trade action uses Helix orange (--accent-trade below), matching
+   the rest of the app; green/red stay reserved for Buy/Sell and PnL.
 ============================================================================= */
 .trade-terminal {
   /* 3 surface levels: page → panel → raised (inputs, popovers, modals). */
@@ -23,9 +23,10 @@
   --fg-dim: #5f6b7a;
   --positive: #0ecb81;
   --negative: #f6465d;
-  /* Neutral primary action (no Helix orange on trade controls). */
-  --accent-trade: #3b82f6;
-  --accent-trade-hover: #4c8ef7;
+  /* Primary trade action = Helix orange (brand accent), matching the rest of
+     the app. Green/red stay reserved for Buy/Sell, PnL and price direction. */
+  --accent-trade: #d97757;
+  --accent-trade-hover: #e89373;
 
   --color-bg: #0b0e11;
   --color-surface: #11151b;

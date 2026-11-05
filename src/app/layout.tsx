@@ -5,22 +5,25 @@ import { Web3Provider } from "@/components/providers/Web3Provider";
 
 // Brand fonts — Fraunces for serif page titles (landing + dashboard h1s),
 // Inter for body, JetBrains Mono for technical labels.
+// All weights that the UI actually uses are loaded as REAL weights so the
+// browser never synthesizes a faux-bold (the cause of the smeared/doubled
+// numbers on the terminal). Cap is 600 — see font-synthesis: none in globals.
 const fraunces = Fraunces({
   variable: "--font-fraunces",
   subsets: ["latin"],
-  weight: ["300", "400", "500"],
+  weight: ["300", "400", "500", "600"],
   display: "swap",
 });
 const inter = Inter({
   variable: "--font-inter",
   subsets: ["latin"],
-  weight: ["400", "500"],
+  weight: ["400", "500", "600"],
   display: "swap",
 });
 const jetbrainsMono = JetBrains_Mono({
   variable: "--font-jetbrains-mono",
   subsets: ["latin"],
-  weight: ["400"],
+  weight: ["400", "500", "600"],
   display: "swap",
 });
 

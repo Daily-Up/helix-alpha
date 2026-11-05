@@ -106,7 +106,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void } = {})
         onClick={onNavigate}
         className="flex h-14 items-center gap-2 border-b border-line px-4 transition-colors hover:bg-surface-2"
       >
-        <div className="flex h-7 w-7 items-center justify-center rounded bg-accent text-sm font-bold text-bg">
+        <div className="flex h-7 w-7 items-center justify-center rounded bg-accent text-sm font-semibold text-bg">
           α
         </div>
         <div className="flex flex-col leading-tight">

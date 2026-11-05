@@ -40,7 +40,7 @@ export function AccountButton() {
       ) : !a.ready ? (
         <button
           onClick={() => a.openSetup()}
-          className="rounded-full bg-[color:var(--accent-trade)] px-3.5 py-1.5 text-[12px] font-semibold text-[#0b0e11] transition-all hover:brightness-110"
+          className="rounded-md border border-[color:var(--accent-trade)]/50 bg-[color:var(--accent-trade)]/20 px-3.5 py-1.5 text-[12px] font-semibold text-[color:var(--accent-trade)] transition-colors hover:bg-[color:var(--accent-trade)]/30"
         >
           {a.step === "wallet" ? "Connect" : "Finish setup"}
         </button>

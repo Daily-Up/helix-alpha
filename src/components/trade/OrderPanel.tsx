@@ -360,7 +360,7 @@ export function OrderPanel({
   const connectCta = (
     <button
       onClick={() => auth.openSetup()}
-      className="flex w-full items-center justify-center rounded-md border border-[color:var(--accent-trade)]/50 bg-[color:var(--accent-trade)]/15 py-2.5 text-[13px] font-semibold text-[color:var(--accent-trade)] transition-colors hover:bg-[color:var(--accent-trade)]/25"
+      className="flex w-full items-center justify-center rounded-md border border-[color:var(--accent-trade)]/50 bg-[color:var(--accent-trade)]/20 py-3 text-[14px] font-semibold text-[color:var(--accent-trade)] transition-colors hover:bg-[color:var(--accent-trade)]/30"
     >
       {auth.step === "wallet" ? "Connect to trade" : "Finish setup"}
     </button>
@@ -416,7 +416,7 @@ export function OrderPanel({
         </button>
       </div>
 
-      {/* Market / Limit — underline tabs with a blue indicator. */}
+      {/* Market / Limit — underline tabs with an orange (accent) indicator. */}
       <div className="flex items-center gap-5 border-b border-line text-[12px]">
         {(["market", "limit"] as const).map((t) => (
           <button

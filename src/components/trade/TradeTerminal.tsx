@@ -886,12 +886,14 @@ function MarkPrice({ value, digits }: { value: number | null; digits: number }) 
       <span className="text-[11px] uppercase tracking-wide text-fg-dim">Mark</span>
       <span
         className={cn(
-          "-ml-1 w-fit rounded px-1 font-[var(--font-jetbrains-mono)] text-[22px] font-semibold leading-tight tabular-nums transition-colors duration-150 motion-reduce:transition-none",
+          // The tick flash tints ONLY the background; the number keeps a stable
+          // fg colour and weight so it never appears to shift or smear.
+          "-ml-1 w-fit rounded px-1 font-[var(--font-jetbrains-mono)] text-[22px] font-semibold leading-tight tabular-nums text-fg transition-colors duration-150 motion-reduce:transition-none",
           flash === "up"
-            ? "bg-positive/25 text-positive"
+            ? "bg-positive/25"
             : flash === "down"
-              ? "bg-negative/25 text-negative"
-              : "bg-transparent text-fg",
+              ? "bg-negative/25"
+              : "bg-transparent",
         )}
       >
         {value != null

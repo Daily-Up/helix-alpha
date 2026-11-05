@@ -25,7 +25,7 @@ const PALETTE = [
   "#facc15",
   "#fb7185",
   "#10b981",
-  "#3b82f6",
+  "#fb923c",
 ];
 
 export function AllocationDonut({
