@@ -37,12 +37,23 @@ interface HomeData {
     id: string;
     asset_symbol: string;
     asset_kind: string;
+    sodex_symbol: string | null;
     direction: "long" | "short";
     tier: "auto" | "review" | "info";
     confidence: number;
     fired_at: number;
     event_title: string | null;
     event_type: string | null;
+  }>;
+  recent_graded: Array<{
+    signal_id: string;
+    asset_symbol: string;
+    asset_kind: string;
+    sodex_symbol: string | null;
+    direction: "long" | "short";
+    outcome: "target_hit" | "stop_hit" | "flat";
+    realized_pct: number | null;
+    outcome_at: number | null;
   }>;
   wealth: {
     product_count: number;
@@ -70,18 +81,12 @@ interface HomeData {
     generated_at: number;
   } | null;
   calibration: {
-    overall: {
-      total_signals: number;
-      evaluable: number;
-      hit_rate_3d: number | null;
-      avg_pnl_pct_3d: number | null;
-    };
-    best_event_type: {
-      key: string;
-      count: number;
-      hit_rate_3d: number | null;
-      avg_pnl_pct_3d: number | null;
-    } | null;
+    /** Resolved outcomes (target_hit | stop_hit | flat) in the window. */
+    graded: number;
+    /** wins / graded, or null when nothing is graded yet. */
+    hit_rate: number | null;
+    /** When graded === 0: ms epoch the first pending outcome becomes gradable. */
+    first_grade_at: number | null;
   };
 }
 
@@ -111,6 +116,23 @@ const REGIME_DOT: Record<
   neutral: "bg-fg-dim",
 };
 
+const OUTCOME_META: Record<
+  "target_hit" | "stop_hit" | "flat",
+  { label: string; tone: "positive" | "negative" | "default" }
+> = {
+  target_hit: { label: "TARGET HIT", tone: "positive" },
+  stop_hit: { label: "STOP HIT", tone: "negative" },
+  flat: { label: "FLAT", tone: "default" },
+};
+
+/** Short date for "first grades <date>" — "today"/"imminently" near term. */
+function fmtGradeDate(ms: number): string {
+  if (ms <= Date.now()) return "imminently";
+  const d = new Date(ms);
+  if (d.toDateString() === new Date().toDateString()) return "today";
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 export function HomePage() {
   const [data, setData] = useState<HomeData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -121,6 +143,12 @@ export function HomePage() {
       .then((j: HomeData) => setData(j))
       .finally(() => setLoading(false));
   }, []);
+
+  // A briefing older than 36h isn't "today's" — the generator (cron / tick)
+  // has fallen behind. Tag it amber rather than presenting it as current.
+  const briefingStale =
+    data?.briefing != null &&
+    Date.now() - data.briefing.generated_at > 36 * 60 * 60 * 1000;
 
   return (
     <div className="flex flex-col gap-6">
@@ -135,13 +163,14 @@ export function HomePage() {
             <span className="italic text-accent-2">audited in the open.</span>
           </h1>
           <p className="mt-2.5 max-w-xl text-[13px] leading-relaxed text-fg-muted">
-            Live news, classified by Claude into tiered signals and an
-            AI-managed book — every call graded against what actually happened.
+            Live news, classified by Claude into tiered signals, mapped to SoDEX
+            markets and Wealth products, with every call graded against what
+            actually happened.
           </p>
         </div>
         {data ? (
           <div className="flex shrink-0 items-center gap-5 font-[var(--font-jetbrains-mono)] text-[11px] text-fg-dim">
-            {data.briefing ? (
+            {data.briefing && !briefingStale ? (
               <span className="inline-flex items-center gap-1.5">
                 <span
                   className={cn(
@@ -150,6 +179,12 @@ export function HomePage() {
                   )}
                 />
                 {data.briefing.regime.replace("_", "-").toUpperCase()}
+              </span>
+            ) : null}
+            {briefingStale ? (
+              <span className="inline-flex items-center gap-1.5 text-warning">
+                <span className="h-1.5 w-1.5 rounded-full bg-warning" />
+                BRIEFING DELAYED
               </span>
             ) : null}
             {data.counts.last_event_at ? (
@@ -199,23 +234,27 @@ export function HomePage() {
                 tone="accent"
               />
               <Stat
-                label="3d hit rate"
+                label="Signal hit rate"
                 value={
-                  data.calibration.overall.hit_rate_3d != null
-                    ? `${(data.calibration.overall.hit_rate_3d * 100).toFixed(0)}%`
+                  data.calibration.hit_rate != null
+                    ? `${Math.round(data.calibration.hit_rate * 100)}%`
                     : "—"
                 }
                 sub={
-                  data.calibration.overall.evaluable > 0
-                    ? `n=${data.calibration.overall.evaluable} measured`
-                    : "calibrating…"
+                  data.calibration.graded > 0
+                    ? `${data.calibration.graded} graded`
+                    : data.calibration.first_grade_at
+                      ? `first grades ${fmtGradeDate(data.calibration.first_grade_at)}`
+                      : "awaiting first grades"
                 }
                 tone={
-                  (data.calibration.overall.hit_rate_3d ?? 0.5) >= 0.55
-                    ? "positive"
-                    : (data.calibration.overall.hit_rate_3d ?? 0.5) <= 0.45
-                      ? "negative"
-                      : "default"
+                  data.calibration.graded >= 5 && data.calibration.hit_rate != null
+                    ? data.calibration.hit_rate >= 0.55
+                      ? "positive"
+                      : data.calibration.hit_rate <= 0.45
+                        ? "negative"
+                        : "default"
+                    : "default"
                 }
               />
               <Stat
@@ -229,14 +268,27 @@ export function HomePage() {
           {/* ── Today's briefing (if any) ──────────────────────── */}
           {data.briefing ? (
             <section>
-              <Card className="overflow-hidden border-accent/30">
+              <Card
+                className={cn(
+                  "overflow-hidden",
+                  briefingStale ? "border-warning/40" : "border-accent/30",
+                )}
+              >
                 <CardHeader>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <Badge tone="accent">DAILY BRIEFING</Badge>
                     <Badge tone={REGIME_TONE[data.briefing.regime]}>
                       {data.briefing.regime.toUpperCase().replace("_", "-")}
                     </Badge>
-                    <span className="ml-auto text-[11px] text-fg-dim">
+                    {briefingStale ? (
+                      <Badge tone="warning">BRIEFING DELAYED</Badge>
+                    ) : null}
+                    <span
+                      className={cn(
+                        "ml-auto text-[11px]",
+                        briefingStale ? "text-warning" : "text-fg-dim",
+                      )}
+                    >
                       {data.briefing.date} · generated{" "}
                       <Timestamp
                         ms={data.briefing.generated_at}
@@ -320,10 +372,15 @@ export function HomePage() {
 
           {/* ── Two-column: signals + index ────────────────────── */}
           <section className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            {/* Top signals */}
+            {/* Top signals — fresh pending; falls back to recently graded */}
             <Card>
               <CardHeader>
-                <CardTitle>Top pending signals</CardTitle>
+                <CardTitle>
+                  {data.top_signals.length === 0 &&
+                  data.recent_graded.length > 0
+                    ? "Recently graded"
+                    : "Top pending signals"}
+                </CardTitle>
                 <Link
                   href="/signals"
                   className="text-[11px] text-accent-2 hover:underline"
@@ -332,11 +389,7 @@ export function HomePage() {
                 </Link>
               </CardHeader>
               <CardBody className="!p-0">
-                {data.top_signals.length === 0 ? (
-                  <div className="px-4 py-6 text-sm text-fg-dim">
-                    No pending signals right now.
-                  </div>
-                ) : (
+                {data.top_signals.length > 0 ? (
                   <ul className="divide-y divide-line">
                     {data.top_signals.map((s) => (
                       <li
@@ -384,12 +437,82 @@ export function HomePage() {
                             {s.event_title.length > 110 ? "…" : ""}
                           </div>
                         ) : null}
-                        <div className="text-[10px] text-fg-dim">
-                          fired <Timestamp ms={s.fired_at} mode="relative" />
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[10px] text-fg-dim">
+                            fired <Timestamp ms={s.fired_at} mode="relative" />
+                          </span>
+                          {s.sodex_symbol ? (
+                            <TradeLink
+                              sodexSymbol={s.sodex_symbol}
+                              side={s.direction}
+                            />
+                          ) : null}
                         </div>
                       </li>
                     ))}
                   </ul>
+                ) : data.recent_graded.length > 0 ? (
+                  <ul className="divide-y divide-line">
+                    <li className="px-4 pt-3 text-[10px] text-fg-dim">
+                      No live signals right now — here are the latest graded
+                      calls.
+                    </li>
+                    {data.recent_graded.map((g) => (
+                      <li
+                        key={g.signal_id}
+                        className="flex flex-col gap-1 px-4 py-3 text-xs"
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <AssetLogo symbol={g.asset_symbol} size={18} />
+                          <Badge
+                            tone={
+                              g.direction === "long" ? "positive" : "negative"
+                            }
+                            mono
+                          >
+                            {g.direction.toUpperCase()}
+                          </Badge>
+                          <span className="font-mono text-sm font-semibold text-fg">
+                            {fmtAssetSymbol(g.asset_symbol, g.asset_kind)}
+                          </span>
+                          <Badge tone={OUTCOME_META[g.outcome].tone}>
+                            {OUTCOME_META[g.outcome].label}
+                          </Badge>
+                          {g.realized_pct != null ? (
+                            <Num
+                              value={g.realized_pct}
+                              unit="%"
+                              sign
+                              dp={2}
+                              tone="auto"
+                              tier="secondary"
+                              className="ml-auto"
+                            />
+                          ) : null}
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[10px] text-fg-dim">
+                            graded{" "}
+                            {g.outcome_at ? (
+                              <Timestamp ms={g.outcome_at} mode="relative" />
+                            ) : (
+                              "—"
+                            )}
+                          </span>
+                          {g.sodex_symbol ? (
+                            <TradeLink
+                              sodexSymbol={g.sodex_symbol}
+                              side={g.direction}
+                            />
+                          ) : null}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="px-4 py-6 text-sm text-fg-dim">
+                    No pending signals right now.
+                  </div>
                 )}
               </CardBody>
             </Card>
@@ -413,38 +536,41 @@ export function HomePage() {
                 ) : (
                   <ul className="divide-y divide-line">
                     {data.wealth.highlights.map((h) => (
-                      <li
-                        key={h.fund_id}
-                        className="flex items-center justify-between gap-2 px-4 py-3 text-xs"
-                      >
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-medium text-fg">
-                            {h.name}
+                      <li key={h.fund_id}>
+                        <Link
+                          href={`/wealth/${encodeURIComponent(h.fund_id)}`}
+                          className="flex items-center justify-between gap-2 px-4 py-3 text-xs transition-colors hover:bg-surface-2/40"
+                        >
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium text-fg">
+                              {h.name}
+                            </div>
+                            <div className="text-[10px] uppercase tracking-wider text-fg-dim">
+                              {h.metric_label}
+                            </div>
                           </div>
-                          <div className="text-[10px] uppercase tracking-wider text-fg-dim">
-                            {h.metric_label}
-                          </div>
-                        </div>
-                        <div className="flex shrink-0 items-center gap-3">
-                          <Num
-                            value={h.metric_value}
-                            unit="%"
-                            sign
-                            dp={2}
-                            tone="auto"
-                            tier="secondary"
-                          />
-                          {h.change_pct != null && (
+                          <div className="flex shrink-0 items-center gap-3">
                             <Num
-                              value={h.change_pct}
+                              value={h.metric_value}
                               unit="%"
                               sign
                               dp={2}
                               tone="auto"
-                              tier="context"
+                              tier="secondary"
                             />
-                          )}
-                        </div>
+                            {h.change_pct != null && (
+                              <Num
+                                value={h.change_pct}
+                                unit="%"
+                                sign
+                                dp={2}
+                                tone="auto"
+                                tier="context"
+                              />
+                            )}
+                            <span className="text-fg-dim">→</span>
+                          </div>
+                        </Link>
                       </li>
                     ))}
                   </ul>
@@ -510,6 +636,32 @@ export function HomePage() {
         </>
       ) : null}
     </div>
+  );
+}
+
+/** Deep-link into the trade terminal with the signal's market + side preset,
+ *  tagged ?src=event (the same attribution the Event Stream uses). Only
+ *  rendered when the signal maps to a SoDEX market (sodex_symbol present). */
+function TradeLink({
+  sodexSymbol,
+  side,
+}: {
+  sodexSymbol: string;
+  side: "long" | "short";
+}) {
+  return (
+    <Link
+      href={`/trade?market=${encodeURIComponent(sodexSymbol)}&side=${side}&src=event`}
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 rounded border px-2 py-0.5 text-[10px] font-medium transition-colors",
+        side === "long"
+          ? "border-positive/40 bg-positive/10 text-positive hover:bg-positive/20"
+          : "border-negative/40 bg-negative/10 text-negative hover:bg-negative/20",
+      )}
+      title={`Open ${sodexSymbol} in the terminal, ${side} preset`}
+    >
+      ▶ Trade {side.toUpperCase()}
+    </Link>
   );
 }
 

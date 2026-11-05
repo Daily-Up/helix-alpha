@@ -39,6 +39,10 @@
     {
       "path": "/api/cron/equity-snapshots",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/generate-briefing",
+      "schedule": "0 13 * * *"
     }
   ]
 }

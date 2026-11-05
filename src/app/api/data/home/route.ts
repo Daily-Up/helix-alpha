@@ -36,6 +36,7 @@ export async function GET() {
     id: string;
     asset_symbol: string;
     asset_kind: string;
+    sodex_symbol: string | null;
     direction: "long" | "short";
     tier: "auto" | "review" | "info";
     confidence: number;
@@ -43,8 +44,13 @@ export async function GET() {
     event_title: string | null;
     event_type: string | null;
   }
+  // Only FRESH pending signals — within their own horizon (expires_at in the
+  // future, or legacy rows with none). The tick sweeper flips past-horizon
+  // signals to 'expired', but we filter here too so a momentary sweep lag never
+  // surfaces a stale signal as "pending" on the homepage.
   const topSignals = await all<TopSig>(
     `SELECT s.id, a.symbol AS asset_symbol, a.kind AS asset_kind,
+            s.sodex_symbol AS sodex_symbol,
             s.direction, s.tier, s.confidence, s.fired_at,
             n.title AS event_title, c.event_type AS event_type
      FROM signals s
@@ -52,9 +58,17 @@ export async function GET() {
      LEFT JOIN news_events n ON n.id = s.triggered_by_event_id
      LEFT JOIN classifications c ON c.event_id = s.triggered_by_event_id
      WHERE s.status = 'pending'
+       AND (s.expires_at IS NULL OR s.expires_at > ?)
      ORDER BY s.confidence DESC, s.fired_at DESC
      LIMIT 3`,
+    [Date.now()],
   );
+
+  // Fallback for the "Top pending signals" card: when nothing is live, show the
+  // 3 most recently graded signals with their actual outcome instead of an
+  // empty panel.
+  const recentGraded =
+    topSignals.length === 0 ? await Postmortem.recentGradedOutcomes(3) : [];
 
   // ── SoDEX Wealth snapshot ─────────────────────────────────────
   // Catalog-level (not wallet-specific) highlights for the dashboard tile:
@@ -100,17 +114,13 @@ export async function GET() {
 
   const briefing = await Briefings.getLatestBriefing();
 
-  const overall = await Postmortem.overallStats({
-    since_ms: 30 * 24 * 60 * 60 * 1000,
-  });
-  const byType = await Postmortem.statsByEventType({
-    since_ms: 30 * 24 * 60 * 60 * 1000,
-  });
-  const evaluable = byType.filter(
-    (b) => b.count >= 2 && b.hit_rate_3d != null,
+  // Calibration reads the LIVE grader (signal_outcomes), written by the
+  // resolution job every tick — not impact_metrics, which depends on the
+  // compute-impact job and is empty when that job hasn't run. This makes the
+  // "hit rate" tile reflect grading that actually happens.
+  const graded = await Postmortem.gradedOutcomeStats(
+    30 * 24 * 60 * 60 * 1000,
   );
-  evaluable.sort((a, b) => (b.hit_rate_3d ?? 0) - (a.hit_rate_3d ?? 0));
-  const bestEventType = evaluable[0] ?? null;
 
   interface Counts {
     total_events: number;
@@ -132,6 +142,7 @@ export async function GET() {
     counts,
     signal_stats: sigStats,
     top_signals: topSignals,
+    recent_graded: recentGraded,
     wealth: wealthSnapshot,
     briefing: briefing
       ? {
@@ -143,8 +154,9 @@ export async function GET() {
         }
       : null,
     calibration: {
-      overall,
-      best_event_type: bestEventType,
+      graded: graded.graded,
+      hit_rate: graded.hit_rate,
+      first_grade_at: graded.first_grade_at,
     },
   });
 }

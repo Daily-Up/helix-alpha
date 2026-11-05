@@ -23,8 +23,9 @@ import {
   autoExecutePending,
   reconcileOpenPositions,
 } from "@/lib/trading";
-import { Signals, Settings, Cron, IndexFund } from "@/lib/db";
+import { Signals, Settings, Cron, IndexFund, Briefings } from "@/lib/db";
 import { rebalanceIndex } from "@/lib/index-fund";
+import { runBriefing } from "@/lib/ai";
 import { runResolutionJob } from "@/lib/outcomes/resolve-job";
 import { evaluateAlerts, isReadOnly } from "@/lib/system-health";
 
@@ -174,6 +175,39 @@ async function handle(req: Request): Promise<NextResponse> {
     summary.sectors_snapshot = snap;
   } catch (err) {
     summary.sectors_snapshot = { error: (err as Error).message };
+  }
+
+  // 8b) Generate the Daily AI Briefing once per UTC day. The briefing used to
+  //     rely solely on the GitHub Actions workflow (helix-briefing.yml); when
+  //     GitHub's scheduled runs stall (as they did 2026-11-01→05), the briefing
+  //     silently goes stale. tick is the most reliable clock we have — it fires
+  //     every ~5 min — and runBriefing is idempotent per UTC date (a cheap
+  //     cached PK read once the day's briefing exists, one Claude call per day
+  //     otherwise). Gated to ≥13:00 UTC to mirror the intended slot and let the
+  //     morning data refresh land first; self-heals by retrying on later ticks
+  //     if the first attempt of the day fails. The Vercel cron at 13:00 is a
+  //     second, independent trigger — both are idempotent, so no double-gen.
+  try {
+    const today = Briefings.todayUtcDate();
+    const existing = await Briefings.getBriefing(today);
+    if (existing) {
+      summary.briefing = { status: "cached", date: today };
+    } else if (new Date().getUTCHours() < 13) {
+      summary.briefing = { status: "waiting", date: today, note: "before 13:00 UTC" };
+    } else {
+      const { data: b } = await Cron.recordRun("generate_briefing", async () => {
+        const r = await runBriefing({});
+        return {
+          summary: r.cached
+            ? `cached date=${r.date}`
+            : `generated date=${r.date} cost=$${r.cost_usd.toFixed(4)}`,
+          data: r,
+        };
+      });
+      summary.briefing = { status: "generated", date: b?.date ?? today };
+    }
+  } catch (err) {
+    summary.briefing = { error: (err as Error).message };
   }
 
   // 9) Evaluate system-health alert thresholds (Part 3). Idempotent —

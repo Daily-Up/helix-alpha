@@ -279,6 +279,93 @@ export async function recentSignalOutcomes(
   }));
 }
 
+// ── Live grading stats (signal_outcomes) ────────────────────────────────
+//
+// The bucket stats above read `impact_metrics`, populated by the
+// compute-impact job. The *live* feedback loop the resolution job writes
+// every tick is `signal_outcomes` (outcome ∈ target_hit|stop_hit|flat once
+// an horizon elapses). These helpers report that live grader so the homepage
+// can show a real hit rate + "N graded" instead of an indefinite
+// "calibrating…", and a concrete "first grades on <date>" before any resolve.
+
+export interface GradedOutcomeStats {
+  /** Resolved outcomes (target_hit | stop_hit | flat) in the window. */
+  graded: number;
+  /** Of those, how many were directionally favourable (realized_pct > 0). */
+  wins: number;
+  /** wins / graded, or null when nothing is graded yet. */
+  hit_rate: number | null;
+  /** When graded === 0: the soonest a pending outcome becomes gradable
+   *  (MIN expires_at over outcome IS NULL). null when nothing is pending. */
+  first_grade_at: number | null;
+}
+
+export async function gradedOutcomeStats(
+  sinceMs = 30 * 24 * 60 * 60 * 1000,
+): Promise<GradedOutcomeStats> {
+  const since = Date.now() - sinceMs;
+  const agg = await get<{ graded: number; wins: number }>(
+    `SELECT COUNT(*) AS graded,
+            COALESCE(SUM(CASE WHEN realized_pct > 0 THEN 1 ELSE 0 END), 0) AS wins
+       FROM signal_outcomes
+      WHERE outcome IN ('target_hit','stop_hit','flat')
+        AND generated_at >= ?`,
+    [since],
+  );
+  const graded = agg?.graded ?? 0;
+  const wins = agg?.wins ?? 0;
+  let first_grade_at: number | null = null;
+  if (graded === 0) {
+    const soonest = await get<{ soonest: number | null }>(
+      `SELECT MIN(expires_at) AS soonest
+         FROM signal_outcomes
+        WHERE outcome IS NULL`,
+    );
+    first_grade_at = soonest?.soonest ?? null;
+  }
+  return {
+    graded,
+    wins,
+    hit_rate: graded > 0 ? wins / graded : null,
+    first_grade_at,
+  };
+}
+
+export interface RecentGradedOutcome {
+  signal_id: string;
+  asset_symbol: string;
+  asset_kind: string;
+  sodex_symbol: string | null;
+  direction: "long" | "short";
+  outcome: "target_hit" | "stop_hit" | "flat";
+  realized_pct: number | null;
+  outcome_at: number | null;
+}
+
+/** The most recently resolved signals with their graded outcome — used as the
+ *  homepage "Top pending signals" fallback when nothing is live. */
+export async function recentGradedOutcomes(
+  limit = 3,
+): Promise<RecentGradedOutcome[]> {
+  return all<RecentGradedOutcome>(
+    `SELECT o.signal_id          AS signal_id,
+            a.symbol             AS asset_symbol,
+            a.kind               AS asset_kind,
+            s.sodex_symbol       AS sodex_symbol,
+            o.direction          AS direction,
+            o.outcome            AS outcome,
+            o.realized_pct       AS realized_pct,
+            o.outcome_at         AS outcome_at
+       FROM signal_outcomes o
+       LEFT JOIN signals s ON s.id = o.signal_id
+       LEFT JOIN assets  a ON a.id = o.asset_id
+      WHERE o.outcome IN ('target_hit','stop_hit','flat')
+      ORDER BY o.outcome_at DESC
+      LIMIT ?`,
+    [limit],
+  );
+}
+
 function buildWhere(
   filter: PostmortemFilter,
   opts: { signalsOnly?: boolean } = {},
