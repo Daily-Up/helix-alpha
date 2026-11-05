@@ -15,7 +15,7 @@
  * NEVER auto-submits — a real mainnet order needs the explicit Confirm click.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { cn } from "@/components/ui/cn";
 import { useTradeMode } from "@/lib/sodex-onchain/useTradeMode";
@@ -75,7 +75,7 @@ const pxFmt = (v: number | null | undefined, digits: number) =>
         maximumFractionDigits: digits,
       });
 
-export function OrderPanel({
+function OrderPanelImpl({
   symbol,
   sodexSymbol,
   market,
@@ -717,6 +717,11 @@ export function OrderPanel({
     </div>
   );
 }
+
+// Memoized: with stable (useCallback'd) onSourceConsumed/onPlaced handlers, the
+// ticket only re-renders when its own inputs change (price/account/rules/side),
+// not on the terminal's 1s clock tick.
+export const OrderPanel = memo(OrderPanelImpl);
 
 function BracketInput({
   label,

@@ -7,6 +7,7 @@
  * account state. Shows a Connect CTA until the browser trading key is live.
  */
 
+import { memo } from "react";
 import { cn } from "@/components/ui/cn";
 import { buttonClass } from "@/components/ui/Button";
 import type { SodexPerpsAccountState } from "@/lib/sodex-onchain/types";
@@ -21,7 +22,7 @@ const signedMoney = (v: number | null | undefined) =>
     ? "—"
     : `${v >= 0 ? "+" : "−"}$${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-export function AccountPanel({
+function AccountPanelImpl({
   account,
   ready,
 }: {
@@ -124,6 +125,10 @@ export function AccountPanel({
     </div>
   );
 }
+
+// Memoized: re-renders only when `account` (5s poll) or `ready` changes, not on
+// the terminal's 1s clock tick.
+export const AccountPanel = memo(AccountPanelImpl);
 
 function ARow({
   label,

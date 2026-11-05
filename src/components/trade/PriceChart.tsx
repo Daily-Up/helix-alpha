@@ -7,7 +7,7 @@
  * lightweight-charts is imported inside the effect so it never SSRs.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { cn } from "@/components/ui/cn";
 import type { SetupLevel } from "./SetupCard";
 
@@ -56,7 +56,7 @@ const fmt = (n: number | null, d = 2) =>
     ? "—"
     : n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
 
-export function PriceChart({
+function PriceChartImpl({
   symbol,
   label,
   market,
@@ -568,3 +568,9 @@ export function PriceChart({
     </div>
   );
 }
+
+// Memoized: its props (symbol, label, levels, position lines, tickSize) are all
+// stable across the terminal's 1s clock tick and 3–5s market polls, so the
+// chart no longer re-renders on every parent render — only when its own inputs
+// actually change.
+export const PriceChart = memo(PriceChartImpl);

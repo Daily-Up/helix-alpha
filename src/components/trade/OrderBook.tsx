@@ -108,7 +108,7 @@ const BookRow = memo(function BookRow({
   );
 });
 
-export function OrderBook({
+function OrderBookImpl({
   bids,
   asks,
   markPrice,
@@ -349,3 +349,8 @@ export function OrderBook({
     </div>
   );
 }
+
+// Memoized: the book only depends on bids/asks/trades/markPrice/loading, none of
+// which change on the terminal's 1s clock tick — so it stops re-rendering every
+// second and only updates when the ladder data actually moves.
+export const OrderBook = memo(OrderBookImpl);

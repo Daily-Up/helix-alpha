@@ -11,12 +11,26 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { cn } from "@/components/ui/cn";
 import { AssetLogo } from "@/components/ui/AssetLogo";
 import { CheckCircle2, XCircle, AlertTriangle, Info } from "lucide-react";
 import { AssetPicker } from "./AssetPicker";
 import { SetupCard, type SetupResponse } from "./SetupCard";
-import { PriceChart } from "./PriceChart";
+// Chart is lazy-loaded (client-only) so lightweight-charts + the chart code
+// never run during initial hydration — cuts main-thread blocking (TBT). The
+// skeleton fills the same cell height, so nothing shifts when it swaps in (CLS).
+const PriceChart = dynamic(
+  () => import("./PriceChart").then((m) => m.PriceChart),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-full min-h-[360px] w-full items-center justify-center text-[11px] text-fg-dim">
+        Loading chart…
+      </div>
+    ),
+  },
+);
 import { OrderBook, type BookLevel } from "./OrderBook";
 import { OrderPanel, type SymbolRules } from "./OrderPanel";
 import { AccountPanel } from "./AccountPanel";
@@ -350,6 +364,14 @@ export function TradeTerminal({
     [assets],
   );
 
+  // Stable handlers for the memoized OrderPanel (inline arrows would defeat the
+  // memo and re-render the ticket on every parent render / clock tick).
+  const onSourceConsumed = useCallback(() => setSource(undefined), []);
+  const onOrderPlaced = useCallback(() => {
+    refreshAccount();
+    refreshOpenOrders();
+  }, [refreshAccount, refreshOpenOrders]);
+
   // Bottom-panel height: load persisted, drag to resize, persist on release.
   const bottomHRef = useRef(DEFAULT_BOTTOM);
   const draggingBottom = useRef(false);
@@ -559,9 +581,12 @@ export function TradeTerminal({
         </div>
 
         <MarkPrice value={mark} digits={digits} />
-        {isPerp ? <Stat label="Oracle" value={fmt(oracle, digits)} /> : null}
+        {isPerp ? (
+          <Stat label="Oracle" value={fmt(oracle, digits)} minW="10ch" />
+        ) : null}
         <Stat
           label="24h Change"
+          minW="19ch"
           value={
             changeAbs != null
               ? `${changeAbs >= 0 ? "+" : ""}${fmt(changeAbs, digits)} / ${changePct != null ? `${changePct >= 0 ? "+" : ""}${changePct.toFixed(2)}%` : "—"}`
@@ -569,12 +594,13 @@ export function TradeTerminal({
           }
           tone={changePct == null ? "default" : up ? "positive" : "negative"}
         />
-        <Stat label="24h Volume" value={fmtUsd(num(ticker?.quoteVolume))} />
+        <Stat label="24h Volume" value={fmtUsd(num(ticker?.quoteVolume))} minW="9ch" />
         {isPerp ? (
           <>
-            <Stat label="Open Interest" value={fmtUsd(oiUsd)} />
+            <Stat label="Open Interest" value={fmtUsd(oiUsd)} minW="9ch" />
             <Stat
               label="Funding"
+              minW="20ch"
               value={
                 fundingPct != null
                   ? `${fundingPct >= 0 ? "+" : ""}${fundingPct.toFixed(4)}%${countdownStr ? ` · ${countdownStr}` : ""}`
@@ -590,8 +616,8 @@ export function TradeTerminal({
           </>
         ) : (
           <>
-            <Stat label="24h High" value={fmt(num(ticker?.highPx), digits)} />
-            <Stat label="24h Low" value={fmt(num(ticker?.lowPx), digits)} />
+            <Stat label="24h High" value={fmt(num(ticker?.highPx), digits)} minW="9ch" />
+            <Stat label="24h Low" value={fmt(num(ticker?.lowPx), digits)} minW="9ch" />
           </>
         )}
 
@@ -751,11 +777,8 @@ export function TradeTerminal({
               account={account}
               sideFill={sideFill}
               source={source}
-              onSourceConsumed={() => setSource(undefined)}
-              onPlaced={() => {
-                refreshAccount();
-                refreshOpenOrders();
-              }}
+              onSourceConsumed={onSourceConsumed}
+              onPlaced={onOrderPlaced}
             />
           ) : null}
           <AccountPanel account={account} ready={tm.ready} />
@@ -842,14 +865,22 @@ function Stat({
   value,
   tone = "default",
   title,
+  minW,
 }: {
   label: string;
   value: string;
   tone?: "default" | "positive" | "negative";
   title?: string;
+  /** Reserve the loaded value's footprint (e.g. "10ch") so "—" → value never
+   *  reflows the wrapping header row (CLS). */
+  minW?: string;
 }) {
   return (
-    <div className="flex flex-col border-l border-line/70 pl-4" title={title}>
+    <div
+      className="flex flex-col border-l border-line/70 pl-4"
+      style={minW ? { minWidth: minW } : undefined}
+      title={title}
+    >
       <span className="text-[11px] uppercase tracking-wide text-fg-dim">
         {label}
       </span>
@@ -882,7 +913,10 @@ function MarkPrice({ value, digits }: { value: number | null; digits: number }) 
     prev.current = value;
   }, [value]);
   return (
-    <div className="flex flex-col border-l border-line/70 pl-4">
+    <div
+      className="flex flex-col border-l border-line/70 pl-4"
+      style={{ minWidth: "118px" }}
+    >
       <span className="text-[11px] uppercase tracking-wide text-fg-dim">Mark</span>
       <span
         className={cn(

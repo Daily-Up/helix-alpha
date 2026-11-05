@@ -9,12 +9,21 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { cn } from "@/components/ui/cn";
 import { buttonClass } from "@/components/ui/Button";
 import { useSodexAuth } from "@/components/sodex/auth/SodexAuthProvider";
 import { AssetLogo } from "@/components/ui/AssetLogo";
-import { TpSlModal, type TpSlMeta } from "./TpSlModal";
-import { CloseModal } from "./CloseModal";
+import type { TpSlMeta } from "./TpSlModal";
+// Modals are lazy-loaded (client-only): they only mount when a row opens them,
+// so their code is kept out of the terminal's initial bundle / hydration.
+const TpSlModal = dynamic(() => import("./TpSlModal").then((m) => m.TpSlModal), {
+  ssr: false,
+});
+const CloseModal = dynamic(
+  () => import("./CloseModal").then((m) => m.CloseModal),
+  { ssr: false },
+);
 import {
   SodexSide,
   SodexOrderType,
