@@ -85,7 +85,7 @@ const BookRow = memo(function BookRow({
           "absolute inset-y-[1px] right-0 rounded-l-[3px] transition-[width] duration-200",
           side === "ask" ? "bg-negative" : "bg-positive",
         )}
-        style={{ width: `${pct}%`, opacity: 0.18 }}
+        style={{ width: `${pct}%`, opacity: 0.1 }}
       />
       <span
         className={cn(
@@ -101,7 +101,7 @@ const BookRow = memo(function BookRow({
       <span className="relative text-right text-fg-muted">
         {row.size.toLocaleString(undefined, { maximumFractionDigits: 4 })}
       </span>
-      <span className="relative text-right text-fg-dim">
+      <span className="relative text-right text-fg-muted">
         {row.total.toLocaleString(undefined, { maximumFractionDigits: 4 })}
       </span>
     </button>
