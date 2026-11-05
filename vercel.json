@@ -98,7 +98,7 @@
     },
     {
       "path": "/api/cron/snapshot-sector-indices",
-      "schedule": "*/20 * * * *"
+      "schedule": "0 1 * * *"
     }
   ]
 }

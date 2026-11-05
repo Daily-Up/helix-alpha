@@ -18,7 +18,11 @@ import { readSectorIndices } from "@/lib/sectors/index-momentum";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const STALE_MS = 30 * 60 * 1000; // momentum older than 30 min is flagged stale
+// Index momentum is refreshed once a day by the snapshot cron (Vercel Hobby
+// allows daily crons only). 7d/1m/3m returns move slowly, so day-old momentum
+// is fine; only flag "stale" once the data is older than a day's cadence +
+// buffer, which means the cron actually missed a run.
+const STALE_MS = 26 * 60 * 60 * 1000;
 
 export async function GET() {
   const sectors = await Sectors.getLatestSectors();
