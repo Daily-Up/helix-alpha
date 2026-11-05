@@ -16,7 +16,13 @@ import { cn } from "@/components/ui/cn";
 import { AssetLogo } from "@/components/ui/AssetLogo";
 import { CheckCircle2, XCircle, AlertTriangle, Info } from "lucide-react";
 import { AssetPicker } from "./AssetPicker";
-import { SetupCard, type SetupResponse } from "./SetupCard";
+import type { SetupResponse } from "./SetupCard";
+// SetupCard only renders inside the on-demand "AI Setup" floating card, so its
+// code is lazy-loaded (kept out of the terminal's initial hydration).
+const SetupCard = dynamic(
+  () => import("./SetupCard").then((m) => m.SetupCard),
+  { ssr: false },
+);
 // Chart is lazy-loaded (client-only) so lightweight-charts + the chart code
 // never run during initial hydration — cuts main-thread blocking (TBT). The
 // skeleton fills the same cell height, so nothing shifts when it swaps in (CLS).
@@ -35,7 +41,17 @@ import { OrderBook, type BookLevel } from "./OrderBook";
 import { OrderPanel, type SymbolRules } from "./OrderPanel";
 import { AccountPanel } from "./AccountPanel";
 import type { Trade } from "./TradesTape";
-import { BottomPanel, type BottomTab } from "./BottomPanel";
+import type { BottomTab } from "./BottomPanel";
+// BottomPanel (positions/orders/history tables) sits in a fixed-height
+// container, so lazy-loading it with a filling skeleton keeps CLS at zero while
+// splitting its table code out of the initial terminal bundle.
+const BottomPanel = dynamic(
+  () => import("./BottomPanel").then((m) => m.BottomPanel),
+  {
+    ssr: false,
+    loading: () => <div className="h-full w-full bg-surface" />,
+  },
+);
 import { useTradeMode } from "@/lib/sodex-onchain/useTradeMode";
 import { getPerpsAccountState } from "@/lib/sodex-onchain/client";
 import {
