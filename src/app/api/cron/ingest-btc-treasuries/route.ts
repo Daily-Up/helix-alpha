@@ -34,7 +34,10 @@ async function handle(req: Request): Promise<NextResponse> {
     const summary = await runTreasuriesIngestWithAudit({
       onlyTickers: onlyTickers ? onlyTickers.split(",") : undefined,
       delayMs: delayMs ? Number(delayMs) : undefined,
-      maxCompanies: maxCompanies ? Number(maxCompanies) : undefined,
+      // Default-bound the per-company history loop so a scheduled run stays
+      // within the function limit even when SoSoValue is slow (55 companies ×
+      // up to 20s/call is otherwise unbounded). Pass ?maxCompanies= to override.
+      maxCompanies: maxCompanies ? Number(maxCompanies) : 45,
     });
     return NextResponse.json({ ok: true, ...summary });
   } catch (err) {

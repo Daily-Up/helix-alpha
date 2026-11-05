@@ -35,7 +35,10 @@ async function handle(): Promise<NextResponse> {
     // when SoSoValue is sluggish. Each company is one /purchase-history
     // call (~56 total); at 300ms throttle we wrap up in ~17s of waits +
     // the actual network round-trips.
-    const summary = await runTreasuriesIngestWithAudit({ delayMs: 300 });
+    const summary = await runTreasuriesIngestWithAudit({
+      delayMs: 300,
+      maxCompanies: 45,
+    });
     return NextResponse.json({ ok: true, ...summary });
   } catch (err) {
     return NextResponse.json(
