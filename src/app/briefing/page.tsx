@@ -9,9 +9,9 @@ export default function Briefing() {
           <h1 className="dash-title">Daily AI Briefing</h1>
           <p className="mt-2 dash-description">
             Once a day Claude reads pending signals, sector rotation, ETF
-            flows, AlphaIndex positions, and the macro calendar — then writes
-            a 3-paragraph market read with a single highest-conviction trade
-            idea. Your tape, summarised.
+            flows, BTC-treasury accumulation, and the macro calendar — then
+            writes a 3-paragraph market read with a single highest-conviction
+            trade idea. Your tape, summarised.
           </p>
         </header>
 

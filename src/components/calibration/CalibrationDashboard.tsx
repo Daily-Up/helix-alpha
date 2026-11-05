@@ -403,13 +403,8 @@ function FrameworkComparisonCard({
             </>
           ) : v2Empty ? (
             <>
-              v2.1 has no outcomes yet. Switch to v2.1 via the
-              framework selector on{" "}
-              <Link href="/alphaindex" className="underline">
-                /alphaindex
-              </Link>
-              , or wait for the parallel runner to accumulate shadow
-              outcomes (~24h). Empty cells render as "—" until the
+              v2.1 has no outcomes yet. Wait for the parallel runner to
+              accumulate shadow outcomes (~24h). Empty cells render as "—" until the
               data lands.
             </>
           ) : (

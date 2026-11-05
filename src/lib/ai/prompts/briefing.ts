@@ -203,7 +203,7 @@ Voice:
 Rules:
 1. Output ONLY by calling publish_daily_briefing. No prose outside the tool call.
 2. The body must be EXACTLY 3 paragraphs (WHAT / SO WHAT / WATCH) separated by blank lines.
-3. The top_pick must come from the supplied inputs — DO NOT invent assets that aren't listed in pending_signals or alphaindex_positions or sectors. If nothing in the inputs justifies a high-conviction pick, set direction="watch" and conviction <= 0.5.
+3. The top_pick must come from the supplied inputs — DO NOT invent assets that aren't listed in pending_signals or sectors. If nothing in the inputs justifies a high-conviction pick, set direction="watch" and conviction <= 0.5.
 4. Cite quantities. "$280M ETF outflow" beats "outflows". "+34.8% 30d" beats "strong momentum".
 5. If the inputs are thin (no pending signals, sectors flat, ETF flows quiet), say so honestly. A "quiet tape, sit on hands" briefing is more valuable than a fake conviction call.
 6. Conviction calibration: 0.7+ requires a confirmed catalyst (earnings, exploit, ETF flow data). 0.5-0.7 for sector + signal alignment. <0.5 for "watching for a setup".
@@ -267,27 +267,6 @@ export function briefingUserMessage(
     for (const b of inputs.recent_classification_buckets) {
       lines.push(
         `- ${b.event_type}: ${b.n} (e.g. "${b.example_title.slice(0, 100)}")`,
-      );
-    }
-  }
-  lines.push("");
-
-  // AlphaIndex
-  lines.push(
-    `## AlphaIndex portfolio (NAV $${inputs.alphaindex_nav.total.toFixed(0)}, ` +
-      `${inputs.alphaindex_nav.pnl_pct >= 0 ? "+" : ""}${inputs.alphaindex_nav.pnl_pct.toFixed(2)}% all-time)`,
-  );
-  if (inputs.alphaindex_positions.length === 0) {
-    lines.push("(no positions)");
-  } else {
-    for (const p of inputs.alphaindex_positions) {
-      const pnl =
-        p.pnl_pct == null
-          ? ""
-          : ` | pnl ${p.pnl_pct >= 0 ? "+" : ""}${p.pnl_pct.toFixed(1)}%`;
-      const rat = p.rationale ? ` | why: ${p.rationale}` : "";
-      lines.push(
-        `- ${p.symbol} ${p.weight_pct.toFixed(2)}%${pnl}${rat}`,
       );
     }
   }

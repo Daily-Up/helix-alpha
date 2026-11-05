@@ -222,7 +222,7 @@ export function BriefingPage() {
             }}
           >
             Claude reads pending signals, sector rotation, ETF flows,
-            AlphaIndex positions, and the macro calendar — then writes a
+            BTC-treasury accumulation, and the macro calendar — then writes a
             3-paragraph market read with a single highest-conviction trade
             idea.
           </p>
@@ -968,15 +968,6 @@ function InputsSummary({ inputs }: { inputs: BriefingInputsSummary }) {
         inputs.top_event_types.length > 0
           ? `top types: ${inputs.top_event_types.map((t) => `${t.event_type}(${t.n})`).join(", ")}`
           : undefined,
-    },
-    {
-      label: "AlphaIndex top positions",
-      body:
-        inputs.alphaindex_top_positions.length === 0
-          ? "(no positions)"
-          : inputs.alphaindex_top_positions
-              .map((p) => `${p.symbol} ${p.weight_pct.toFixed(1)}%`)
-              .join(" · "),
     },
     {
       label: "Sector leaders (24h)",
