@@ -95,8 +95,8 @@ export default function HelixLandingPage() {
               style={{ fontSize: "22px", lineHeight: "1.65", color: TEXT }}
             >
               Every signal carries its full reasoning chain. Every outcome is
-              tracked. Every framework is stress-tested. Trade what you can
-              verify.
+              graded against what actually happened. Trade what you can verify —
+              on SoDEX, from your own wallet.
             </p>
 
             <div
@@ -147,9 +147,9 @@ export default function HelixLandingPage() {
       {/* ─────────── Section 3: Stats strip ─────────── */}
       <section className="py-24" data-section="stats">
         <div className="mx-auto grid max-w-[1280px] grid-cols-2 px-6 md:grid-cols-4 md:px-12">
-          <Stat n="3" suffix="" label="AI AGENTS PER SIGNAL · CLASSIFY · VERIFY · DEBATE" first />
-          <Stat n="100" suffix="%" label="SIGNALS SCORED AGAINST OUTCOME" />
-          <Stat n="40" suffix="+" label="ASSETS · CRYPTO · EQUITIES · TREASURIES" />
+          <Stat n="100" suffix="%" label="SIGNALS GRADED AGAINST OUTCOME" first />
+          <Stat n="70" suffix="+" label="SODEX MARKETS · CRYPTO · EQUITIES · ETFS" />
+          <Stat n="11" suffix="" label="ON-CHAIN WEALTH PRODUCTS" />
           <Stat n="24" suffix="/7" label="CATALYST MONITORING" />
         </div>
       </section>
@@ -190,8 +190,8 @@ export default function HelixLandingPage() {
               body="When a signal's horizon expires, we record what actually happened — target hit, stop hit, or expired flat. The calibration dashboard shows hit rate by tier, by catalyst type, and conviction calibration curves. We measure the way real funds do."
             />
             <AuditCard
-              title="Stress-tested frameworks"
-              body="Two portfolio frameworks running paper-traded in parallel. v2.1 was stress-tested against a real -35% BTC bear market and contained the loss to -19%. Acceptance criteria are documented; failures are visible. Trade-offs are stated."
+              title="Live on SoDEX, not on paper"
+              body="Execute any signal in the trade terminal, and buy or sell curated Wealth ETFs in-app — real orders on SoDEX, routed with Helix's builder code. Helix never holds your keys; you sign in your own wallet."
             />
           </div>
         </div>
@@ -291,12 +291,12 @@ export default function HelixLandingPage() {
             <EvidenceRow
               side="left"
               eyebrow="Evidence 03"
-              title="An AI-managed index, paper-traded live."
-              body="AlphaIndex allocates across BTC, ETH, L1s, RWA, sector indexes, and perps based on accumulated news signals, sector momentum, and ETF flows. Real SoDEX prices, simulated fills. Rebalance rationale written by Claude — visible for every rebalance."
-              linkLabel="View live AlphaIndex →"
-              href="/index-fund"
-              src="/landing/stress.png"
-              alt="The AlphaIndex live portfolio dashboard — NAV, holdings, rebalance history, and Claude-written rebalance reasoning."
+              title="On-chain Wealth, in one place."
+              body="Browse SoDEX Wealth live — tokenized ETFs (vQQQ, vVOO, vSMH), Stable Earn yield, and RWA — with real returns, APY, mapped Helix events, and 1-month charts. Buy and sell the curated ETFs in-app on SoDEX, routed with Helix's builder code."
+              linkLabel="Explore the Wealth Index →"
+              href="/wealth-index"
+              src="/landing/wealth.png"
+              alt="The Helix Wealth Index — SoDEX Wealth products with live returns, APY, event feeds, and in-app Buy/Sell."
             />
           </div>
         </div>
@@ -304,7 +304,7 @@ export default function HelixLandingPage() {
 
       <Rule />
 
-      {/* ─────────── Section 7: Frameworks comparison ─────────── */}
+      {/* ─────────── Section 7: Calibration ─────────── */}
       <section
         id="calibration"
         className="py-40"
@@ -322,71 +322,25 @@ export default function HelixLandingPage() {
               maxWidth: "820px",
             }}
           >
-            <span style={{ fontFeatureSettings: '"smcp"' }}>Two</span> frameworks. Documented trade-offs.
-            <br />
-            You choose.
+            <span style={{ fontFeatureSettings: '"smcp"' }}>Every</span> call, graded against outcome.
           </h2>
 
-          {/* Desktop: editorial table */}
-          <div className="mt-16 hidden md:block" data-reveal="content">
-            <table className="w-full border-collapse">
-              <thead>
-                <tr>
-                  <Th />
-                  <Th>v1</Th>
-                  <Th accent>v2.1</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {COMPARE_ROWS.map((r) => (
-                  <tr
-                    key={r.k}
-                    data-table-row
-                    className="landing-table-row opacity-0 transition-colors duration-150"
-                    style={{ borderTop: `1px solid ${TEXT}26` }}
-                  >
-                    <td className="py-5 pr-8 align-top" style={{ color: TEXT_MUTED }}>
-                      {r.k}
-                    </td>
-                    <td className="py-5 pr-8 align-top">{r.v1}</td>
-                    <td className="py-5 align-top">{r.v2}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Mobile: stacked */}
-          <div className="mt-12 flex flex-col gap-8 md:hidden" data-reveal="content">
-            {(["v1", "v2.1"] as const).map((fw) => (
-              <div
-                key={fw}
-                className="border-t pt-6"
-                style={{ borderColor: `${TEXT}26` }}
-              >
-                <div
-                  className="font-[var(--font-jetbrains-mono)] text-[12px] uppercase"
-                  style={{ color: TEXT_MUTED, letterSpacing: "0.1em" }}
-                >
-                  {fw}
-                </div>
-                <dl className="mt-4 flex flex-col gap-4">
-                  {COMPARE_ROWS.map((r) => (
-                    <div key={r.k}>
-                      <dt
-                        className="text-[12px] uppercase"
-                        style={{ color: TEXT_MUTED, letterSpacing: "0.1em" }}
-                      >
-                        {r.k}
-                      </dt>
-                      <dd className="mt-1 text-[16px]">
-                        {fw === "v1" ? r.v1 : r.v2}
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
-              </div>
-            ))}
+          <div
+            className="mt-16 grid grid-cols-1 gap-10 md:grid-cols-3 md:gap-12"
+            data-reveal="content"
+          >
+            <AuditCard
+              title="Every signal gets a clock"
+              body="At fire time we fix the holding window — T+1d, 3d or 7d by catalyst type — with a target and a stop. No open-ended calls."
+            />
+            <AuditCard
+              title="Measured against price"
+              body="When the window expires, the resolution job walks real SoDEX price history and records the outcome: target hit, stop hit, or flat. Nothing is graded by hand."
+            />
+            <AuditCard
+              title="Fed back, in the open"
+              body="Graded outcomes roll up into a live hit rate — by tier, catalyst and asset class — on the calibration dashboard. The scoreboard is public."
+            />
           </div>
 
           <p
@@ -394,8 +348,8 @@ export default function HelixLandingPage() {
             style={{ color: TEXT_MUTED, lineHeight: 1.65 }}
             data-reveal="content"
           >
-            Both frameworks run paper-traded in parallel. The calibration
-            dashboard shows actual outcomes side by side.
+            Signals are scored the way a desk scores a trade — against what the
+            market actually did, not against a vibe.
           </p>
         </div>
       </section>
@@ -494,32 +448,6 @@ const STAGES: Array<{ title: string; body: string; techLabel: string }> = [
     body: "Pre-save invariant gate enforces every rule above. Lifecycle sweeper expires stale signals.",
     techLabel: "invariants.ts · lifecycle.ts · I-13, I-14, I-30",
   },
-];
-
-// ─────────────────────────────────────────────────────────────────────────
-// Section 7 comparison rows
-// ─────────────────────────────────────────────────────────────────────────
-
-const COMPARE_ROWS: Array<{ k: string; v1: string; v2: string }> = [
-  { k: "Design philosophy", v1: "Unconstrained", v2: "Risk-controlled" },
-  { k: "BTC anchor", v1: "Adaptive", v2: "40 – 70% band" },
-  {
-    k: "Concentration cap",
-    v1: "None",
-    v2: "8% per position, 15% per cluster",
-  },
-  {
-    k: "Drawdown protection",
-    v1: "None",
-    v2: "Circuit breaker at −8% / −12%",
-  },
-  {
-    k: "Worst stress test",
-    v1: "−53% (2× BTC)",
-    v2: "−19% (0.55× BTC)",
-  },
-  { k: "Capture in trends", v1: "Full", v2: "~80% of BTC" },
-  { k: "Best for", v1: "Maximum upside", v2: "Bounded downside" },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -664,18 +592,3 @@ function Stage({
   );
 }
 
-function Th({ children, accent }: { children?: React.ReactNode; accent?: boolean }) {
-  return (
-    <th
-      className="pb-5 text-left font-[var(--font-jetbrains-mono)] text-[12px] uppercase"
-      style={{
-        color: accent ? ACCENT : TEXT_MUTED,
-        letterSpacing: "0.1em",
-        fontWeight: 400,
-      }}
-      {...(accent ? { "data-v21-header": "" } : {})}
-    >
-      {children}
-    </th>
-  );
-}

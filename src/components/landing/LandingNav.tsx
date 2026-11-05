@@ -21,7 +21,7 @@ const SCROLL_THRESHOLD_PX = 80;
 const NAV_LINKS = [
   { href: "#why-audit", label: "Why audit" },
   { href: "#how-it-works", label: "How it works" },
-  { href: "#frameworks", label: "Frameworks" },
+  { href: "#frameworks", label: "Evidence" },
   { href: "#calibration", label: "Calibration" },
 ];
 
