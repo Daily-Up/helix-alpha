@@ -19,6 +19,24 @@
       "maxDuration": 60,
       "memory": 1024
     },
+    "src/app/api/cron/ingest-etf/route.ts": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "src/app/api/cron/ingest-macro/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/cron/ingest-btc-treasuries/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/cron/ingest-unlocks/route.ts": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "src/app/api/cron/compute-impact/route.ts": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
     "src/app/api/data/**/route.ts": {
       "maxDuration": 15
     },
@@ -43,6 +61,26 @@
     {
       "path": "/api/cron/generate-briefing",
       "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/cron/ingest-unlocks",
+      "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/cron/ingest-etf",
+      "schedule": "0 11 * * *"
+    },
+    {
+      "path": "/api/cron/ingest-macro",
+      "schedule": "10 11 * * *"
+    },
+    {
+      "path": "/api/cron/ingest-btc-treasuries",
+      "schedule": "20 11 * * *"
+    },
+    {
+      "path": "/api/cron/compute-impact",
+      "schedule": "0 4 * * *"
     }
   ]
 }
