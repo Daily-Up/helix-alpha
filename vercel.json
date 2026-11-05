@@ -24,17 +24,27 @@
       "memory": 1024
     },
     "src/app/api/cron/ingest-macro/route.ts": {
-      "maxDuration": 60
+      "maxDuration": 300
     },
     "src/app/api/cron/ingest-btc-treasuries/route.ts": {
-      "maxDuration": 60
+      "maxDuration": 300
     },
     "src/app/api/cron/ingest-unlocks/route.ts": {
-      "maxDuration": 60,
+      "maxDuration": 300,
       "memory": 1024
     },
     "src/app/api/cron/compute-impact/route.ts": {
-      "maxDuration": 60,
+      "maxDuration": 300,
+      "memory": 1024
+    },
+    "src/app/api/public/refresh-macro/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/public/refresh-treasuries/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/public/refresh-unlocks/route.ts": {
+      "maxDuration": 300,
       "memory": 1024
     },
     "src/app/api/data/**/route.ts": {

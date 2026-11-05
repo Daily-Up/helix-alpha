@@ -12,7 +12,7 @@ import { runImpactComputeWithAudit } from "@/lib/analysis";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 async function handle(req: Request): Promise<NextResponse> {
   try {

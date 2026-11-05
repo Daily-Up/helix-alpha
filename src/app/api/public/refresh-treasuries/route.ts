@@ -12,7 +12,7 @@ import { checkPublicCronBudget } from "@/lib/public-cron-budget";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const MIN_INTERVAL_S = Number(
   process.env.PUBLIC_REFRESH_MIN_INTERVAL_S ?? 5 * 60,
