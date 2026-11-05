@@ -9,7 +9,15 @@
 import { useEffect, useRef, useState } from "react";
 import type { WealthHistoryPoint } from "@/lib/wealth/types";
 
-export function WealthSparkline({ fundId }: { fundId: string }) {
+export function WealthSparkline({
+  fundId,
+  color,
+}: {
+  fundId: string;
+  /** Override the net-direction colour with a fixed stroke (e.g. the dashboard
+   *  uses a muted Helix orange so the line reads on the warm card theme). */
+  color?: string;
+}) {
   const [points, setPoints] = useState<WealthHistoryPoint[] | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const [seen, setSeen] = useState(false);
@@ -45,12 +53,20 @@ export function WealthSparkline({ fundId }: { fundId: string }) {
 
   return (
     <div ref={ref} className="h-6 w-full">
-      {points && points.length >= 2 ? <Line points={points} /> : null}
+      {points && points.length >= 2 ? (
+        <Line points={points} color={color} />
+      ) : null}
     </div>
   );
 }
 
-function Line({ points }: { points: WealthHistoryPoint[] }) {
+function Line({
+  points,
+  color: override,
+}: {
+  points: WealthHistoryPoint[];
+  color?: string;
+}) {
   const W = 120;
   const H = 24;
   const closes = points.map((p) => p.close);
@@ -58,7 +74,7 @@ function Line({ points }: { points: WealthHistoryPoint[] }) {
   const max = Math.max(...closes);
   const span = max - min || 1;
   const up = closes[closes.length - 1] >= closes[0];
-  const color = up ? "var(--positive)" : "var(--negative)";
+  const color = override ?? (up ? "var(--positive)" : "var(--negative)");
   const d = points
     .map((p, i) => {
       const x = (i / (points.length - 1)) * W;

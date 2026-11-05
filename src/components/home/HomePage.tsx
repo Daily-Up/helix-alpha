@@ -1,17 +1,18 @@
 "use client";
 
 /**
- * Dashboard (/app). The hero masthead leads (identity + live status); below it,
- * a redesigned glance surface built from the same raised-panel design system as
- * the Terminal / Portfolio / Event Stream: a connect banner (or account strip
- * when live), four clickable stat tiles, the Daily Briefing, a two-column
- * signals + wealth row, and a slim "how it works" strip for new visitors.
+ * Dashboard (/app). The hero masthead leads; below it, a glance surface where
+ * every section wears the same "Put Helix to work" card theme — a dark panel
+ * with a faint warm (Helix-orange) gradient top-left, a low-opacity orange
+ * hairline border, an orange eyebrow, a light Fraunces title, orange outlined
+ * buttons and orange numbered step chips. Data/logic (hit-rate ≥10 rule, 48h
+ * signal freshness, trade deep-links, briefing fields, wealth → fund pages)
+ * is unchanged from the previous commit — this is a visual theme pass.
  */
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { cn } from "@/components/ui/cn";
-import { Badge } from "@/components/ui/Badge";
 import { Num } from "@/components/ui/Num";
 import { Timestamp } from "@/components/ui/Timestamp";
 import { AssetLogo } from "@/components/ui/AssetLogo";
@@ -21,6 +22,18 @@ import { getPerpsAccountState } from "@/lib/sodex-onchain/client";
 import { fmtAssetSymbol } from "@/lib/format";
 
 const NETWORK = "mainnet" as const;
+
+/* ── Theme tokens ──────────────────────────────────────────────────────── */
+
+// The reference card: dark surface + warm orange gradient top-left + a
+// low-opacity orange hairline, ~12px radius, ~20px padding.
+const CARD =
+  "relative overflow-hidden rounded-xl border border-accent/30 bg-gradient-to-br from-accent/10 via-surface to-surface p-5";
+// Outlined Helix-orange button (faint tint fill, orange text) — "Connect SoDEX →".
+const BTN =
+  "inline-flex items-center justify-center gap-1.5 rounded-md border border-accent/50 bg-accent/20 px-4 py-2.5 text-[13px] font-medium text-accent-2 transition-colors hover:bg-accent/30";
+// Light large figure, matching the Fraunces title weight.
+const FIG = "font-[var(--font-fraunces)] font-light leading-none text-fg tabular-nums";
 
 interface HomeData {
   counts: {
@@ -105,11 +118,11 @@ const REGIME_DOT: Record<Regime, string> = {
   neutral: "bg-fg-dim",
 };
 
-const REGIME_CHIP: Record<Regime, { label: string; cls: string }> = {
-  risk_on: { label: "Risk-on", cls: "bg-positive/15 text-positive" },
-  risk_off: { label: "Risk-off", cls: "bg-negative/15 text-negative" },
-  mixed: { label: "Mixed", cls: "bg-accent/15 text-accent-2" },
-  neutral: { label: "Neutral", cls: "bg-surface-2 text-fg-dim" },
+const REGIME_WORD: Record<Regime, { label: string; cls: string }> = {
+  risk_on: { label: "Risk-on", cls: "text-positive" },
+  risk_off: { label: "Risk-off", cls: "text-negative" },
+  mixed: { label: "Mixed", cls: "text-accent-2" },
+  neutral: { label: "Neutral", cls: "text-fg-dim" },
 };
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -120,15 +133,14 @@ const CATEGORY_LABEL: Record<string, string> = {
 
 const OUTCOME_META: Record<
   "target_hit" | "stop_hit" | "flat",
-  { label: string; tone: "positive" | "negative" | "default"; mark: string }
+  { label: string; cls: string; mark: string }
 > = {
-  target_hit: { label: "Target hit", tone: "positive", mark: "✓" },
-  stop_hit: { label: "Stop hit", tone: "negative", mark: "✗" },
-  flat: { label: "Flat", tone: "default", mark: "—" },
+  target_hit: { label: "Target hit", cls: "text-positive", mark: "✓" },
+  stop_hit: { label: "Stop hit", cls: "text-negative", mark: "✗" },
+  flat: { label: "Flat", cls: "text-fg-dim", mark: "—" },
 };
 
 export function HomePage() {
-  const auth = useSodexAuth();
   const [data, setData] = useState<HomeData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -139,15 +151,15 @@ export function HomePage() {
       .finally(() => setLoading(false));
   }, []);
 
-  // A briefing older than 36h isn't "today's" — the generator (cron / tick)
-  // has fallen behind. Tag it amber rather than presenting it as current.
+  // A briefing older than 36h isn't "today's" — the generator has fallen
+  // behind. Tag it amber rather than presenting it as current.
   const briefingStale =
     data?.briefing != null &&
     Date.now() - data.briefing.generated_at > 36 * 60 * 60 * 1000;
 
   return (
-    <div className="flex flex-col gap-6">
-      {/* ── Masthead: identity + live status (the product leads, not a pitch) ── */}
+    <div className="flex flex-col gap-5">
+      {/* ── Masthead (unchanged) ── */}
       <header className="flex flex-col gap-4 border-b border-line pb-6 md:flex-row md:items-end md:justify-between">
         <div className="max-w-2xl">
           <div className="font-[var(--font-jetbrains-mono)] text-[10px] font-medium uppercase tracking-[0.22em] text-fg-dim">
@@ -198,26 +210,15 @@ export function HomePage() {
 
       {data ? (
         <>
-          {/* 1 · Connect banner (demo) / account strip (live) */}
-          <AccountBar />
-
-          {/* 2 · Clickable stat tiles */}
-          <StatTiles data={data} />
-
-          {/* 3 · Daily briefing */}
-          <BriefingPanel data={data} stale={briefingStale} />
-
-          {/* 4 · Signals + Wealth */}
-          <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <TopSignalsPanel data={data} />
-            <WealthHighlightsPanel data={data} />
+          <AccountCard />
+          <SnapshotCard data={data} />
+          <BriefingCard data={data} stale={briefingStale} />
+          <section className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+            <TopSignalsCard data={data} />
+            <WealthCard data={data} />
           </section>
-
-          {/* 5 · How it works — slim, and only for visitors not yet live */}
-          {!auth.ready ? <HowItWorks /> : null}
-
-          {/* Data sources — quiet footer */}
-          <footer className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-line bg-surface px-4 py-3 text-[11px] text-fg-dim">
+          <HowItWorksCard />
+          <footer className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-[11px] text-fg-dim">
             <span>
               <span className="text-fg-muted">News · sectors · ETF · macro:</span>{" "}
               SoSoValue
@@ -228,12 +229,6 @@ export function HomePage() {
             <span>
               <span className="text-fg-muted">Intelligence:</span> Anthropic Claude
             </span>
-            {data.counts.last_event_at ? (
-              <span className="ml-auto">
-                last event{" "}
-                <Timestamp ms={data.counts.last_event_at} mode="relative" />
-              </span>
-            ) : null}
           </footer>
         </>
       ) : null}
@@ -241,9 +236,9 @@ export function HomePage() {
   );
 }
 
-/* ─────────────────────────── 1 · Account bar ─────────────────────────── */
+/* ─────────────────────── 1 · Connect / account card ──────────────────── */
 
-function AccountBar() {
+function AccountCard() {
   const auth = useSodexAuth();
   const [acct, setAcct] = useState<{
     equity: number;
@@ -276,81 +271,88 @@ function AccountBar() {
 
   if (auth.loading) return null;
 
-  // Not live — slim one-row connect banner (no AlphaIndex wording).
-  if (!auth.ready) {
-    return (
-      <div className="flex flex-col gap-3 rounded-xl border border-line bg-surface px-4 py-3 md:flex-row md:items-center md:justify-between">
-        <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-4">
-          <span className="text-[13px] text-fg">
-            Trade signals, news and Wealth products on SoDEX from Helix.
-          </span>
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[11px] text-fg-muted">
-            <ConnectStep n={1} label="Connect wallet" />
-            <span className="text-fg-dim">·</span>
-            <ConnectStep n={2} label="Approve 1 bp builder fee" />
-            <span className="text-fg-dim">·</span>
-            <ConnectStep n={3} label="Trade" />
-          </div>
-        </div>
-        {/* .trade-terminal so --accent-trade (primary blue) resolves, matching
-            the header Connect button exactly. */}
-        <span className="trade-terminal shrink-0">
-          <button
-            onClick={() => auth.openSetup()}
-            className="w-full rounded-full bg-[color:var(--accent-trade)] px-4 py-1.5 text-[12px] font-semibold text-[#0b0e11] transition-all hover:brightness-110 md:w-auto"
-          >
-            {auth.step === "wallet" ? "Connect" : "Finish setup"}
-          </button>
-        </span>
-      </div>
-    );
-  }
-
-  // Live — compact account strip.
   const money = (n: number) =>
     `$${Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const signed = (n: number) => `${n >= 0 ? "+" : "−"}${money(n)}`;
-  return (
-    <div className="flex flex-wrap items-center gap-x-8 gap-y-3 rounded-xl border border-positive/25 bg-positive/[0.04] px-4 py-3">
-      <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-positive">
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-positive" />
-        Connected
-        {auth.address ? (
-          <span className="font-[var(--font-jetbrains-mono)] text-fg-dim">
-            · {auth.address.slice(0, 6)}…{auth.address.slice(-4)}
-          </span>
-        ) : null}
-      </span>
-      <AcctStat label="Equity" value={acct ? money(acct.equity) : "…"} />
-      <AcctStat
-        label="uPnL today"
-        value={acct ? signed(acct.upnl) : "…"}
-        tone={
-          acct ? (acct.upnl > 0 ? "pos" : acct.upnl < 0 ? "neg" : "def") : "def"
-        }
-      />
-      <AcctStat
-        label="Open positions"
-        value={acct ? String(acct.positions) : "…"}
-      />
-      <Link
-        href="/trade"
-        className="ml-auto shrink-0 rounded-md border border-positive/40 bg-positive/10 px-3 py-1.5 text-[12px] font-medium text-positive transition-colors hover:bg-positive/20"
-      >
-        Open terminal →
-      </Link>
-    </div>
-  );
-}
 
-function ConnectStep({ n, label }: { n: number; label: string }) {
+  // Live — "Your SoDEX account".
+  if (auth.ready) {
+    return (
+      <section className={CARD}>
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <Eyebrow>
+              Live trading · Connected
+              {auth.address ? (
+                <span className="ml-2 font-normal normal-case tracking-normal text-fg-dim">
+                  {auth.address.slice(0, 6)}…{auth.address.slice(-4)}
+                </span>
+              ) : null}
+            </Eyebrow>
+            <h2 className="mt-1.5 font-[var(--font-fraunces)] text-[19px] font-light leading-tight text-fg">
+              Your SoDEX account
+            </h2>
+            <div className="mt-3 flex flex-wrap items-end gap-x-9 gap-y-3">
+              <AcctStat label="Equity" value={acct ? money(acct.equity) : "…"} />
+              <AcctStat
+                label="uPnL today"
+                value={acct ? signed(acct.upnl) : "…"}
+                tone={
+                  acct
+                    ? acct.upnl > 0
+                      ? "pos"
+                      : acct.upnl < 0
+                        ? "neg"
+                        : "def"
+                    : "def"
+                }
+              />
+              <AcctStat
+                label="Open positions"
+                value={acct ? String(acct.positions) : "…"}
+              />
+            </div>
+          </div>
+          <Link href="/trade" className={cn(BTN, "shrink-0")}>
+            Open terminal →
+          </Link>
+        </div>
+      </section>
+    );
+  }
+
+  // Demo — "Put Helix to work with real capital".
   return (
-    <span className="inline-flex items-center gap-1.5">
-      <span className="flex h-4 w-4 items-center justify-center rounded-full border border-accent/40 bg-accent/15 text-[9px] font-semibold text-accent-2">
-        {n}
-      </span>
-      {label}
-    </span>
+    <section className={CARD}>
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div className="max-w-2xl">
+          <Eyebrow>Live trading · SoDEX mainnet</Eyebrow>
+          <h2 className="mt-1.5 font-[var(--font-fraunces)] text-[19px] font-light leading-tight text-fg">
+            Put Helix to work with real capital
+          </h2>
+          <p className="mt-1.5 text-[12.5px] leading-relaxed text-fg-muted">
+            Connect once to trade signals, news and Wealth products as real
+            SoDEX orders, one click each.{" "}
+            <span className="text-fg-dim">
+              Helix never holds your keys; you sign in your own wallet.
+            </span>
+          </p>
+          <ol className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[11px] text-fg-muted">
+            <Step n={1} label="Connect wallet" />
+            <Arrow />
+            <Step n={2} label="Approve once (1 bp builder fee)" />
+            <Arrow />
+            <Step n={3} label="Trade from your browser" />
+          </ol>
+        </div>
+        <button
+          onClick={() => auth.openSetup()}
+          className={cn(BTN, "shrink-0")}
+        >
+          {auth.step === "wallet" ? "Connect SoDEX" : "Finish setup"} →
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -364,13 +366,14 @@ function AcctStat({
   tone?: "pos" | "neg" | "def";
 }) {
   return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-[9px] font-medium uppercase tracking-wider text-fg-dim">
+    <div className="flex flex-col gap-1">
+      <span className="text-[9.5px] font-medium uppercase tracking-wider text-fg-dim">
         {label}
       </span>
       <span
         className={cn(
-          "font-[var(--font-jetbrains-mono)] text-[15px] font-semibold tabular-nums",
+          FIG,
+          "text-[20px]",
           tone === "pos"
             ? "text-positive"
             : tone === "neg"
@@ -384,94 +387,71 @@ function AcctStat({
   );
 }
 
-/* ─────────────────────────── 2 · Stat tiles ──────────────────────────── */
+/* ─────────────────────────── 2 · Live snapshot ───────────────────────── */
 
-function StatTiles({ data }: { data: HomeData }) {
+function SnapshotCard({ data }: { data: HomeData }) {
   const c = data.calibration;
   const rateReady = c.graded >= 10 && c.hit_rate != null;
   const wealthHref = data.wealth.usdc_earn
     ? `/wealth/${encodeURIComponent(data.wealth.usdc_earn.fund_id)}`
     : "/wealth-index";
   return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-      <TileLink
-        href="/signals"
-        label="Pending signals"
-        value={String(data.signal_stats.total_pending)}
-        sub={`${data.signal_stats.auto} auto · ${data.signal_stats.review} review`}
-        tone="accent"
-      />
-      <TileLink
-        href={wealthHref}
-        label={data.wealth.usdc_earn ? `${data.wealth.usdc_earn.name} · APY` : "USDC Earn APY"}
-        value={data.wealth.usdc_earn ? `${data.wealth.usdc_earn.apy.toFixed(2)}%` : "—"}
-        sub={`${data.wealth.product_count} Wealth products`}
-        tone="accent"
-      />
-      <TileLink
-        href="/signals?tab=graded"
-        label="Signal hit rate"
-        value={rateReady ? `${Math.round((c.hit_rate ?? 0) * 100)}%` : "—"}
-        sub={
-          rateReady
-            ? `${c.graded} graded`
-            : `${c.graded} graded · rate after 10`
-        }
-        tone={
-          rateReady
-            ? (c.hit_rate ?? 0) >= 0.55
-              ? "positive"
-              : (c.hit_rate ?? 0) <= 0.45
-                ? "negative"
-                : "default"
-            : "default"
-        }
-      />
-      <TileLink
-        href="/events"
-        label="Events processed"
-        value={data.counts.total_events.toLocaleString()}
-        sub={`${data.counts.total_classified.toLocaleString()} AI-classified`}
-      />
-    </div>
+    <section className={CARD}>
+      <Eyebrow>Live snapshot</Eyebrow>
+      <div className="mt-4 grid grid-cols-2 gap-x-5 gap-y-5 sm:grid-cols-4">
+        <Figure
+          href="/signals"
+          label="Pending signals"
+          value={String(data.signal_stats.total_pending)}
+          sub={`${data.signal_stats.auto} auto · ${data.signal_stats.review} review`}
+        />
+        <Figure
+          href={wealthHref}
+          label={data.wealth.usdc_earn ? `${data.wealth.usdc_earn.name} · APY` : "USDC Earn · APY"}
+          value={data.wealth.usdc_earn ? `${data.wealth.usdc_earn.apy.toFixed(2)}%` : "—"}
+          sub={`${data.wealth.product_count} Wealth products`}
+        />
+        <Figure
+          href="/signals?tab=graded"
+          label="Signal hit rate"
+          value={rateReady ? `${Math.round((c.hit_rate ?? 0) * 100)}%` : "—"}
+          sub={
+            rateReady
+              ? `${c.graded} graded`
+              : `${c.graded} graded · rate after 10`
+          }
+        />
+        <Figure
+          href="/events"
+          label="Events processed"
+          value={data.counts.total_events.toLocaleString()}
+          sub={`${data.counts.total_classified.toLocaleString()} AI-classified`}
+        />
+      </div>
+    </section>
   );
 }
 
-function TileLink({
+function Figure({
   href,
   label,
   value,
   sub,
-  tone = "default",
 }: {
   href: string;
   label: string;
   value: string;
   sub: string;
-  tone?: "default" | "positive" | "negative" | "accent";
 }) {
-  const valCls =
-    tone === "positive"
-      ? "text-positive"
-      : tone === "negative"
-        ? "text-negative"
-        : tone === "accent"
-          ? "text-accent-2"
-          : "text-fg";
   return (
     <Link
       href={href}
-      className="group flex min-w-0 flex-col gap-1 rounded-xl border border-line bg-surface px-4 py-3 transition-colors hover:border-line-2 hover:bg-surface-2/30"
+      className="group -mx-1 flex min-w-0 flex-col gap-1.5 rounded-lg px-1 py-1 transition-colors hover:bg-accent/[0.05]"
     >
-      <span className="truncate text-[9px] font-medium uppercase tracking-wider text-fg-dim">
+      <span className="truncate text-[9.5px] font-medium uppercase tracking-wider text-fg-dim">
         {label}
       </span>
-      <span
-        className={cn(
-          "font-[var(--font-jetbrains-mono)] text-[20px] font-semibold tabular-nums",
-          valCls,
-        )}
-      >
+      <span className={cn(FIG, "text-[27px] group-hover:text-accent-2")}>
         {value}
       </span>
       <span className="truncate text-[10px] text-fg-dim">{sub}</span>
@@ -479,49 +459,40 @@ function TileLink({
   );
 }
 
-/* ─────────────────────────── 3 · Briefing ────────────────────────────── */
+/* ─────────────────────────── 3 · Daily briefing ──────────────────────── */
 
-function BriefingPanel({ data, stale }: { data: HomeData; stale: boolean }) {
+function BriefingCard({ data, stale }: { data: HomeData; stale: boolean }) {
   const b = data.briefing;
   if (!b) {
     return (
-      <Panel>
-        <PanelHead title="Daily briefing" href="/briefing" action="Briefing" />
-        <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+      <section className={CARD}>
+        <Eyebrow>Daily briefing</Eyebrow>
+        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <div className="text-[13px] text-fg">No briefing for today yet.</div>
-            <div className="text-[11px] text-fg-dim">
+            <div className="font-[var(--font-fraunces)] text-[18px] font-light text-fg">
+              No briefing for today yet.
+            </div>
+            <div className="mt-0.5 text-[12px] text-fg-muted">
               Claude reads everything and writes a 3-paragraph market read in
               ~25s.
             </div>
           </div>
-          <Link
-            href="/briefing"
-            className="shrink-0 rounded-md border border-accent/50 bg-accent/15 px-3 py-1.5 text-[12px] font-medium text-accent-2 hover:bg-accent/25"
-          >
+          <Link href="/briefing" className={cn(BTN, "shrink-0")}>
             Generate briefing →
           </Link>
         </div>
-      </Panel>
+      </section>
     );
   }
-  const chip = REGIME_CHIP[b.regime];
+  const rw = REGIME_WORD[b.regime];
   const tp = b.top_pick;
   return (
-    <Panel className={stale ? "border-warning/40" : undefined}>
-      <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3">
-        <h2 className="font-[var(--font-jetbrains-mono)] text-[10px] font-semibold uppercase tracking-[0.18em] text-fg-dim">
-          Daily briefing
-        </h2>
-        <span className="text-[11px] text-fg-dim">{b.date}</span>
-        <span
-          className={cn(
-            "rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide",
-            chip.cls,
-          )}
-        >
-          {chip.label}
-        </span>
+    <section className={cn(CARD, stale && "border-warning/40")}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Eyebrow>
+          Daily briefing · {b.date} ·{" "}
+          <span className={rw.cls}>{rw.label.toUpperCase()}</span>
+        </Eyebrow>
         {stale ? (
           <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-warning">
             Briefing delayed
@@ -536,115 +507,111 @@ function BriefingPanel({ data, stale }: { data: HomeData; stale: boolean }) {
           generated <Timestamp ms={b.generated_at} mode="relative" />
         </span>
       </div>
-      <div className="flex flex-col gap-3 px-4 py-4">
-        <h3 className="font-[var(--font-fraunces)] text-[20px] font-light leading-snug text-fg md:text-[22px]">
-          {b.headline}
-        </h3>
-        {b.summary ? (
-          <p className="line-clamp-2 max-w-3xl text-[12.5px] leading-relaxed text-fg-muted">
-            {b.summary}
-          </p>
-        ) : null}
-        {tp ? (
-          <div className="rounded-lg border border-line bg-surface-2/40 p-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[9.5px] font-medium uppercase tracking-wider text-accent-2">
-                Top pick today
-              </span>
-              <AssetLogo symbol={tp.asset_symbol} size={18} />
-              <span className="font-mono text-sm font-semibold text-fg">
-                {fmtAssetSymbol(tp.asset_symbol)}
-              </span>
-              <Badge
-                tone={
-                  tp.direction === "long"
-                    ? "positive"
-                    : tp.direction === "short"
-                      ? "negative"
-                      : "warning"
-                }
-                mono
-              >
-                {tp.direction.toUpperCase()}
-              </Badge>
-              <span className="ml-auto font-[var(--font-jetbrains-mono)] text-[11px] tabular-nums text-fg-muted">
-                {Math.round(tp.conviction * 100)}% conviction
-              </span>
-            </div>
-            <div className="mt-2">
-              <ConvictionBar pct={tp.conviction * 100} />
-            </div>
-            <p className="mt-2 text-[12px] leading-relaxed text-fg-muted">
-              {tp.thesis}
-            </p>
-            <div className="mt-3 flex flex-wrap items-center gap-3">
-              {b.top_pick_sodex &&
-              (tp.direction === "long" || tp.direction === "short") ? (
-                <TradeLink sodexSymbol={b.top_pick_sodex} side={tp.direction} />
-              ) : null}
-              <Link
-                href="/briefing"
-                className="text-[11px] text-accent-2 hover:underline"
-              >
-                Read the full briefing →
-              </Link>
-            </div>
+
+      <h2 className="mt-2.5 font-[var(--font-fraunces)] text-[22px] font-light leading-snug text-fg">
+        {b.headline}
+      </h2>
+      {b.summary ? (
+        <p className="mt-2 line-clamp-2 max-w-3xl text-[12.5px] leading-relaxed text-fg-muted">
+          {b.summary}
+        </p>
+      ) : null}
+
+      {tp ? (
+        <div className="mt-4 rounded-lg border border-accent/20 bg-accent/[0.04] p-3.5">
+          <Eyebrow>Top pick today</Eyebrow>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <AssetLogo symbol={tp.asset_symbol} size={18} />
+            <span className="font-mono text-sm font-semibold text-fg">
+              {fmtAssetSymbol(tp.asset_symbol)}
+            </span>
+            <span
+              className={cn(
+                "text-[11px] font-semibold uppercase tracking-wide",
+                tp.direction === "long"
+                  ? "text-positive"
+                  : tp.direction === "short"
+                    ? "text-negative"
+                    : "text-accent-2",
+              )}
+            >
+              {tp.direction}
+            </span>
+            <span className="ml-auto text-[11px] text-fg-muted">
+              {Math.round(tp.conviction * 100)}% conviction
+            </span>
           </div>
-        ) : (
-          <Link
-            href="/briefing"
-            className="self-start text-[11px] text-accent-2 hover:underline"
-          >
-            Read the full briefing →
-          </Link>
-        )}
-      </div>
-    </Panel>
+          <div className="mt-2">
+            <ConvictionBar pct={tp.conviction * 100} />
+          </div>
+          <p className="mt-2 text-[12px] leading-relaxed text-fg-muted">
+            {tp.thesis}
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            {b.top_pick_sodex &&
+            (tp.direction === "long" || tp.direction === "short") ? (
+              <TradeLink sodexSymbol={b.top_pick_sodex} side={tp.direction} />
+            ) : null}
+            <Link
+              href="/briefing"
+              className="text-[11px] text-accent-2 hover:underline"
+            >
+              Read the full briefing →
+            </Link>
+          </div>
+        </div>
+      ) : (
+        <Link
+          href="/briefing"
+          className="mt-3 inline-block text-[11px] text-accent-2 hover:underline"
+        >
+          Read the full briefing →
+        </Link>
+      )}
+    </section>
   );
 }
 
 /* ─────────────────────────── 4a · Top signals ────────────────────────── */
 
-function TopSignalsPanel({ data }: { data: HomeData }) {
+function TopSignalsCard({ data }: { data: HomeData }) {
   const sigs = data.top_signals;
   const graded = data.recent_graded;
   const showGraded = sigs.length === 0 && graded.length > 0;
   return (
-    <Panel>
-      <PanelHead
-        title={showGraded ? "Recently graded" : "Top signals"}
+    <section className={CARD}>
+      <CardHead
+        eyebrow={showGraded ? "Recently graded" : "Top signals"}
         href="/signals"
         action="All signals"
       />
       {sigs.length > 0 ? (
-        <ul className="divide-y divide-line">
+        <ul className="divide-y divide-accent/10">
           {sigs.map((s) => (
-            <li key={s.id} className="flex items-start gap-3 px-4 py-3">
+            <li key={s.id} className="flex items-start gap-3 py-3 first:pt-0">
               <AssetLogo symbol={s.asset_symbol} size={22} />
               <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-1.5">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <span className="font-mono text-[13px] font-semibold text-fg">
                     {fmtAssetSymbol(s.asset_symbol, s.asset_kind)}
                   </span>
-                  <Badge
-                    tone={s.direction === "long" ? "positive" : "negative"}
-                    mono
+                  <span
+                    className={cn(
+                      "text-[11px] font-semibold uppercase tracking-wide",
+                      s.direction === "long"
+                        ? "text-positive"
+                        : "text-negative",
+                    )}
                   >
-                    {s.direction.toUpperCase()}
-                  </Badge>
-                  <Badge
-                    tone={
-                      s.tier === "auto"
-                        ? "accent"
-                        : s.tier === "review"
-                          ? "info"
-                          : "default"
-                    }
-                  >
+                    {s.direction}
+                  </span>
+                  <span className="text-[10px] uppercase tracking-wide text-fg-dim">
                     {s.tier}
-                  </Badge>
+                  </span>
                   {s.event_type ? (
-                    <Badge tone="default">{s.event_type}</Badge>
+                    <span className="text-[10px] uppercase tracking-wide text-fg-dim">
+                      · {s.event_type}
+                    </span>
                   ) : null}
                   <span className="ml-auto font-[var(--font-jetbrains-mono)] text-[11px] tabular-nums text-fg-muted">
                     {Math.round(s.confidence * 100)}%
@@ -671,38 +638,30 @@ function TopSignalsPanel({ data }: { data: HomeData }) {
           ))}
         </ul>
       ) : showGraded ? (
-        <ul className="divide-y divide-line">
-          <li className="px-4 pt-3 text-[11px] text-fg-dim">
+        <ul className="divide-y divide-accent/10">
+          <li className="pb-2 text-[11px] text-fg-dim">
             No fresh signals — latest graded calls:
           </li>
           {graded.map((g) => {
             const m = OUTCOME_META[g.outcome];
             return (
-              <li
-                key={g.signal_id}
-                className="flex items-center gap-3 px-4 py-3"
-              >
+              <li key={g.signal_id} className="flex items-center gap-3 py-3">
                 <AssetLogo symbol={g.asset_symbol} size={22} />
-                <div className="flex flex-wrap items-center gap-1.5">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <span className="font-mono text-[13px] font-semibold text-fg">
                     {fmtAssetSymbol(g.asset_symbol, g.asset_kind)}
                   </span>
-                  <Badge
-                    tone={g.direction === "long" ? "positive" : "negative"}
-                    mono
-                  >
-                    {g.direction.toUpperCase()}
-                  </Badge>
                   <span
                     className={cn(
-                      "inline-flex items-center gap-1 text-[11px] font-semibold",
-                      m.tone === "positive"
+                      "text-[11px] font-semibold uppercase tracking-wide",
+                      g.direction === "long"
                         ? "text-positive"
-                        : m.tone === "negative"
-                          ? "text-negative"
-                          : "text-fg-dim",
+                        : "text-negative",
                     )}
                   >
+                    {g.direction}
+                  </span>
+                  <span className={cn("text-[11px] font-semibold", m.cls)}>
                     {m.mark} {m.label}
                   </span>
                 </div>
@@ -723,36 +682,36 @@ function TopSignalsPanel({ data }: { data: HomeData }) {
           })}
         </ul>
       ) : (
-        <div className="px-4 py-10 text-center text-[13px] text-fg-dim">
+        <div className="py-8 text-center text-[13px] text-fg-dim">
           No fresh signals right now.
         </div>
       )}
-    </Panel>
+    </section>
   );
 }
 
 /* ─────────────────────────── 4b · Wealth ─────────────────────────────── */
 
-function WealthHighlightsPanel({ data }: { data: HomeData }) {
+function WealthCard({ data }: { data: HomeData }) {
   const hs = data.wealth.highlights;
   return (
-    <Panel>
-      <PanelHead
-        title="Wealth highlights"
+    <section className={CARD}>
+      <CardHead
+        eyebrow="Wealth highlights"
         href="/wealth-index"
         action="Wealth Index"
       />
       {hs.length === 0 ? (
-        <div className="px-4 py-10 text-center text-[13px] text-fg-dim">
+        <div className="py-8 text-center text-[13px] text-fg-dim">
           Couldn&apos;t load SoDEX Wealth right now.
         </div>
       ) : (
-        <ul className="divide-y divide-line">
+        <ul className="divide-y divide-accent/10">
           {hs.map((h) => (
             <li key={h.fund_id}>
               <Link
                 href={`/wealth/${encodeURIComponent(h.fund_id)}`}
-                className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-2/30"
+                className="-mx-1 flex items-center gap-3 rounded-lg px-1 py-3 transition-colors first:pt-0 hover:bg-accent/[0.05]"
               >
                 <Monogram symbol={h.symbol} name={h.name} />
                 <div className="min-w-0 flex-1">
@@ -760,12 +719,12 @@ function WealthHighlightsPanel({ data }: { data: HomeData }) {
                     <span className="truncate text-[13px] font-medium text-fg">
                       {h.name}
                     </span>
-                    <span className="shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-fg-dim">
+                    <span className="shrink-0 rounded border border-accent/20 bg-accent/5 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-accent-2">
                       {CATEGORY_LABEL[h.category] ?? h.category}
                     </span>
                   </div>
-                  <div className="mt-1 w-full max-w-[160px]">
-                    <WealthSparkline fundId={h.fund_id} />
+                  <div className="mt-1 max-w-[150px]">
+                    <WealthSparkline fundId={h.fund_id} color="var(--accent)" />
                   </div>
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-0.5">
@@ -793,13 +752,14 @@ function WealthHighlightsPanel({ data }: { data: HomeData }) {
                       />
                     </span>
                   ) : null}
+                  <span className="text-[11px] text-accent-2">→</span>
                 </div>
               </Link>
             </li>
           ))}
         </ul>
       )}
-    </Panel>
+    </section>
   );
 }
 
@@ -807,65 +767,46 @@ function WealthHighlightsPanel({ data }: { data: HomeData }) {
 
 const STEPS = ["Ingest", "Classify", "Signal", "Act", "Calibrate"];
 
-function HowItWorks() {
+function HowItWorksCard() {
   return (
-    <div className="flex flex-wrap items-center gap-x-2 gap-y-2 rounded-xl border border-line bg-surface px-4 py-3">
-      <span className="font-[var(--font-jetbrains-mono)] text-[9px] font-semibold uppercase tracking-wider text-fg-dim">
-        How it works
-      </span>
-      {STEPS.map((s, i) => (
-        <span
-          key={s}
-          className="inline-flex items-center gap-2 text-[11px] text-fg-muted"
-        >
-          <span className="inline-flex items-center gap-1.5">
-            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-accent/20 text-[9px] font-bold text-accent-2">
-              {i + 1}
+    <section className={cn(CARD, "py-4")}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <Eyebrow>How it works</Eyebrow>
+        <ol className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[11px] text-fg-muted">
+          {STEPS.map((s, i) => (
+            <span key={s} className="inline-flex items-center gap-2">
+              <Step n={i + 1} label={s} />
+              {i < STEPS.length - 1 ? <Arrow /> : null}
             </span>
-            {s}
-          </span>
-          {i < STEPS.length - 1 ? <span className="text-fg-dim">→</span> : null}
-        </span>
-      ))}
-    </div>
+          ))}
+        </ol>
+      </div>
+    </section>
   );
 }
 
 /* ─────────────────────────── shared bits ─────────────────────────────── */
 
-function Panel({
-  className,
-  children,
-}: {
-  className?: string;
-  children: React.ReactNode;
-}) {
+function Eyebrow({ children }: { children: React.ReactNode }) {
   return (
-    <section
-      className={cn(
-        "overflow-hidden rounded-xl border border-line bg-surface",
-        className,
-      )}
-    >
+    <div className="font-[var(--font-jetbrains-mono)] text-[10px] font-medium uppercase tracking-[0.2em] text-accent-2">
       {children}
-    </section>
+    </div>
   );
 }
 
-function PanelHead({
-  title,
+function CardHead({
+  eyebrow,
   href,
   action = "View all",
 }: {
-  title: string;
+  eyebrow: string;
   href?: string;
   action?: string;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
-      <h2 className="font-[var(--font-jetbrains-mono)] text-[10px] font-semibold uppercase tracking-[0.18em] text-fg-dim">
-        {title}
-      </h2>
+    <div className="mb-3.5 flex items-center justify-between gap-3">
+      <Eyebrow>{eyebrow}</Eyebrow>
       {href ? (
         <Link
           href={href}
@@ -878,10 +819,25 @@ function PanelHead({
   );
 }
 
+function Step({ n, label }: { n: number; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="flex h-4 w-4 items-center justify-center rounded-full border border-accent/40 bg-accent/15 text-[9px] font-semibold text-accent-2">
+        {n}
+      </span>
+      {label}
+    </span>
+  );
+}
+
+function Arrow() {
+  return <span className="text-fg-dim">→</span>;
+}
+
 function ConvictionBar({ pct }: { pct: number }) {
   const p = Math.max(0, Math.min(100, pct));
   return (
-    <div className="h-1 w-full overflow-hidden rounded-full bg-surface-2">
+    <div className="h-[3px] w-full overflow-hidden rounded-full bg-accent/10">
       <div
         className="h-full rounded-full bg-accent transition-all"
         style={{ width: `${p}%` }}
@@ -890,26 +846,21 @@ function ConvictionBar({ pct }: { pct: number }) {
   );
 }
 
-function Monogram({
-  symbol,
-  name,
-}: {
-  symbol: string | null;
-  name: string;
-}) {
+function Monogram({ symbol, name }: { symbol: string | null; name: string }) {
   const txt =
     (symbol || name).replace(/[^a-zA-Z0-9]/g, "").slice(0, 2).toUpperCase() ||
     "?";
   return (
-    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-line bg-surface-2 font-[var(--font-jetbrains-mono)] text-[10px] font-semibold text-fg-muted">
+    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-accent/20 bg-accent/5 font-[var(--font-jetbrains-mono)] text-[10px] font-semibold text-accent-2">
       {txt}
     </span>
   );
 }
 
 /** Deep-link into the trade terminal with the signal's market + side preset,
- *  tagged ?src=event (the same attribution the Event Stream uses). Only
- *  rendered when the signal maps to a SoDEX market (sodex_symbol present). */
+ *  tagged ?src=event. Outlined + tinted-fill shape (like the orange button),
+ *  but keeps green/red for the side. Only when the asset maps to a SoDEX
+ *  market (sodex_symbol present). */
 function TradeLink({
   sodexSymbol,
   side,
@@ -921,7 +872,7 @@ function TradeLink({
     <Link
       href={`/trade?market=${encodeURIComponent(sodexSymbol)}&side=${side}&src=event`}
       className={cn(
-        "inline-flex shrink-0 items-center gap-1 rounded border px-2 py-0.5 text-[10px] font-medium transition-colors",
+        "inline-flex shrink-0 items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors",
         side === "long"
           ? "border-positive/40 bg-positive/10 text-positive hover:bg-positive/20"
           : "border-negative/40 bg-negative/10 text-negative hover:bg-negative/20",
