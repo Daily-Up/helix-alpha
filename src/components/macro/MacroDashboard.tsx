@@ -51,10 +51,20 @@ function fmtSurprise(s: HistoryRow): string {
     body = (s.surprise / 1_000).toFixed(0) + "K";
     suffix = "";
   } else {
-    body = s.surprise.toFixed(2);
-    // For small numbers we DO know the unit: % for inflation/PMI deltas,
-    // pp (percentage points) for everything else.
-    suffix = s.unit ?? "pp";
+    // Unit is set by the INDICATOR, not the magnitude. SoSoValue sends bare
+    // numbers (unit is null), but the shape is reliable: rate / index prints
+    // (unemployment, CPI, Core CPI, PPI, retail sales, PMI) are DECIMALS and
+    // the surprise is in percentage/index points → "pp"; headcount prints
+    // (NFP, initial jobless claims) are INTEGERS reported in thousands → "k".
+    // Guessing by magnitude mislabeled NFP's "-60" as "-60pp" (it's -60k jobs).
+    const raw = `${s.actual_raw ?? ""}${s.forecast_raw ?? ""}`;
+    if (/%/.test(raw) || raw.includes(".")) {
+      body = s.surprise.toFixed(2);
+      suffix = "pp";
+    } else {
+      body = s.surprise.toFixed(0);
+      suffix = "k";
+    }
   }
   return `${sign}${body}${suffix}`;
 }
