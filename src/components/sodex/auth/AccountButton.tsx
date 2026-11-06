@@ -80,7 +80,7 @@ function Menu({ anchor }: { anchor: React.RefObject<HTMLButtonElement | null> })
   const [copied, setCopied] = useState(false);
   const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const fee = getBuilderCode("mainnet")?.fee ?? 10;
+  const fee = getBuilderCode("mainnet")?.fee ?? 20;
   const expLabel = a.keyExpiry ? formatExpiry(a.keyExpiry) : "";
   const needsRenew = a.keyExpiry?.msLeft != null && a.keyExpiry.msLeft < DAY;
 

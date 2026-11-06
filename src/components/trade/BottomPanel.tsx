@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { cn } from "@/components/ui/cn";
 import { buttonClass } from "@/components/ui/Button";
+import { getBuilderCode } from "@/lib/sodex-onchain/chains";
 import { useSodexAuth } from "@/components/sodex/auth/SodexAuthProvider";
 import { AssetLogo } from "@/components/ui/AssetLogo";
 import type { TpSlMeta } from "./TpSlModal";
@@ -1102,8 +1103,12 @@ function CloseAllConfirm({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
-  const TAKER = 0.0004; // exchange taker; builder adds 0.0001 → ~0.0005 total.
-  const TOTAL_RATE = 0.0005;
+  // Rough close-all fee estimate: hardcoded exchange taker (real rate is
+  // per-symbol) + the live builder rate, so it tracks the builder fee instead
+  // of going stale when it changes.
+  const TAKER = 0.0004;
+  const builderCode = getBuilderCode("mainnet");
+  const TOTAL_RATE = TAKER + (builderCode ? builderCode.fee / 100_000 : 0);
   const rows = positions.map((p) => {
     const abs = Math.abs(Number(p.sz));
     const mark = markBySymbol[p.s.toUpperCase()] ?? Number(p.ep);

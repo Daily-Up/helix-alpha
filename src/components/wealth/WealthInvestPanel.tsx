@@ -4,7 +4,8 @@
  * WealthInvestPanel — in-app Buy/Sell for a spot-tradable (`clob`) wealth fund.
  * MARKET IOC orders via the separate wealth spot path (placeWealthSpotOrder →
  * shared placeOrderBatch; perps code untouched). Builder fee is 0% on buys /
- * 0.01% on sells (SoDEX only charges spot builder fees on the sell side).
+ * the builder rate (2 bp) on sells (SoDEX only charges spot builder fees on the
+ * sell side).
  *
  * Gated behind wealthInvestEnabled(); otherwise the fund page shows the
  * "Invest on SoDEX ↗" link. Never auto-submits — the user clicks Place.
@@ -13,6 +14,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { cn } from "@/components/ui/cn";
 import { buttonClass } from "@/components/ui/Button";
+import { getBuilderCode } from "@/lib/sodex-onchain/chains";
 import { fmtUsd } from "@/lib/format";
 import { useSodexAuth } from "@/components/sodex/auth/SodexAuthProvider";
 import { fetchFeeRate, type FeeRate } from "@/lib/portfolio/fetch";
@@ -280,7 +282,11 @@ export function WealthInvestPanel({
         </div>
         <div className="flex justify-between">
           <span>Builder fee</span>
-          <span>{tab === "buy" ? "0% on buys" : "0.01% on sells"}</span>
+          <span>
+            {tab === "buy"
+              ? "0% on buys"
+              : `${((getBuilderCode("mainnet")?.fee ?? 0) / 1000).toFixed(2)}% on sells`}
+          </span>
         </div>
       </div>
 

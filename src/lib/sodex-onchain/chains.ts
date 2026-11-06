@@ -129,8 +129,12 @@ const BUILDER_ID: Record<SodexNetwork, number> = {
   mainnet: Number(process.env.NEXT_PUBLIC_SODEX_BUILDER_ID_MAINNET ?? "8409") || 8409,
   testnet: Number(process.env.NEXT_PUBLIC_SODEX_BUILDER_ID_TESTNET ?? "0") || 0,
 };
+// 20 tenths-of-a-bp = 2 bp = 0.02% (was 10 = 1 bp). Raised 2026-11-06.
+// NOTE: this is also the max-fee rate requested in approveBuilder(), so users
+// who approved at the old 1 bp ceiling must RE-APPROVE before their orders will
+// route at 2 bp (SoDEX rejects a builder fee above the approved max).
 const BUILDER_FEE_TENTHS_BP =
-  Number(process.env.NEXT_PUBLIC_SODEX_BUILDER_FEE ?? "10") || 10;
+  Number(process.env.NEXT_PUBLIC_SODEX_BUILDER_FEE ?? "20") || 20;
 
 export interface SodexBuilderCode {
   /** Helix's SoDEX builder account id. */

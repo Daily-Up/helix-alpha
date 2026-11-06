@@ -26,7 +26,7 @@ export function SodexSettingsPage() {
   const a = useSodexAuth();
   const [keys, setKeys] = useState<SodexApiKeyRow[]>([]);
   const [loadingKeys, setLoadingKeys] = useState(false);
-  const fee = getBuilderCode("mainnet")?.fee ?? 10;
+  const fee = getBuilderCode("mainnet")?.fee ?? 20;
 
   const loadKeys = useCallback(async () => {
     if (!a.address) {
