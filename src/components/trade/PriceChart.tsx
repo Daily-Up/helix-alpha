@@ -7,7 +7,7 @@
  * lightweight-charts is imported inside the effect so it never SSRs.
  */
 
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/components/ui/cn";
 import type { SetupLevel } from "./SetupCard";
 
@@ -112,7 +112,108 @@ function PriceChartImpl({
     { text: string; color: string; dir: "up" | "down" }[]
   >([]);
 
+  // Whether the user is pinned to the right edge (following live) vs scrolled
+  // back; the current level targets (entry/liq/tp/sl/orders) held in a ref so
+  // the view-change subscriptions can re-evaluate visibility without re-running
+  // React effects; rAF handle for throttling; and the view-listener cleanup.
+  const followRef = useRef(true);
+  const targetsRef = useRef<
+    {
+      price: number;
+      color: string;
+      style: number;
+      lineTitle: string;
+      edgeLabel: string;
+    }[]
+  >([]);
+  const rafRef = useRef<number | null>(null);
+  const cleanupViewRef = useRef<(() => void) | null>(null);
+
   const digits = (candles[candles.length - 1]?.close ?? 1) < 10 ? 4 : 2;
+
+  // Decide each level's on-screen state from the ACTUAL price scale — where the
+  // price maps inside the pane (priceToCoordinate) — not the candle min/max. So
+  // a TP within the zoomed-out view draws as a full price line, and one
+  // scrolled off-screen shows an edge marker (↑ above / ↓ below). Called only
+  // through scheduleSync (next animation frame) so the scale is already current.
+  const syncLevels = useCallback(() => {
+    const series = candleRef.current;
+    const chart = chartRef.current;
+    const el = containerRef.current;
+    if (!series || !chart || !el) return;
+    for (const pl of tradeLinesRef.current) {
+      try {
+        series.removePriceLine(pl);
+      } catch {
+        /* no-op */
+      }
+    }
+    tradeLinesRef.current = [];
+    // Price-pane height = container height minus the time axis; priceToCoordinate
+    // returns a value in [0, paneH] for prices currently visible in the pane.
+    let timeAxisH = 28;
+    try {
+      const h = chart.timeScale().height?.();
+      if (typeof h === "number" && h > 0) timeAxisH = h;
+    } catch {
+      /* fallback 28 */
+    }
+    const paneH = Math.max(0, el.clientHeight - timeAxisH);
+    const lastClose =
+      candlesRef.current[candlesRef.current.length - 1]?.close ?? 0;
+    const out: { text: string; color: string; dir: "up" | "down" }[] = [];
+    for (const t of targetsRef.current) {
+      let coord: number | null = null;
+      try {
+        coord = series.priceToCoordinate(t.price);
+      } catch {
+        coord = null;
+      }
+      const visible = coord != null && coord >= 0 && coord <= paneH;
+      if (visible) {
+        tradeLinesRef.current.push(
+          series.createPriceLine({
+            price: t.price,
+            color: t.color,
+            lineWidth: 1,
+            lineStyle: t.style,
+            axisLabelVisible: true,
+            title: t.lineTitle,
+          }),
+        );
+      } else {
+        const dir: "up" | "down" =
+          coord != null
+            ? coord < 0
+              ? "up"
+              : "down"
+            : t.price >= lastClose
+              ? "up"
+              : "down";
+        out.push({
+          text: `${t.edgeLabel} ${dir === "up" ? "↑" : "↓"}`,
+          color: t.color,
+          dir,
+        });
+      }
+    }
+    setEdges((prev) =>
+      prev.length === out.length &&
+      prev.every((p, i) => p.text === out[i].text && p.dir === out[i].dir)
+        ? prev
+        : out,
+    );
+  }, []);
+
+  // rAF-throttle so a burst of view events (wheel, pan, resize) coalesces into
+  // one recompute per frame, after the scale has settled.
+  const scheduleSync = useCallback(() => {
+    if (rafRef.current != null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      syncLevels();
+    });
+  }, [syncLevels]);
 
   // Fetch candles.
   useEffect(() => {
@@ -241,10 +342,46 @@ function PriceChartImpl({
         if (hit) setLegend(hit);
       });
 
+      // Track right-edge follow (pinned to live vs scrolled back) and recompute
+      // level visibility whenever the horizontal view changes (pan / time zoom).
+      chart
+        .timeScale()
+        .subscribeVisibleLogicalRangeChange(
+          (range: { from: number; to: number } | null) => {
+            if (range) {
+              const lastIdx = candlesRef.current.length - 1;
+              followRef.current = range.to >= lastIdx - 2;
+            }
+            scheduleSync();
+          },
+        );
+
+      // Vertical zoom (wheel over the price axis) and price-axis drag emit no
+      // range-change event, so also recompute on wheel / mouseup, and on resize.
+      const onView = () => scheduleSync();
+      el.addEventListener("wheel", onView, { passive: true });
+      el.addEventListener("mouseup", onView);
+      let ro: ResizeObserver | null = null;
+      if (typeof ResizeObserver !== "undefined") {
+        ro = new ResizeObserver(() => scheduleSync());
+        ro.observe(el);
+      }
+      cleanupViewRef.current = () => {
+        el.removeEventListener("wheel", onView);
+        el.removeEventListener("mouseup", onView);
+        ro?.disconnect();
+      };
+
       setReady(true);
     })();
     return () => {
       disposed = true;
+      cleanupViewRef.current?.();
+      cleanupViewRef.current = null;
+      if (rafRef.current != null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
       if (chartRef.current) {
         chartRef.current.remove();
         chartRef.current = null;
@@ -254,7 +391,10 @@ function PriceChartImpl({
     };
   }, []);
 
-  // Push data.
+  // Push a full dataset — initial load, symbol change or timeframe change only
+  // (live ticks go through series.update() in the poll below, never here). For a
+  // fresh dataset we reset both axes (autoScale + fitContent) and resume
+  // following the latest bar.
   useEffect(() => {
     candlesRef.current = candles;
     if (!ready || !candleRef.current || candles.length === 0) return;
@@ -274,9 +414,16 @@ function PriceChartImpl({
         color: c.close >= c.open ? VOL_UP : VOL_DOWN,
       })),
     );
+    try {
+      candleRef.current.priceScale().applyOptions({ autoScale: true });
+    } catch {
+      /* no-op */
+    }
     chartRef.current?.timeScale().fitContent();
+    followRef.current = true;
     setLegend(candles[candles.length - 1] ?? null);
-  }, [candles, ready]);
+    scheduleSync();
+  }, [candles, ready, scheduleSync]);
 
   // Keep the price-axis precision in sync with the symbol's tick size.
   useEffect(() => {
@@ -313,6 +460,7 @@ function PriceChartImpl({
         const j = await r.json();
         if (cancelled || !j.ok || !Array.isArray(j.candles)) return;
         const lastT = candlesRef.current[candlesRef.current.length - 1]?.time ?? 0;
+        let appended = false;
         for (const c of j.candles as Candle[]) {
           if (c.time < lastT) continue; // never update older than the last bar
           candleRef.current?.update({
@@ -330,8 +478,23 @@ function PriceChartImpl({
           // keep the ref in sync so the legend/crosshair stay correct
           const arr = candlesRef.current;
           if (arr.length && arr[arr.length - 1].time === c.time) arr[arr.length - 1] = c;
-          else arr.push(c);
+          else {
+            arr.push(c);
+            appended = true;
+          }
         }
+        // A brand-new bar: only snap to the latest if the user is already at the
+        // right edge — otherwise leave their scrolled-back/zoomed view untouched.
+        if (appended && followRef.current) {
+          try {
+            chartRef.current?.timeScale().scrollToRealTime();
+          } catch {
+            /* no-op */
+          }
+        }
+        // New data shifts the autoscaled price range → re-evaluate which levels
+        // are on-screen (TP/SL may cross in or out of view).
+        scheduleSync();
       } catch {
         /* keep last good */
       }
@@ -341,7 +504,7 @@ function PriceChartImpl({
       cancelled = true;
       clearInterval(t);
     };
-  }, [ready, symbol, market, interval]);
+  }, [ready, symbol, market, interval, scheduleSync]);
 
   // Setup levels → price lines.
   useEffect(() => {
@@ -369,87 +532,68 @@ function PriceChartImpl({
     }
   }, [levels, ready, candles]);
 
-  // Position (entry neutral, liq red-dashed), TP (green dashed) / SL (red
-  // dashed), and open-order (side-coloured, labelled with size) price lines.
-  // Cleared + redrawn when they change or the symbol switches.
+  // Build the level targets (entry / liq / TP / SL / open orders) + the entry
+  // anchor for the autoscale nudge whenever the position or orders change.
+  // Visibility (full line vs edge marker) is decided by syncLevels from the live
+  // price scale, so NOTHING here touches the zoom/scale — the user's view is
+  // preserved across position refreshes. (The old autoScale re-enable here was
+  // what reset the vertical zoom on every account poll.)
   useEffect(() => {
-    const series = candleRef.current;
-    if (!ready || !series) return;
-    for (const pl of tradeLinesRef.current) {
-      try {
-        series.removePriceLine(pl);
-      } catch {
-        /* no-op */
-      }
-    }
-    tradeLinesRef.current = [];
-    const add = (price: number, color: string, style: number, title: string) =>
-      tradeLinesRef.current.push(
-        series.createPriceLine({
-          price,
-          color,
-          lineWidth: 1,
-          lineStyle: style,
-          axisLabelVisible: true,
-          title,
-        }),
-      );
+    if (!ready) return;
     const px = (n: number) => fmt(n, decimalsFromTick(tickSize));
-
-    // Candle price range (the autoscale target). Any TP/SL/liq/order line OUTSIDE
-    // this range is NOT drawn as a price line — it becomes an edge marker on the
-    // price axis instead, so the scale is never stretched to fit it.
-    let cMax = -Infinity;
-    let cMin = Infinity;
-    for (const c of candles) {
-      if (c.high > cMax) cMax = c.high;
-      if (c.low < cMin) cMin = c.low;
-    }
-    const hasRange = Number.isFinite(cMax) && Number.isFinite(cMin);
-    const out: { text: string; color: string; dir: "up" | "down" }[] = [];
-    const place = (
-      price: number,
-      color: string,
-      style: number,
-      lineTitle: string,
-      edgeLabel: string,
-    ) => {
-      if (!hasRange || (price >= cMin && price <= cMax)) {
-        add(price, color, style, lineTitle);
-      } else if (price > cMax) {
-        out.push({ text: `${edgeLabel} ↑`, color, dir: "up" });
-      } else {
-        out.push({ text: `${edgeLabel} ↓`, color, dir: "down" });
-      }
-    };
-
-    // Entry stays a price line (the autoscale nudges it into view when within
-    // ~5%). TP / SL / Liq / orders follow the same edge-or-line rule.
+    const targets: {
+      price: number;
+      color: string;
+      style: number;
+      lineTitle: string;
+      edgeLabel: string;
+    }[] = [];
     if (positionEntry != null && positionEntry > 0)
-      add(positionEntry, NEUTRAL, 0, "Entry");
+      targets.push({
+        price: positionEntry,
+        color: NEUTRAL,
+        style: 0,
+        lineTitle: "Entry",
+        edgeLabel: `Entry ${px(positionEntry)}`,
+      });
     if (positionLiq != null && positionLiq > 0)
-      place(positionLiq, DOWN, 2, "Liq", `Liq ${px(positionLiq)}`);
+      targets.push({
+        price: positionLiq,
+        color: DOWN,
+        style: 2,
+        lineTitle: "Liq",
+        edgeLabel: `Liq ${px(positionLiq)}`,
+      });
     if (tpPrice != null && tpPrice > 0)
-      place(tpPrice, UP, 2, `TP ${px(tpPrice)}`, `TP ${px(tpPrice)}`);
+      targets.push({
+        price: tpPrice,
+        color: UP,
+        style: 2,
+        lineTitle: `TP ${px(tpPrice)}`,
+        edgeLabel: `TP ${px(tpPrice)}`,
+      });
     if (slPrice != null && slPrice > 0)
-      place(slPrice, DOWN, 2, `SL ${px(slPrice)}`, `SL ${px(slPrice)}`);
+      targets.push({
+        price: slPrice,
+        color: DOWN,
+        style: 2,
+        lineTitle: `SL ${px(slPrice)}`,
+        edgeLabel: `SL ${px(slPrice)}`,
+      });
     for (const o of orderLines ?? []) {
       const label = o.side === "buy" ? "Buy" : "Sell";
-      place(o.price, o.side === "buy" ? UP : DOWN, 1, `${label} ${o.size}`, `${label} ${px(o.price)}`);
+      targets.push({
+        price: o.price,
+        color: o.side === "buy" ? UP : DOWN,
+        style: 1,
+        lineTitle: `${label} ${o.size}`,
+        edgeLabel: `${label} ${px(o.price)}`,
+      });
     }
-
-    entryRef.current = positionEntry != null && positionEntry > 0 ? positionEntry : null;
-    try {
-      series.priceScale().applyOptions({ autoScale: true });
-    } catch {
-      /* no-op */
-    }
-    setEdges((prev) =>
-      prev.length === out.length &&
-      prev.every((p, i) => p.text === out[i].text && p.dir === out[i].dir)
-        ? prev
-        : out,
-    );
+    targetsRef.current = targets;
+    entryRef.current =
+      positionEntry != null && positionEntry > 0 ? positionEntry : null;
+    scheduleSync();
   }, [
     ready,
     positionEntry,
@@ -459,7 +603,7 @@ function PriceChartImpl({
     orderLines,
     symbol,
     tickSize,
-    candles.length,
+    scheduleSync,
   ]);
 
   const up = legend ? legend.close >= legend.open : true;
