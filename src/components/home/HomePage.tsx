@@ -341,7 +341,7 @@ function AccountCard() {
           <ol className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[11px] text-fg-muted">
             <Step n={1} label="Connect wallet" />
             <Arrow />
-            <Step n={2} label="Approve once (2 bp builder fee)" />
+            <Step n={2} label="Approve once (3 bp builder fee)" />
             <Arrow />
             <Step n={3} label="Trade from your browser" />
           </ol>

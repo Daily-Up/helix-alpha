@@ -268,7 +268,7 @@ function KeyStep() {
 
 function BuilderStep() {
   const a = useSodexAuth();
-  const fee = getBuilderCode("mainnet")?.fee ?? 20;
+  const fee = getBuilderCode("mainnet")?.fee ?? 30;
   return (
     <div className="flex flex-col gap-3">
       <p className="text-[12px] text-fg-muted">

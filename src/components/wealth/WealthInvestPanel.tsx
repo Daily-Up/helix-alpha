@@ -4,7 +4,7 @@
  * WealthInvestPanel — in-app Buy/Sell for a spot-tradable (`clob`) wealth fund.
  * MARKET IOC orders via the separate wealth spot path (placeWealthSpotOrder →
  * shared placeOrderBatch; perps code untouched). Builder fee is 0% on buys /
- * the builder rate (2 bp) on sells (SoDEX only charges spot builder fees on the
+ * the builder rate (3 bp) on sells (SoDEX only charges spot builder fees on the
  * sell side).
  *
  * Gated behind wealthInvestEnabled(); otherwise the fund page shows the
