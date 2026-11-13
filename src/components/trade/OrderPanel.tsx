@@ -126,6 +126,7 @@ function OrderPanelImpl({
   const [limitPxInput, setLimitPxInput] = useState("");
   const [postOnly, setPostOnly] = useState(false);
   const [tpsl, setTpsl] = useState(false);
+  const [reduceOnly, setReduceOnly] = useState(false);
   const [stopInput, setStopInput] = useState("");
   const [targetInput, setTargetInput] = useState("");
 
@@ -200,10 +201,21 @@ function OrderPanelImpl({
     sizeUnit === "usd" ? rawSize : entryPrice ? rawSize * entryPrice : 0;
   const qty = entryPrice && entryPrice > 0 ? sizeUsd / entryPrice : 0;
 
+  // Open position (signed base units) for this market → reduce-only sizing.
+  const positionSz = acct?.positionSz ?? 0;
+  const positionNotional = Math.abs(positionSz) * (entryPrice ?? 0);
+
   // Buying power → slider ceiling. Falls back to a nominal $1000 pre-connect.
+  // In reduce-only mode the ceiling is the open position itself (100% = close
+  // the whole position), never buying power.
   const buyingPower =
     acct?.availableUsd != null ? acct.availableUsd * displayLeverage : null;
-  const sliderMax = buyingPower && buyingPower > 0 ? buyingPower : 1000;
+  const sliderMax =
+    reduceOnly && positionNotional > 0
+      ? positionNotional
+      : buyingPower && buyingPower > 0
+        ? buyingPower
+        : 1000;
   const pct = Math.max(0, Math.min(100, Math.round((sizeUsd / sliderMax) * 100)));
 
   const setFromPct = (p: number) => {
@@ -265,11 +277,33 @@ function OrderPanelImpl({
       ? Math.round(parsedLimit / rules.tickSize) * rules.tickSize
       : parsedLimit;
 
+  // Reduce-only (perps): close/reduce the open position, never flip it. Valid
+  // only with an open position, on the closing side, and no larger than the
+  // position (SoDEX rejects an over-close → "Reduce Only Too Large").
+  const hasPosition = isPerp && positionSz !== 0;
+  const reducingSide: "buy" | "sell" = positionSz > 0 ? "sell" : "buy";
+  const reduceOnlyError: string | null = !reduceOnly
+    ? null
+    : !hasPosition
+      ? "No position to reduce"
+      : side !== reducingSide
+        ? `Switch to ${reducingSide === "sell" ? "Sell" : "Buy"} to reduce`
+        : qty > Math.abs(positionSz) * 1.0005
+          ? "Reduce Only Too Large"
+          : null;
+
+  // Shown as the submit button's (disabled) label, like the "Reduce Only Too
+  // Large" state in the reference ticket.
+  const blockLabel = sizeUsd > 0 ? reduceOnlyError : null;
+
   // ── Validation (client-side; never let the gateway bounce it) ──
   const validate = (): string | null => {
     if (!entryPrice || entryPrice <= 0) return "No live price yet — try again.";
+    if (reduceOnly && reduceOnlyError) return reduceOnlyError;
+    // A reduce-only close can be smaller than the open-order minimum (partial
+    // close), so the min-notional floor applies to opening orders only.
     const minNote = Math.max(SODEX_MIN_NOTIONAL_USD, rules?.minNotional ?? 0);
-    if (sizeUsd < minNote) return `Minimum order is ${money(minNote)}.`;
+    if (!reduceOnly && sizeUsd < minNote) return `Minimum order is ${money(minNote)}.`;
     if (rules?.maxNotional && rules.maxNotional > 0 && sizeUsd > rules.maxNotional)
       return `Maximum order is ${money(rules.maxNotional)}.`;
     if (type === "limit") {
@@ -311,12 +345,20 @@ function OrderPanelImpl({
         identityAddress: readLocalKey(NETWORK)?.address ?? null,
         connectedMaster,
         sizeInput: String(sizeUsd),
-        stopInput: type === "market" && tpsl ? stopInput : "",
-        targetInput: type === "market" && tpsl ? targetInput : "",
+        stopInput: type === "market" && tpsl && !reduceOnly ? stopInput : "",
+        targetInput: type === "market" && tpsl && !reduceOnly ? targetInput : "",
         orderType: type === "limit" ? "LIMIT" : "MARKET",
         limitPrice: type === "limit" ? roundedLimit : undefined,
-        timeInForce:
-          type === "limit" ? (postOnly ? "POST_ONLY" : "GTC") : undefined,
+        // Reduce-only executes immediately-or-cancel (TIF IOC); otherwise a
+        // limit rests (post-only or GTC) and a market is IOC by default.
+        timeInForce: reduceOnly
+          ? "IOC"
+          : type === "limit"
+            ? postOnly
+              ? "POST_ONLY"
+              : "GTC"
+            : undefined,
+        reduceOnly,
         source,
         setMsg,
         setBusy,
@@ -342,6 +384,7 @@ function OrderPanelImpl({
     stopInput,
     targetInput,
     postOnly,
+    reduceOnly,
     source,
     onSourceConsumed,
     onPlaced,
@@ -561,6 +604,30 @@ function OrderPanelImpl({
         ))}
       </div>
 
+      {/* Reduce Only — perps: close/reduce the open position, never flip it */}
+      {isPerp ? (
+        <label className="flex w-full cursor-pointer items-center gap-2 text-[11.5px] text-fg-muted">
+          <input
+            type="checkbox"
+            checked={reduceOnly}
+            onChange={(e) => {
+              const on = e.target.checked;
+              setReduceOnly(on);
+              // Default to the closing side so the order actually reduces.
+              if (on && positionSz !== 0)
+                setSide(positionSz > 0 ? "sell" : "buy");
+            }}
+            className="h-3 w-3 accent-accent"
+          />
+          Reduce Only
+          {reduceOnly ? (
+            <span className="ml-auto font-[var(--font-jetbrains-mono)] text-[10px] tracking-wide text-fg-dim">
+              TIF IOC
+            </span>
+          ) : null}
+        </label>
+      ) : null}
+
       {/* TP / SL — market only this build */}
       {type === "market" ? (
         <div className="flex flex-col gap-2">
@@ -628,6 +695,7 @@ function OrderPanelImpl({
             entry={entryPrice}
             type={type}
             postOnly={postOnly}
+            reduceOnly={reduceOnly}
             stop={stopPrice}
             target={targetPrice}
             exchangeFeeUsd={exchangeFeeUsd}
@@ -645,16 +713,21 @@ function OrderPanelImpl({
         ) : (
           <button
             onClick={requestConfirm}
-            disabled={busy || sizeUsd <= 0}
+            disabled={busy || sizeUsd <= 0 || !!blockLabel}
             className={cn(
               "w-full rounded-md py-3 text-[14px] font-semibold transition-all duration-150",
-              sizeUsd <= 0
+              sizeUsd <= 0 || blockLabel
                 ? "cursor-not-allowed opacity-50"
                 : "hover:-translate-y-px hover:shadow-lg hover:brightness-[1.06]",
+              blockLabel ? "bg-surface-2 text-fg-muted" : "",
             )}
-            style={{ backgroundColor: sideColor, color: "#0b0e11" }}
+            style={
+              blockLabel
+                ? undefined
+                : { backgroundColor: sideColor, color: "#0b0e11" }
+            }
           >
-            {submitLabel}
+            {blockLabel ?? submitLabel}
           </button>
         )}
         {/* Quiet real-funds reminder — orders on this ticket execute on SoDEX
@@ -766,6 +839,7 @@ function ConfirmStep(p: {
   entry: number | null;
   type: "market" | "limit";
   postOnly: boolean;
+  reduceOnly: boolean;
   stop: number | null;
   target: number | null;
   exchangeFeeUsd: number;
@@ -792,6 +866,7 @@ function ConfirmStep(p: {
         <span className="text-fg">{p.symbol}</span>{" "}
         <span className="text-fg-dim">
           · {p.type === "limit" ? (p.postOnly ? "Limit · post-only" : "Limit") : "Market"}
+          {p.reduceOnly ? " · reduce-only" : ""}
         </span>
       </div>
       <div className="flex flex-col gap-1 text-[11px]">
