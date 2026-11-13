@@ -28,6 +28,7 @@ import { rebalanceIndex } from "@/lib/index-fund";
 import { runBriefing } from "@/lib/ai";
 import { runResolutionJob } from "@/lib/outcomes/resolve-job";
 import { evaluateAlerts, isReadOnly } from "@/lib/system-health";
+import { refreshHomeSnapshot } from "@/lib/home/snapshot";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -217,6 +218,16 @@ async function handle(req: Request): Promise<NextResponse> {
     summary.alerts_raised = raised.length;
   } catch (err) {
     summary.alerts_raised = { error: (err as Error).message };
+  }
+
+  // 10) Pre-warm the dashboard snapshot LAST, so it reflects everything the
+  //     tick just refreshed (new signals, sectors, briefing, outcomes). This
+  //     keeps kv_cache['home_snapshot'] <5 min fresh, so /api/data/home is
+  //     always an instant cache read instead of a cold ~10s compute.
+  try {
+    summary.home_snapshot = await refreshHomeSnapshot();
+  } catch (err) {
+    summary.home_snapshot = { error: (err as Error).message };
   }
 
   return NextResponse.json({
