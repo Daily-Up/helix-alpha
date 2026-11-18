@@ -10,10 +10,11 @@
  * is unchanged from the previous commit — this is a visual theme pass.
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { cn } from "@/components/ui/cn";
 import { buttonClass } from "@/components/ui/Button";
+import { SectionError } from "@/components/ui/SectionError";
 import { Num } from "@/components/ui/Num";
 import { Timestamp } from "@/components/ui/Timestamp";
 import { AssetLogo } from "@/components/ui/AssetLogo";
@@ -144,13 +145,27 @@ const OUTCOME_META: Record<
 export function HomePage() {
   const [data, setData] = useState<HomeData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
-  useEffect(() => {
+  const load = useCallback(() => {
+    setLoading(true);
+    setError(false);
     fetch("/api/data/home")
-      .then((r) => r.json())
+      .then((r) => {
+        // Guard the 500-with-empty-body case: calling r.json() on it throws
+        // "Unexpected end of JSON input". Fail cleanly into the error state
+        // instead, and never set `data` to a malformed (non-200) body.
+        if (!r.ok) throw new Error(`home ${r.status}`);
+        return r.json();
+      })
       .then((j: HomeData) => setData(j))
+      .catch(() => setError(true))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   // A briefing older than 36h isn't "today's" — the generator has fallen
   // behind. Tag it amber rather than presenting it as current.
@@ -207,6 +222,8 @@ export function HomePage() {
 
       {loading && !data ? (
         <div className="text-sm text-fg-dim">Loading live snapshot…</div>
+      ) : error && !data ? (
+        <SectionError onRetry={load} />
       ) : null}
 
       {data ? (

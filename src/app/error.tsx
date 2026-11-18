@@ -39,17 +39,17 @@ export default function Error({
           fontSize: 12,
           letterSpacing: "0.22em",
           textTransform: "uppercase",
-          color: "var(--negative)",
+          color: "var(--fg-dim)",
         }}
       >
-        Something went wrong
+        Temporarily unavailable
       </div>
       <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0, color: "var(--fg-brand)" }}>
-        This section hit a snag
+        Couldn&apos;t load this right now
       </h1>
-      <p style={{ maxWidth: 420, margin: 0, color: "var(--fg-muted)", lineHeight: 1.6 }}>
-        The data didn&apos;t load cleanly. This is usually temporary — try
-        again.
+      <p style={{ maxWidth: 440, margin: 0, color: "var(--fg-muted)", lineHeight: 1.6 }}>
+        The data service may be briefly unavailable — this is usually temporary.
+        Give it a moment, then retry.
       </p>
       <button
         onClick={reset}
@@ -64,7 +64,7 @@ export default function Error({
           cursor: "pointer",
         }}
       >
-        Try again
+        Retry
       </button>
     </main>
   );
