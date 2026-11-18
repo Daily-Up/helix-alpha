@@ -75,9 +75,29 @@ const nextConfig: NextConfig = {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
   async redirects() {
+    // Canonical host is the apex helixalpha.xyz. Every other host that serves
+    // this app — the www subdomain and the project's production *.vercel.app
+    // aliases — 308-redirects to it, preserving path + query string.
+    // Preview deployments (helix-alpha-git-*, helix-alpha-<hash>-*) are
+    // deliberately NOT listed here, so branch previews keep working on their
+    // own URLs.
+    const CANONICAL_HOST = "helixalpha.xyz";
+    const NON_CANONICAL_HOSTS = [
+      "www.helixalpha.xyz",
+      "helix-alpha.vercel.app",
+      "helix-alpha-kappa.vercel.app",
+    ];
+    const hostRedirects = NON_CANONICAL_HOSTS.map((host) => ({
+      source: "/:path*",
+      has: [{ type: "host" as const, value: host }],
+      destination: `https://${CANONICAL_HOST}/:path*`,
+      permanent: true,
+    }));
+
     // AlphaIndex is archived — its page and any legacy /alphaindex links go to
     // the Wealth Index. (The live-deploy code path is hard-disabled too.)
     return [
+      ...hostRedirects,
       { source: "/index-fund", destination: "/wealth-index", permanent: true },
       { source: "/index-fund/:path*", destination: "/wealth-index", permanent: true },
       { source: "/alphaindex", destination: "/wealth-index", permanent: true },
