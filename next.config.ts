@@ -75,17 +75,22 @@ const nextConfig: NextConfig = {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
   async redirects() {
-    // Canonical host is the apex helixalpha.xyz. Every other host that serves
-    // this app — the www subdomain and the project's production *.vercel.app
-    // aliases — 308-redirects to it, preserving path + query string.
-    // Preview deployments (helix-alpha-git-*, helix-alpha-<hash>-*) are
-    // deliberately NOT listed here, so branch previews keep working on their
-    // own URLs.
+    // Canonical host is the apex helixalpha.xyz. Every other host THIS project
+    // serves — the www subdomain, the Vercel-generated production domain, and
+    // the stable production alias — 308-redirects to it, preserving path +
+    // query string. Preview deployments (helix-alpha-git-*, helix-alpha-<hash>-*)
+    // are deliberately NOT listed, so branch previews keep working on their own
+    // URLs.
+    //
+    // NB: helix-alpha.vercel.app is a DIFFERENT Vercel account's app (a Create
+    // Next App starter), not ours — which is exactly why this project's
+    // generated domain is the doubled helix-alpha-helix-alpha.vercel.app. We
+    // can't (and don't) redirect a host we don't own, so it's not listed.
     const CANONICAL_HOST = "helixalpha.xyz";
     const NON_CANONICAL_HOSTS = [
       "www.helixalpha.xyz",
-      "helix-alpha.vercel.app",
-      "helix-alpha-kappa.vercel.app",
+      "helix-alpha-helix-alpha.vercel.app", // Vercel-generated production domain
+      "helix-alpha-kappa.vercel.app", // stable production alias
     ];
     const hostRedirects = NON_CANONICAL_HOSTS.map((host) => ({
       source: "/:path*",
