@@ -46,6 +46,20 @@ export async function recordRun<T>(
   fn: () => Promise<{ summary: string; data?: T }>,
 ): Promise<{ id: number; summary: string; data?: T }> {
   const start = Date.now();
+
+  // Reap stale locks first. A prior run killed by the serverless timeout
+  // never reaches the catch below, so it is stranded as status='running'
+  // forever — which poisons lastRun()/freshness signals and deadlocks the
+  // public rate-limiter (checkPublicCronBudget). Nothing on Hobby outlives
+  // the 60s function cap, so any same-job run still "running" after a few
+  // minutes is dead; mark it errored so state self-heals.
+  await run(
+    `UPDATE cron_runs SET status = 'error', finished_at = ?,
+       error = 'reaped: stale running lock (function likely timed out)'
+     WHERE job = ? AND status = 'running' AND started_at < ?`,
+    [start, job, start - 3 * 60 * 1000],
+  );
+
   const insert = await run(
     `INSERT INTO cron_runs (job, started_at, status) VALUES (?, ?, 'running')`,
     [job, start],

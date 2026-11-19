@@ -46,7 +46,10 @@ async function handle(req: Request): Promise<NextResponse> {
 
   // 1) Ingest news (last 30 min window — fast, picks up only fresh items)
   try {
-    const ing = await runNewsIngest({ windowMs: 30 * 60 * 1000, maxItems: 80 });
+    // maxItems trimmed 80->40 so ingest+classify fits the 60s function cap
+    // (a full run was timing out mid-classify and stranding a running lock).
+    // The pinger fires every ~10 min, so coverage still holds.
+    const ing = await runNewsIngest({ windowMs: 30 * 60 * 1000, maxItems: 40 });
     summary.ingest = {
       fetched: ing.fetched,
       new_events: ing.new_events,

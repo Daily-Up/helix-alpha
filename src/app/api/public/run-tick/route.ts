@@ -51,7 +51,9 @@ async function handle(): Promise<NextResponse> {
       try {
         const ing = await runNewsIngest({
           windowMs: 30 * 60 * 1000,
-          maxItems: 80,
+          // Trimmed 80->40 so the run fits the 60s function cap instead of
+          // timing out mid-classify (which stranded a running lock).
+          maxItems: 40,
         });
         summary.ingest = {
           fetched: ing.fetched,

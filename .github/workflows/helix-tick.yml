@@ -31,7 +31,10 @@ jobs:
       - name: Hit /api/cron/tick
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          BASE_URL: https://helix-alpha-kappa.vercel.app
+          # Canonical apex. The old helix-alpha-kappa.vercel.app host now
+          # 308-redirects here, and curl -fsS won't follow it (and would drop
+          # the auth header cross-host), so hit the apex directly.
+          BASE_URL: https://helixalpha.xyz
         run: |
           curl -fsS -X POST \
             -H "Authorization: Bearer $CRON_SECRET" \

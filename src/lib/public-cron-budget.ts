@@ -48,9 +48,19 @@ export async function checkPublicCronBudget(
     };
   }
 
-  // If the last run is still in flight, refuse (so a slow run doesn't
-  // pile up parallel invocations).
-  if (last.status === "running") {
+  // If the last run is still in flight, refuse (so a slow run doesn't pile
+  // up parallel invocations) — BUT only while it's plausibly still alive. A
+  // serverless timeout kills the function without running recordRun's catch,
+  // so a crashed run stays status='running' forever. Treating that as "in
+  // flight" permanently deadlocks this endpoint (the exact failure that
+  // froze ingestion: one hung run → every later tick refused). Anything
+  // "running" far longer than the 60s function cap is a stale lock — ignore
+  // it and let the caller proceed (recordRun reaps the row on the next run).
+  const STALE_RUNNING_MS = 3 * 60 * 1000; // >> maxDuration (60s)
+  if (
+    last.status === "running" &&
+    Date.now() - last.started_at < STALE_RUNNING_MS
+  ) {
     return {
       ok: false,
       reason: `A ${humanJob(job)} is already running — wait for it to finish.`,
